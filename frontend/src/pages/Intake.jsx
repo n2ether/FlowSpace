@@ -344,8 +344,8 @@ const Intake = () => {
                                 </Button>
                                 <Button
                                     onClick={next}
-                                    disabled={submitting}
-                                    className="rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600"
+                                    disabled={submitting || !canNext()}
+                                    className="rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600 disabled:opacity-60"
                                     data-testid="intake-next-btn"
                                 >
                                     {step === steps.length - 1
