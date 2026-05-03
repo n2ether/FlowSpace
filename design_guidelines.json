@@ -1,0 +1,84 @@
+{
+  "project_name": "Garage Storage Organization Site",
+  "app_type": "marketing_site",
+  "theme": "light",
+  "archetype": "1 (Organic & Earthy / Calm Minimalist)",
+  "design_philosophy": "Bright and clean. White base with green details and blue accents for clarity. Style: minimal, modern, calm. Lots of white space. Icons simple (line style). Positioning around CLARITY, FLOW, MENTAL RELIEF.",
+  "colors": {
+    "background_primary": "#FFFFFF",
+    "background_secondary": "#F8FAFC",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569",
+    "accent_primary": "#10B981",
+    "accent_primary_hover": "#059669",
+    "accent_secondary": "#2563EB",
+    "border": "#E2E8F0",
+    "success": "#10B981"
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "Manrope",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-slate-900",
+      "h2": "text-3xl sm:text-4xl font-light text-slate-900",
+      "h3": "text-xl sm:text-2xl font-medium text-slate-900",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base text-slate-600 leading-relaxed",
+      "small": "text-sm text-slate-500 uppercase tracking-widest"
+    }
+  },
+  "layout_and_spacing": {
+    "container": "max-w-7xl mx-auto px-6 lg:px-8",
+    "section_spacing": "py-24 sm:py-32",
+    "grid_bento": "grid grid-cols-1 md:grid-cols-3 gap-8",
+    "border_radius": "rounded-2xl",
+    "shadows": "shadow-sm hover:shadow-md transition-shadow duration-300"
+  },
+  "components_to_use": {
+    "navigation": "Sticky header with backdrop-blur-xl bg-white/70, clear logo, Language Switcher (EN/ES/PT-BR) as a dropdown, and primary CTA button. Desktop nav visible.",
+    "hero": "Split layout or stacked with a dramatic interactive 'Before/After' image slider (react-compare-slider or similar). Large H1.",
+    "value_props": "Minimalist grid or flex layout. Generous white space (p-8 or p-12 per card). Use lucide-react icons in Emerald/Blue.",
+    "how_it_works": "3-step process using numbers or timeline. High contrast steps.",
+    "packages_pricing": "3 columns. Standard package featured with a subtle Emerald border or shadow.",
+    "before_after_gallery": "Grid of cards showing before/after transformations. Use image pairs.",
+    "intake_form": "Multi-step wizard (Shadcn Tabs or custom state) for 'Show us your space', 'Questions', 'Upload photos'.",
+    "admin_panel": "Simple dashboard layout. Sidebar navigation. Data table for form submissions. Form to upload new Before/After images."
+  },
+  "interactive_elements": {
+    "buttons": "Rounded-full or soft rounded-xl. Primary CTA bg-emerald-500 text-white hover:bg-emerald-600. Secondary buttons outline or subtle bg-slate-100.",
+    "transitions": "Smooth transform 0.2s ease, opacity 0.2s ease. Hover lift on cards (-translate-y-1).",
+    "language_switcher": "Shadcn DropdownMenu or Select for EN, ES, PT-BR."
+  },
+  "media": {
+    "icons_library": "lucide-react",
+    "images": {
+      "hero_before": {
+        "url": "https://images.unsplash.com/photo-1570129476815-ba368ac77013?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxtZXNzeSUyMGdhcmFnZSUyMGNsdXR0ZXJ8ZW58MHx8fHwxNzc3ODA5ODE3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Messy garage clutter"
+      },
+      "hero_after": {
+        "url": "https://images.unsplash.com/photo-1765277789183-a08a084312bf?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwxfHxjbGVhbiUyMG1pbmltYWxpc3QlMjBjbG9zZXR8ZW58MHx8fHwxNzc3ODA5ODE3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Clean minimalist organized space"
+      },
+      "gallery_before_1": {
+        "url": "https://images.unsplash.com/photo-1635108198854-26645ffe6714?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwzfHxvcmdhbml6ZWQlMjBtb2Rlcm4lMjBnYXJhZ2V8ZW58MHx8fHwxNzc3ODA5ODE3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Cluttered tools"
+      },
+      "gallery_after_1": {
+        "url": "https://images.unsplash.com/photo-1758975715211-3f56eb1056ab?crop=entropy&cs=srgb&fm=jpg&ixid=M3w7NTY2NzR8MHwxfHNlYXJjaHwyfHxjbGVhbiUyMG1pbmltYWxpc3QlMjBjbG9zZXR8ZW58MHx8fHwxNzc3ODA5ODE3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Organized tools/closet"
+      }
+    }
+  },
+  "testing": {
+    "required_attributes": "Add data-testid attributes to all interactive elements, e.g., data-testid='cta-start-project', data-testid='lang-switcher', data-testid='intake-next-step'."
+  },
+  "instructions_to_main_agent": [
+    "Install required dependencies: lucide-react, framer-motion, react-compare-slider.",
+    "Set up Tailwind config with 'Outfit' and 'Manrope' fonts.",
+    "Implement a language context or simple dictionary object to handle Trilingual content (EN, ES, PT-BR).",
+    "Build a 'react-compare-slider' for the Hero and Before/After gallery to show the transformations interactively.",
+    "Create the multi-step intake form with Shadcn components (Input, Textarea, Button).",
+    "Create a mock Admin Panel route ('/admin') with Shadcn Table to list leads and a form to add new before/after images."
+  ]
+}
