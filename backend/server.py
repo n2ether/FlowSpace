@@ -16,6 +16,7 @@ from emergentintegrations.payments.stripe.checkout import (
     CheckoutStatusResponse,
     CheckoutSessionRequest,
 )
+import stripe as stripe_sdk
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -309,29 +310,51 @@ async def checkout_status(session_id: str, request: Request):
         }
 
     stripe = _get_stripe(request)
+    status_resp = None
     try:
-        status_resp: CheckoutStatusResponse = await stripe.get_checkout_status(session_id)
+        status_resp = await stripe.get_checkout_status(session_id)
+        new_payment_status = status_resp.payment_status
+        new_status = status_resp.status
+        amount_total = status_resp.amount_total
+        currency = status_resp.currency
+        metadata = status_resp.metadata
     except Exception as e:
-        logging.exception("Stripe status failed")
-        raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
+        # Fallback: emergentintegrations currently has a pydantic validation bug
+        # with StripeObject metadata. Query Stripe directly.
+        logging.warning(f"emergentintegrations status failed, falling back: {e}")
+        try:
+            stripe_sdk.api_key = STRIPE_API_KEY
+            sess = await stripe_sdk.checkout.Session.retrieve_async(session_id)
+            new_payment_status = getattr(sess, "payment_status", "unknown")
+            new_status = getattr(sess, "status", "unknown")
+            amount_total = getattr(sess, "amount_total", None) or 0
+            currency = getattr(sess, "currency", existing.get("currency", "usd"))
+            raw_meta = getattr(sess, "metadata", {}) or {}
+            try:
+                metadata = dict(raw_meta)
+            except Exception:
+                metadata = {}
+        except Exception as inner:
+            logging.exception("Stripe direct fallback also failed")
+            raise HTTPException(status_code=502, detail=f"Stripe error: {inner}")
 
     await db.payment_transactions.update_one(
         {"session_id": session_id},
         {
             "$set": {
-                "payment_status": status_resp.payment_status,
-                "status": status_resp.status,
+                "payment_status": new_payment_status,
+                "status": new_status,
                 "updated_at": _iso(datetime.now(timezone.utc)),
             }
         },
     )
 
     return {
-        "payment_status": status_resp.payment_status,
-        "status": status_resp.status,
-        "amount_total": status_resp.amount_total,
-        "currency": status_resp.currency,
-        "metadata": status_resp.metadata,
+        "payment_status": new_payment_status,
+        "status": new_status,
+        "amount_total": amount_total,
+        "currency": currency,
+        "metadata": metadata,
     }
 
 
