@@ -59,7 +59,7 @@ STARTER_GALLERY = [
     },
 ]
 
-app = FastAPI(title="ClearSpace API")
+app = FastAPI(title="FlowSpace API")
 api_router = APIRouter(prefix="/api")
 
 
@@ -175,7 +175,7 @@ async def seed_gallery_if_empty():
 # ------------------------- Public Routes -------------------------
 @api_router.get("/")
 async def root():
-    return {"message": "ClearSpace API", "status": "ok"}
+    return {"message": "FlowSpace API", "status": "ok"}
 
 
 @api_router.get("/packages")
@@ -255,7 +255,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     metadata: Dict[str, str] = {
         "package_id": pkg["id"],
         "package_name": pkg["name"],
-        "source": "clearspace_web",
+        "source": "flowspace_web",
     }
     if req.email:
         metadata["email"] = str(req.email)

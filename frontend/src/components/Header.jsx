@@ -41,26 +41,25 @@ const Header = () => {
             <div className="container-app flex h-16 items-center justify-between">
                 <Link
                     to="/"
-                    className="flex items-center gap-2"
+                    className="flex items-center gap-2.5"
                     data-testid="logo-home-link"
                 >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-white">
+                    <span className="flex h-9 w-9 items-center justify-center">
                         <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
+                            viewBox="0 0 64 64"
+                            className="h-9 w-9"
                             fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.4"
+                            stroke="#5C7A65"
+                            strokeWidth="2.6"
                             strokeLinecap="round"
                             strokeLinejoin="round"
                         >
-                            <path d="M3 21V8l9-5 9 5v13" />
-                            <path d="M9 21V12h6v9" />
+                            <path d="M10 32 L32 10 L54 32 L54 56 L10 56 Z" />
+                            <path d="M14 42 C24 34, 30 50, 40 42 C46 37, 50 42, 54 42" strokeWidth="2.4" />
                         </svg>
                     </span>
                     <span className="font-heading text-lg font-semibold tracking-tight text-slate-900">
-                        ClearSpace
+                        FlowSpace
                     </span>
                 </Link>
 
