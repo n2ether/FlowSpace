@@ -14,7 +14,7 @@ import {
     SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { adminClient } from "../lib/api";
+import { adminClient, API } from "../lib/api";
 import { useLang } from "../context/LanguageContext";
 import { toast } from "sonner";
 
@@ -144,8 +144,13 @@ const Admin = () => {
                                             <div className="text-sm text-slate-500">
                                                 {l.email} {l.phone ? `· ${l.phone}` : ""}
                                             </div>
+                                            {l.created_at && (
+                                                <div className="mt-0.5 text-xs text-slate-400">
+                                                    {new Date(l.created_at).toLocaleString()}
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-wrap items-center gap-2">
                                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium uppercase tracking-widest text-emerald-700">
                                                 {l.space_type}
                                             </span>
@@ -154,13 +159,102 @@ const Admin = () => {
                                                     {l.package_id}
                                                 </span>
                                             )}
+                                            {l.budget && (
+                                                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium uppercase tracking-widest text-amber-700">
+                                                    {l.budget.replace(/_/g, " ")}
+                                                </span>
+                                            )}
                                             <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
                                                 {l.language?.toUpperCase()}
                                             </span>
                                         </div>
                                     </div>
-                                    {l.biggest_challenge && (
+
+                                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        {l.bothers_about && l.bothers_about.length > 0 && (
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Bothered by</div>
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                    {l.bothers_about.map((b) => (
+                                                        <span key={b} className="rounded-md bg-rose-50 px-2 py-0.5 text-xs text-rose-700">
+                                                            {b.replace(/_/g, " ")}
+                                                        </span>
+                                                    ))}
+                                                    {l.bothers_other && (
+                                                        <span className="rounded-md bg-rose-50 px-2 py-0.5 text-xs italic text-rose-700">
+                                                            {l.bothers_other}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {l.desired_feeling && l.desired_feeling.length > 0 && (
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Wants to feel</div>
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                    {l.desired_feeling.map((f) => (
+                                                        <span key={f} className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                                                            {f}
+                                                        </span>
+                                                    ))}
+                                                    {l.feeling_other && (
+                                                        <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs italic text-emerald-700">
+                                                            {l.feeling_other}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {l.storage_needs && l.storage_needs.length > 0 && (
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Storage needs</div>
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                    {l.storage_needs.map((s) => (
+                                                        <span key={s} className="rounded-md bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                                                            {s}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {((l.style_prefs && l.style_prefs.length > 0) ||
+                                            (l.color_prefs && l.color_prefs.length > 0)) && (
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Style & colors</div>
+                                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                    {(l.style_prefs || []).map((s) => (
+                                                        <span key={`s-${s}`} className="rounded-md bg-violet-50 px-2 py-0.5 text-xs text-violet-700">
+                                                            {s.replace(/_/g, " ")}
+                                                        </span>
+                                                    ))}
+                                                    {(l.color_prefs || []).map((c) => (
+                                                        <span key={`c-${c}`} className="rounded-md bg-stone-100 px-2 py-0.5 text-xs text-stone-700">
+                                                            {c.replace(/_/g, " ")}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {l.diy_level && (
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">DIY level</div>
+                                                <div className="mt-1.5 text-sm text-slate-700">{l.diy_level.replace(/_/g, " ")}</div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {l.must_stay && (
                                         <p className="mt-3 text-sm text-slate-600">
+                                            <strong>Must stay:</strong> {l.must_stay}
+                                        </p>
+                                    )}
+                                    {l.daily_improvement && (
+                                        <p className="mt-1 text-sm text-slate-600">
+                                            <strong>Daily improvement:</strong> {l.daily_improvement}
+                                        </p>
+                                    )}
+                                    {l.biggest_challenge && (
+                                        <p className="mt-1 text-sm text-slate-600">
                                             <strong>Challenge:</strong> {l.biggest_challenge}
                                         </p>
                                     )}
@@ -170,22 +264,28 @@ const Admin = () => {
                                         </p>
                                     )}
                                     {l.photos && l.photos.length > 0 && (
-                                        <div className="mt-3 flex gap-2">
-                                            {l.photos.slice(0, 6).map((p, i) => (
-                                                <a
-                                                    key={i}
-                                                    href={p}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="block h-14 w-14 overflow-hidden rounded-md border border-slate-200"
-                                                >
-                                                    <img
-                                                        src={p}
-                                                        alt="photo"
-                                                        className="h-full w-full object-cover"
-                                                    />
-                                                </a>
-                                            ))}
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {l.photos.slice(0, 8).map((p, i) => {
+                                                const src = p.startsWith("http")
+                                                    ? p
+                                                    : `${API.replace("/api", "")}${p}`;
+                                                return (
+                                                    <a
+                                                        key={i}
+                                                        href={src}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="block h-16 w-16 overflow-hidden rounded-md border border-slate-200"
+                                                        data-testid={`lead-photo-${l.id}-${i}`}
+                                                    >
+                                                        <img
+                                                            src={src}
+                                                            alt="photo"
+                                                            className="h-full w-full object-cover"
+                                                        />
+                                                    </a>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>

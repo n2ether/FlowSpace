@@ -21,6 +21,7 @@ import {
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import BeforeAfterSlider from "../components/BeforeAfterSlider";
+import QuestionnaireModal from "../components/QuestionnaireModal";
 import { Button } from "../components/ui/button";
 import {
     Accordion,
@@ -31,6 +32,11 @@ import {
 import { api } from "../lib/api";
 import { useLang } from "../context/LanguageContext";
 import { toast } from "sonner";
+
+// Lightweight pub/sub so any CTA can open the questionnaire modal
+const openQuestionnaire = (pkg = "") => {
+    window.dispatchEvent(new CustomEvent("flowspace:open-questionnaire", { detail: { pkg } }));
+};
 
 const fadeUp = {
     initial: { opacity: 0, y: 16 },
@@ -74,7 +80,7 @@ const Hero = () => {
 
                     <div className="flex flex-wrap items-center gap-3 pt-2">
                         <Button
-                            onClick={() => navigate("/intake")}
+                            onClick={() => openQuestionnaire("")}
                             className="group rounded-full bg-emerald-500 px-6 py-6 text-base font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-600 hover:shadow-md"
                             data-testid="hero-cta-start"
                         >
@@ -278,12 +284,12 @@ const Packages = () => {
             if (res.data?.url) {
                 window.location.href = res.data.url;
             } else {
-                navigate(`/intake?package=${pkgId}`);
+                openQuestionnaire(pkgId);
             }
         } catch (e) {
             console.error(e);
-            toast.error("Could not start checkout. Redirecting to intake form.");
-            navigate(`/intake?package=${pkgId}`);
+            toast.error("Could not start checkout. Opening questionnaire instead.");
+            openQuestionnaire(pkgId);
         } finally {
             setLoadingId(null);
         }
@@ -542,7 +548,7 @@ const FinalCTA = () => {
                         </div>
                         <div className="flex md:justify-end">
                             <Button
-                                onClick={() => navigate("/intake")}
+                                onClick={() => openQuestionnaire("")}
                                 className="group rounded-full bg-white px-7 py-7 text-base font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
                                 data-testid="final-cta-start"
                             >
@@ -558,6 +564,9 @@ const FinalCTA = () => {
 };
 
 const Landing = () => {
+    const [modalOpen, setModalOpen] = useState(false);
+    const [modalPkg, setModalPkg] = useState("");
+
     useEffect(() => {
         // Handle hash scroll on arrival
         const hash = window.location.hash;
@@ -567,6 +576,13 @@ const Landing = () => {
                 if (el) el.scrollIntoView({ behavior: "smooth" });
             }, 200);
         }
+
+        const onOpen = (e) => {
+            setModalPkg(e.detail?.pkg || "");
+            setModalOpen(true);
+        };
+        window.addEventListener("flowspace:open-questionnaire", onOpen);
+        return () => window.removeEventListener("flowspace:open-questionnaire", onOpen);
     }, []);
 
     return (
@@ -584,6 +600,11 @@ const Landing = () => {
                 <FinalCTA />
             </main>
             <Footer />
+            <QuestionnaireModal
+                open={modalOpen}
+                onOpenChange={setModalOpen}
+                presetPackage={modalPkg}
+            />
         </div>
     );
 };

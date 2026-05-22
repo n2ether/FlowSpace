@@ -1,7 +1,10 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends, UploadFile, File
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
+from bson import ObjectId
+from gridfs.errors import NoFile
 import os
 import logging
 from pathlib import Path
@@ -24,6 +27,9 @@ load_dotenv(ROOT_DIR / ".env")
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
+fs_bucket = AsyncIOMotorGridFSBucket(db, bucket_name="uploads")
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB per photo
 
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
@@ -75,6 +81,18 @@ class Lead(BaseModel):
     goals: Optional[str] = None
     timeline: Optional[str] = None
     photos: List[str] = []
+    # Questionnaire fields
+    bothers_about: List[str] = []
+    bothers_other: Optional[str] = None
+    desired_feeling: List[str] = []
+    feeling_other: Optional[str] = None
+    must_stay: Optional[str] = None
+    storage_needs: List[str] = []
+    style_prefs: List[str] = []
+    color_prefs: List[str] = []
+    budget: Optional[str] = None
+    diy_level: Optional[str] = None
+    daily_improvement: Optional[str] = None
     language: str = "en"
     status: str = "new"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -90,6 +108,17 @@ class LeadCreate(BaseModel):
     goals: Optional[str] = None
     timeline: Optional[str] = None
     photos: List[str] = []
+    bothers_about: List[str] = []
+    bothers_other: Optional[str] = None
+    desired_feeling: List[str] = []
+    feeling_other: Optional[str] = None
+    must_stay: Optional[str] = None
+    storage_needs: List[str] = []
+    style_prefs: List[str] = []
+    color_prefs: List[str] = []
+    budget: Optional[str] = None
+    diy_level: Optional[str] = None
+    daily_improvement: Optional[str] = None
     language: str = "en"
 
 
@@ -197,6 +226,46 @@ async def list_gallery():
     await seed_gallery_if_empty()
     items = await db.gallery.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [_hydrate(it, ["created_at"]) for it in items]
+
+
+# ------------------------- Uploads (GridFS) -------------------------
+@api_router.post("/uploads/photo")
+async def upload_photo(file: UploadFile = File(...)):
+    ct = (file.content_type or "").lower()
+    if not ct.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    file_id = await fs_bucket.upload_from_stream(
+        file.filename or "upload",
+        contents,
+        metadata={"content_type": ct, "uploaded_at": _iso(datetime.now(timezone.utc))},
+    )
+    return {"id": str(file_id), "url": f"/api/uploads/photo/{file_id}"}
+
+
+@api_router.get("/uploads/photo/{photo_id}")
+async def get_photo(photo_id: str):
+    try:
+        oid = ObjectId(photo_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid id")
+    try:
+        stream = await fs_bucket.open_download_stream(oid)
+    except NoFile:
+        raise HTTPException(status_code=404, detail="Not found")
+    data = await stream.read()
+    media = "image/jpeg"
+    if stream.metadata and stream.metadata.get("content_type"):
+        media = stream.metadata["content_type"]
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 # ------------------------- Admin Routes -------------------------
