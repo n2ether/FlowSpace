@@ -23,6 +23,7 @@ import stripe as stripe_sdk
 import httpx
 
 from pdf_generator import build_pdf
+from ai_drafter import draft_deliverable
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -405,6 +406,20 @@ async def upsert_deliverable(
         {"lead_id": lead_id}, {"$set": doc}, upsert=True
     )
     return payload
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/draft")
+async def ai_draft_deliverable(lead_id: str, _: bool = Depends(require_admin)):
+    """Use the LLM to draft a deliverable from the lead's questionnaire."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    try:
+        plan = await draft_deliverable(lead)
+    except Exception as e:
+        logging.exception("AI draft failed")
+        raise HTTPException(status_code=502, detail=f"AI draft failed: {e}")
+    return {"draft": plan}
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")

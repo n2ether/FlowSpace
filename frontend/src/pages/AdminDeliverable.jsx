@@ -8,6 +8,7 @@ import {
     Trash2,
     Image as ImageIcon,
     Loader2,
+    Sparkles,
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -168,6 +169,75 @@ const AdminDeliverable = () => {
     const [form, setForm] = useState(blankDeliverable);
     const [saving, setSaving] = useState(false);
     const [downloading, setDownloading] = useState(false);
+    const [drafting, setDrafting] = useState(false);
+
+    const isEmptyText = (v) => !v || (typeof v === "string" && v.trim() === "");
+    const isEmptyList = (l) =>
+        !l || l.length === 0 || l.every((x) => isEmptyText(x));
+    const isEmptyObjList = (l, keys) =>
+        !l ||
+        l.length === 0 ||
+        l.every((it) => keys.every((k) => isEmptyText(it?.[k])));
+
+    const applyDraft = (draft) => {
+        setForm((f) => {
+            const out = { ...f };
+            // Text fields — fill only if currently empty
+            for (const k of [
+                "intro",
+                "wall_color_name",
+                "wall_color_code",
+                "wall_color_note",
+                "budget_note",
+                "notes",
+                "summary",
+                "attachment_note",
+            ]) {
+                if (isEmptyText(f[k]) && draft[k]) out[k] = draft[k];
+            }
+            // Hex — only replace if default/empty
+            if ((!f.wall_color_hex || f.wall_color_hex === "#cfd7d3") && draft.wall_color_hex) {
+                out.wall_color_hex = draft.wall_color_hex;
+            }
+            // String list fields
+            for (const k of ["needs", "strategy", "action_plan", "benefits"]) {
+                if (isEmptyList(f[k]) && draft[k]?.length) out[k] = draft[k];
+            }
+            // Zones
+            if (isEmptyObjList(f.zones, ["title", "desc"]) && draft.zones?.length) {
+                out.zones = draft.zones;
+            }
+            // Shopping list
+            if (
+                isEmptyObjList(f.shopping_list, ["name"]) &&
+                draft.shopping_list?.length
+            ) {
+                out.shopping_list = draft.shopping_list;
+            }
+            return out;
+        });
+    };
+
+    const aiDraft = async () => {
+        setDrafting(true);
+        try {
+            const client = adminClient(token);
+            const res = await client.post(
+                `/admin/leads/${leadId}/deliverable/draft`,
+                {},
+                { timeout: 90000 },
+            );
+            if (res.data?.draft) {
+                applyDraft(res.data.draft);
+                toast.success("AI draft applied to empty fields");
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("AI draft failed. Try again.");
+        } finally {
+            setDrafting(false);
+        }
+    };
 
     useEffect(() => {
         if (!token) {
@@ -313,7 +383,16 @@ const AdminDeliverable = () => {
                             for <strong>{lead.name}</strong> · {lead.email}
                         </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            onClick={aiDraft}
+                            disabled={drafting}
+                            className="rounded-full border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                            data-testid="deliverable-ai-draft"
+                        >
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            {drafting ? "Drafting…" : "Draft with AI"}
+                        </Button>
                         <Button
                             onClick={save}
                             disabled={saving}
