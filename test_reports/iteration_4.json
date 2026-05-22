@@ -1,0 +1,36 @@
+{
+  "summary": "Full backend (pytest 11/11) + frontend (Playwright E2E) testing of FlowSpace Branded PDF Deliverable feature. All 14 requested test cases pass. Backend deliverable GET/PUT/PDF endpoints, auth, idempotent upsert, GridFS image embedding, graceful invalid-image handling, and customer photo inclusion all verified. Frontend admin Design button → editor → save → reload-persistence → image upload → PDF download all verified end-to-end. No critical or minor functional bugs found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deliverable_pdf.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is at 625 lines — close to the 700-line guideline. Consider extracting the Stripe section (lines 453-596) and Deliverable section (lines 355-450) into separate routers (e.g., routers/stripe.py, routers/deliverable.py) to keep server.py focused on wiring.",
+    "pdf_generator.py calls _styles() repeatedly inside helpers (_safe_image, _placeholder, _shopping_table, _links_table, _zones_table) — each call rebuilds the full stylesheet dict. Minor inefficiency: build once and pass in, or memoize via @lru_cache.",
+    "PUT /api/admin/leads/{lead_id}/deliverable trusts payload.lead_id but overrides it with the path lead_id (good). However, Deliverable is upserted via $set with the full doc; consider using update_one with $setOnInsert for created_at if you ever add one — currently only updated_at is tracked.",
+    "_resolve_image_bytes catches all exceptions and returns None — good for resilience. But the unused `request` parameter is misleading. Either remove the parameter or document why it's retained (e.g., for future header forwarding).",
+    "AdminDeliverable.jsx is 752 lines — large but readable. Saving on PDF generation (downloadPdf calls PUT before GET pdf) is a nice UX guarantee but means an extra write per download click; acceptable.",
+    "Frontend: lead.photos URL is prefixed with API.replace('/api', '') — this assumes REACT_APP_BACKEND_URL ends in /api (it doesn't in the .env: it's just the host). Verified working because the relative photo URL '/api/uploads/photo/{id}' already includes /api. Code is correct but the .replace is a no-op. Worth a comment to avoid future confusion.",
+    "Deliverable model has no created_at field, only updated_at. If audit history matters later, add created_at on first upsert via $setOnInsert."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_deliverable_pdf.py (new — 11 tests)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (all 5 requested frontend flows + image upload)"},
+  "test_credentials": "Admin password: garage2025 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created lead TEST_DeliverableUser (garage, no photos) via POST /api/leads. Used existing seeded lead TEST_FE_E2E (closet, with GridFS photo) for PDF customer-photo and image-embed tests. Frontend test uploaded a tiny 1x1 PNG to GridFS via the admin upload endpoint and saved a Deliverable on the TEST_FE_E2E lead.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 14 requested cases pass. Backend tests in /app/backend/tests/test_deliverable_pdf.py cover: (1) GET deliverable=null for fresh lead, (2) GET nonexistent lead 404, (3) PUT full payload + GET roundtrip persistence, (4) Second PUT idempotent update (no duplicate), (5) PUT nonexistent lead 404, (6) Auth 401 on all three routes without X-Admin-Token, (7) PDF 200 application/pdf with %PDF- header, contains 'FlowSpace', customer name, '{Space} Design Plan', 'Total' (shopping), 'Reference Photo', 'Design Summary', 'Shopping Links', 'The FlowSpace Design Team'; ≥3 pages, (8) include_customer_photos=false omits 'Reference Photo' pages, (9) Relative /api/uploads/photo/{id} in front_view_url resolves via GridFS — PDF size grows by ~1.4KB when image embedded (small 100x100 thumb), (10) Invalid URL + nonexistent GridFS id render placeholder gracefully (200 with 'Image not provided' or 'Image unavailable'). Frontend Playwright at 1440x900: admin login w/ garage2025 → /admin tab leads → 8 Design buttons found → click lead-open-design-{id} for lead with photos → /admin/leads/{id}/design loads with heading 'Closet Design Plan' for TEST_FE_E2E → d-intro visible → fill intro/zones/items/needs/summary → sidebar customer-photo thumbnails (2 visible) → d-include-photos toggles on/off correctly → deliverable-save shows 'Saved' toast → reload re-fills d-intro='TEST_FE intro line for PDF.' and d-summary='TEST_FE summary text.' → d-img-front-file file upload → d-img-front auto-fills '/api/uploads/photo/{ObjectId}' and preview thumbnail renders → deliverable-pdf click fires GET /api/admin/leads/{id}/deliverable/pdf → 200 application/pdf. Zero console errors. cdn-cgi/rum failures are Cloudflare analytics noise, unrelated.",
+  "rca of the issue": "N/A — no failures."
+}

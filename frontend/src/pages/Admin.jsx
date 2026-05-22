@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Plus, Trash2, Users, Image, CreditCard } from "lucide-react";
+import { LogOut, Plus, Trash2, Users, Image, CreditCard, FileText } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { Input } from "../components/ui/input";
@@ -167,6 +167,16 @@ const Admin = () => {
                                             <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
                                                 {l.language?.toUpperCase()}
                                             </span>
+                                            <Button
+                                                onClick={() =>
+                                                    navigate(`/admin/leads/${l.id}/design`)
+                                                }
+                                                className="rounded-full bg-emerald-500 px-3 py-1 text-xs text-white hover:bg-emerald-600"
+                                                data-testid={`lead-open-design-${l.id}`}
+                                            >
+                                                <FileText className="mr-1 h-3.5 w-3.5" />
+                                                Design
+                                            </Button>
                                         </div>
                                     </div>
 

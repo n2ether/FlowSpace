@@ -20,6 +20,9 @@ from emergentintegrations.payments.stripe.checkout import (
     CheckoutSessionRequest,
 )
 import stripe as stripe_sdk
+import httpx
+
+from pdf_generator import build_pdf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -163,6 +166,50 @@ class PaymentTransaction(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class ShoppingItem(BaseModel):
+    name: str
+    qty: float = 1
+    price: float = 0
+
+
+class Zone(BaseModel):
+    title: str
+    desc: str = ""
+
+
+class ShoppingLink(BaseModel):
+    name: str
+    url: str = ""
+
+
+class Deliverable(BaseModel):
+    lead_id: str
+    intro: Optional[str] = None
+    needs: List[str] = []
+    zones: List[Zone] = []
+    wall_color_name: Optional[str] = None
+    wall_color_code: Optional[str] = None
+    wall_color_hex: Optional[str] = None
+    wall_color_note: Optional[str] = None
+    shopping_list: List[ShoppingItem] = []
+    budget_note: Optional[str] = None
+    strategy: List[str] = []
+    action_plan: List[str] = []
+    benefits: List[str] = []
+    notes: Optional[str] = None
+    summary: Optional[str] = None
+    attachment_note: Optional[str] = None
+    shopping_links: List[ShoppingLink] = []
+    # Image refs (any URL — relative /api/uploads/photo/{id} or absolute http)
+    front_view_url: Optional[str] = None
+    floor_plan_url: Optional[str] = None
+    view_1_url: Optional[str] = None
+    view_2_url: Optional[str] = None
+    view_3_url: Optional[str] = None
+    include_customer_photos: bool = True
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 # ------------------------- Helpers -------------------------
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
@@ -303,6 +350,104 @@ async def admin_transactions(_: bool = Depends(require_admin)):
         .to_list(2000)
     )
     return [_hydrate(it, ["created_at", "updated_at"]) for it in items]
+
+
+# ------------------------- Deliverable / PDF -------------------------
+async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
+    """Fetch image bytes from a URL (relative /api/uploads/... or absolute http)."""
+    if not url:
+        return None
+    try:
+        if url.startswith("/api/uploads/photo/"):
+            photo_id = url.rsplit("/", 1)[-1]
+            try:
+                oid = ObjectId(photo_id)
+            except Exception:
+                return None
+            try:
+                stream = await fs_bucket.open_download_stream(oid)
+            except NoFile:
+                return None
+            return await stream.read()
+        if url.startswith("http://") or url.startswith("https://"):
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as ac:
+                r = await ac.get(url)
+                r.raise_for_status()
+                return r.content
+    except Exception as e:
+        logging.warning(f"image fetch failed for {url}: {e}")
+        return None
+    return None
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable")
+async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if d:
+        d = _hydrate(d, ["updated_at"])
+    return {"lead": _hydrate(lead, ["created_at"]), "deliverable": d}
+
+
+@api_router.put("/admin/leads/{lead_id}/deliverable", response_model=Deliverable)
+async def upsert_deliverable(
+    lead_id: str, payload: Deliverable, _: bool = Depends(require_admin)
+):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    payload.lead_id = lead_id
+    payload.updated_at = datetime.now(timezone.utc)
+    doc = _doc(payload)
+    await db.deliverables.update_one(
+        {"lead_id": lead_id}, {"$set": doc}, upsert=True
+    )
+    return payload
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
+async def render_deliverable_pdf(
+    lead_id: str, request: Request, _: bool = Depends(require_admin)
+):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {
+        "lead_id": lead_id
+    }
+
+    # Resolve image bytes in parallel-ish (sequentially via async for clarity)
+    images: Dict[str, Any] = {
+        "front_view": await _resolve_image_bytes(d.get("front_view_url"), request),
+        "floor_plan": await _resolve_image_bytes(d.get("floor_plan_url"), request),
+        "view_1": await _resolve_image_bytes(d.get("view_1_url"), request),
+        "view_2": await _resolve_image_bytes(d.get("view_2_url"), request),
+        "view_3": await _resolve_image_bytes(d.get("view_3_url"), request),
+    }
+    customer_photos: List[Optional[bytes]] = []
+    if d.get("include_customer_photos", True):
+        for p in (lead.get("photos") or [])[:8]:
+            b = await _resolve_image_bytes(p, request)
+            if b:
+                customer_photos.append(b)
+    images["customer_photos"] = customer_photos
+
+    pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
+
+    safe_name = (lead.get("name") or "client").replace(" ", "_")
+    space = (lead.get("space_type") or "space").capitalize()
+    filename = f"FlowSpace_{space}_Plan_{safe_name}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ------------------------- Stripe -------------------------
