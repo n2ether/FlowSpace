@@ -4,7 +4,7 @@ import re
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://flowspace-preview-1.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://space-optimizer-test-1.preview.emergentagent.com").rstrip("/")
 ADMIN_TOKEN = "garage2025"
 HEADERS = {"X-Admin-Token": ADMIN_TOKEN, "Content-Type": "application/json"}
 TIMEOUT = 90

@@ -20,6 +20,12 @@ Create a webpage + app for a personalized home organization business. Hero with 
 
 ## Implemented
 
+### Session 5 — AI 3D Front View Rendering (Feb 24, 2026)
+- **`/app/backend/ai_image_generator.py`** — Gemini Nano Banana (`gemini-3.1-flash-image-preview`) via `emergentintegrations` + Emergent Universal Key. Builds a contextual prompt from `style_prefs`, `color_prefs`, `desired_feeling`, `storage_needs`, `must_stay`, `bothers_about`, plus the deliverable's `wall_color_*` and `zones`. Pulls up to **2 customer-uploaded photos from GridFS** as ImageContent references so the model preserves the actual room footprint while reimagining contents.
+- **`POST /api/admin/leads/{id}/deliverable/generate-image?slot=front_view`** — admin-only. Returns `{slot, url}` (relative GridFS URL); persists image to GridFS w/ correct content-type (JPEG/PNG auto-detected from model output) and updates the deliverable's `{slot}_url` field. Valid slots: `front_view`, `view_1`, `view_2`, `view_3`, `floor_plan`. Typical latency: 12–20s.
+- **"Generate with AI" button** on the 3D Front View slot in `AdminDeliverable.jsx` (violet Sparkles styling, `data-testid=d-img-front-ai`). Saves form first so the prompt uses latest wall-color + zones.
+- Smoke-tested end-to-end: lead create → generate → image fetch → PDF embed (919 KB PDF, valid JPEG).
+
 ### Session 4 — AI "Draft my plan" (Feb 22, 2026)
 - **`/app/backend/ai_drafter.py`** — Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) via emergentintegrations + Emergent Universal Key. Humanizes questionnaire keys (bothers/feeling/storage/style/colors/budget/diy) into a natural prompt, asks for strict JSON, tolerantly parses the response (strips fences, regex-extracts JSON object), coerces types, validates wall_color_hex.
 - **`POST /api/admin/leads/{id}/deliverable/draft`** — admin-only endpoint that returns `{draft: {...}}` matching the Deliverable schema. Typical latency: 15–30s.
@@ -59,11 +65,11 @@ Create a webpage + app for a personalized home organization business. Hero with 
 | **5 (AI Draft)** | **15/15** | **all flows** |
 
 ## Next action items (deferred per user)
+- **P1: Email notifications** — send completed rendering PDF to "completed folder" inbox + customer confirmation (Resend recommended) — *user asked to skip for now (Session 5)*
 - **P1: Stripe integration revival** — user paused; was working in MVP
-- **P1: Email notifications** — send completed rendering PDF to "completed folder" inbox + customer confirmation (Resend recommended)
+- P2: Allow "Generate with AI" on the other rendering slots (view_1/2/3, floor_plan) in the admin UI — endpoint already supports them
 - P2: Public share link for deliverable PDF (`/d/{token}`) so customer can view without admin auth
-- P2: Auto-suggest deliverable fields from questionnaire answers (style/color prefs → wall color, storage_needs → needs list)
 - P2: Server-side image compression for very large uploads
 - P2: Replace seeded Unsplash gallery with real before/after photos via admin upload
 - P3: Testimonials section, JWT admin auth, GA4 analytics
-- P3 (refactor): Extract Stripe + Deliverable sections from `server.py` into `routers/` modules (file is ~625 lines)
+- P3 (refactor): Extract Stripe + Deliverable sections from `server.py` into `routers/` modules (file is ~700 lines)

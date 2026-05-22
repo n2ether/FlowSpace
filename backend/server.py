@@ -24,6 +24,7 @@ import httpx
 
 from pdf_generator import build_pdf
 from ai_drafter import draft_deliverable
+from ai_image_generator import generate_front_view
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -420,6 +421,66 @@ async def ai_draft_deliverable(lead_id: str, _: bool = Depends(require_admin)):
         logging.exception("AI draft failed")
         raise HTTPException(status_code=502, detail=f"AI draft failed: {e}")
     return {"draft": plan}
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/generate-image")
+async def ai_generate_image(
+    lead_id: str,
+    slot: str = "front_view",
+    _: bool = Depends(require_admin),
+):
+    """Generate an AI rendering for a deliverable image slot using Nano Banana.
+
+    Currently supports slot='front_view' — a 3D front-view rendering based
+    on the customer's questionnaire answers and (when available) their
+    uploaded reference photos. The generated PNG is persisted to GridFS
+    and the deliverable doc is updated so the URL survives reloads.
+    """
+    valid_slots = {"front_view", "view_1", "view_2", "view_3", "floor_plan"}
+    if slot not in valid_slots:
+        raise HTTPException(status_code=400, detail=f"Invalid slot. Use one of {sorted(valid_slots)}")
+
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    deliverable = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+
+    try:
+        png_bytes, mime = await generate_front_view(
+            lead=lead, deliverable=deliverable, fs_bucket=fs_bucket
+        )
+    except Exception as e:
+        logging.exception("AI image generation failed")
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
+
+    ext = "jpg" if "jpeg" in (mime or "") else "png"
+    file_id = await fs_bucket.upload_from_stream(
+        f"ai_{slot}_{lead_id}.{ext}",
+        png_bytes,
+        metadata={
+            "content_type": mime or "image/png",
+            "uploaded_at": _iso(datetime.now(timezone.utc)),
+            "source": "ai_generated",
+            "lead_id": lead_id,
+            "slot": slot,
+        },
+    )
+    url = f"/api/uploads/photo/{file_id}"
+
+    slot_field = f"{slot}_url"
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {
+            "$set": {
+                slot_field: url,
+                "lead_id": lead_id,
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
+        },
+        upsert=True,
+    )
+
+    return {"slot": slot, "url": url}
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")

@@ -90,7 +90,7 @@ const ListEditor = ({ label, items, onChange, placeholder, testIdPrefix }) => (
     </div>
 );
 
-const ImageUrlField = ({ label, value, onChange, token, testId }) => {
+const ImageUrlField = ({ label, value, onChange, token, testId, onAiGenerate, aiBusy }) => {
     const [busy, setBusy] = useState(false);
     const handleUpload = async (file) => {
         if (!file) return;
@@ -140,21 +140,39 @@ const ImageUrlField = ({ label, value, onChange, token, testId }) => {
                         placeholder="https://… or /api/uploads/photo/…"
                         data-testid={testId}
                     />
-                    <label className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-full border border-emerald-300 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
-                        {busy ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                            <ImageIcon className="h-3.5 w-3.5" />
-                        )}
-                        Upload image
-                        <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => handleUpload(e.target.files?.[0])}
-                            data-testid={`${testId}-file`}
-                        />
-                    </label>
+                    <div className="flex flex-wrap gap-2">
+                        <label className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-full border border-emerald-300 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                            {busy ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                                <ImageIcon className="h-3.5 w-3.5" />
+                            )}
+                            Upload image
+                            <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleUpload(e.target.files?.[0])}
+                                data-testid={`${testId}-file`}
+                            />
+                        </label>
+                        {onAiGenerate ? (
+                            <button
+                                type="button"
+                                onClick={onAiGenerate}
+                                disabled={aiBusy}
+                                className="inline-flex w-fit items-center gap-1 rounded-full border border-violet-300 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-60"
+                                data-testid={`${testId}-ai`}
+                            >
+                                {aiBusy ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                    <Sparkles className="h-3.5 w-3.5" />
+                                )}
+                                {aiBusy ? "Generating…" : "Generate with AI"}
+                            </button>
+                        ) : null}
+                    </div>
                 </div>
             </div>
         </div>
@@ -170,6 +188,38 @@ const AdminDeliverable = () => {
     const [saving, setSaving] = useState(false);
     const [downloading, setDownloading] = useState(false);
     const [drafting, setDrafting] = useState(false);
+    const [aiImgBusy, setAiImgBusy] = useState(null); // slot key while generating
+
+    const generateImage = async (slot) => {
+        setAiImgBusy(slot);
+        try {
+            // Save current form first so prompt uses latest wall color / zones
+            const client = adminClient(token);
+            try {
+                await client.put(`/admin/leads/${leadId}/deliverable`, cleanPayload());
+            } catch (saveErr) {
+                console.warn("pre-generate save failed", saveErr);
+            }
+            const res = await client.post(
+                `/admin/leads/${leadId}/deliverable/generate-image`,
+                {},
+                { params: { slot }, timeout: 180000 },
+            );
+            const url = res.data?.url;
+            if (url) {
+                update(`${slot}_url`, url);
+                toast.success("AI rendering generated");
+            } else {
+                toast.error("No image returned");
+            }
+        } catch (e) {
+            console.error(e);
+            const detail = e?.response?.data?.detail || "Generation failed";
+            toast.error(detail);
+        } finally {
+            setAiImgBusy(null);
+        }
+    };
 
     const isEmptyText = (v) => !v || (typeof v === "string" && v.trim() === "");
     const isEmptyList = (l) =>
@@ -743,6 +793,8 @@ const AdminDeliverable = () => {
                                     onChange={(v) => update("front_view_url", v)}
                                     token={token}
                                     testId="d-img-front"
+                                    onAiGenerate={() => generateImage("front_view")}
+                                    aiBusy={aiImgBusy === "front_view"}
                                 />
                                 <ImageUrlField
                                     label="Floor Plan (Top View)"

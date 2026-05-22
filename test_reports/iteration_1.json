@@ -38,7 +38,7 @@
   "seed_data_creation": "Tests create lead records prefixed with TEST_ and one gallery item TEST_New Garage Reset (deleted within the same test class). One Stripe checkout session was created and a corresponding payment_transactions doc persists — these are unavoidable side effects of testing real Stripe sandbox.",
   "retest_needed": true,
   "main_agent_can_self_test": true,
-  "context_for_next_testing_agent": "Pytest suite at /app/backend/tests/test_clearspace_api.py covers all required endpoints. The single failing test is `TestCheckout::test_checkout_status` due to an emergentintegrations Stripe library bug parsing StripeObject metadata. After main agent applies a fix, re-run: `pytest /app/backend/tests/test_clearspace_api.py -v`. Backend external URL: https://flowspace-preview-1.preview.emergentagent.com.",
+  "context_for_next_testing_agent": "Pytest suite at /app/backend/tests/test_clearspace_api.py covers all required endpoints. The single failing test is `TestCheckout::test_checkout_status` due to an emergentintegrations Stripe library bug parsing StripeObject metadata. After main agent applies a fix, re-run: `pytest /app/backend/tests/test_clearspace_api.py -v`. Backend external URL: https://space-optimizer-test-1.preview.emergentagent.com.",
   "rca of the issue": {
     "endpoint": "GET /api/checkout/status/{session_id}",
     "reproduction": "1) POST /api/checkout/session with package_id=standard, origin_url=<any> → returns session_id. 2) GET /api/checkout/status/<session_id> → 502 with detail: 'Stripe error: Unexpected error retrieving session status: 1 validation error for CheckoutStatusResponse metadata Input should be a valid dictionary [type=dict_type, input_value=<StripeObject ...>]'.",

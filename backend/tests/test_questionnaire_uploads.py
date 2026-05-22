@@ -5,7 +5,7 @@ import pytest
 import requests
 from PIL import Image
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://flowspace-preview-1.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://space-optimizer-test-1.preview.emergentagent.com").rstrip("/")
 ADMIN_TOKEN = "garage2025"
 
 

@@ -13,7 +13,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://flowspace-preview-1.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://space-optimizer-test-1.preview.emergentagent.com").rstrip("/")
 ADMIN_PASSWORD = "garage2025"
 
 
@@ -243,7 +243,7 @@ class TestCheckout:
             f"{BASE_URL}/api/checkout/session",
             json={
                 "package_id": "standard",
-                "origin_url": "https://flowspace-preview-1.preview.emergentagent.com",
+                "origin_url": "https://space-optimizer-test-1.preview.emergentagent.com",
                 "email": "test_buyer@example.com",
             },
         )
