@@ -5,63 +5,58 @@ Create a webpage + app for a personalized home organization business. Hero with 
 
 ## User personas
 - Busy families / homeowners tired of clutter
-- Client of the business (admin)
-- 3rd-party builders (receive leads + photos to fulfill designs)
+- Client of the business (admin) — fills out design plans and sends deliverables
+- 3rd-party builders — receive leads + photos to fulfill designs
 
-## Core requirements (static)
+## Core requirements
 - Landing page with all 9 sections in specified order
 - Multi-section questionnaire (modal + full-page) saved to MongoDB `leads`
-- Stripe checkout (3 fixed packages: $79 / $149 / $299)
+- Stripe checkout (3 fixed packages: $79 / $149 / $299) — *deferred while we polish workflow*
 - Before/After gallery with filters; seeded + admin-editable
-- Admin panel: leads + gallery CRUD + transactions
+- Admin panel: leads + gallery CRUD + transactions + **design deliverable editor**
 - Trilingual via LanguageContext (EN / ES / PT-BR)
-- Before/After sliders (react-compare-slider)
+- Branded PDF deliverable (`reportlab`) — design plan with FlowSpace header bar
 - Earthy minimalist design — white/green/blue tones
 
-## Implemented (Feb 2026 — session 2: Questionnaire + GridFS)
-- **11-section Questionnaire** as a standalone modal (Landing CTAs) + full page (`/intake`):
-  1. Space type (required)
-  2. What bothers you (max 3) + other
-  3. Desired feeling (max 3) + other
-  4. Must stay items (free text)
-  5. Storage needs (multi-select)
-  6. Style + color preferences (multi-select)
-  7. Budget (single select)
-  8. DIY level (single select)
-  9. Photo uploads (up to 8 × 10MB)
-  10. Daily improvement (free text)
-  11. Contact + package pick (required)
-- **GridFS photo storage** via Motor (`uploads` bucket):
-  - `POST /api/uploads/photo` (multipart) → `{id, url}`
-  - `GET /api/uploads/photo/{id}` streams with proper content-type + cache headers
-  - Validates image/*, rejects empty + >10MB
-- **Lead model** extended with: bothers_about, bothers_other, desired_feeling, feeling_other, must_stay, storage_needs, style_prefs, color_prefs, budget, diy_level, daily_improvement
-- **Admin panel** redesigned for richer lead display: chips for each multi-select field, photo thumbnails resolved via `REACT_APP_BACKEND_URL + /api/uploads/photo/{id}`
-- **Trilingual** questionnaire (EN/ES/PT) — all 80+ option labels translated
-- Dialog a11y: hidden DialogTitle/Description for screen readers
+## Implemented
 
-## Previously implemented (Dec 2025 — session 1)
-- FastAPI + Stripe (emergentintegrations + raw stripe SDK fallback)
-- MongoDB: leads, gallery, payment_transactions
-- Auto-seed gallery on empty
-- Admin auth via X-Admin-Token
-- React + Tailwind + shadcn UI + Outfit/Manrope fonts
-- Browser language auto-detect
-- Before/After slider component
-- Success polling page with Stripe fallback
-- Rebrand from ClearSpace → FlowSpace (logo + name)
+### Session 3 — Branded PDF Deliverable (Feb 22, 2026)
+- **`/app/backend/pdf_generator.py`** — reportlab-based PDF builder. Brand bar w/ logo + tagline ("Clear space. Create flow. Live better.") + page numbers on every page.
+- **`Deliverable` model + 3 admin endpoints** (`GET/PUT /api/admin/leads/{id}/deliverable`, `GET .../pdf`). Idempotent upsert into `deliverables` collection.
+- **Auto-resolves** customer-uploaded photos from GridFS into the PDF body; also supports admin-provided URLs (relative GridFS or absolute http) for the 5 rendering images.
+- **PDF structure** — Page 1: greeting + Overall Plan (3D front view, floor plan, 3 additional views, needs/zones, wall-color block w/ swatch, shopping table with running total, design strategy, action plan, benefits, notes). Pages 2–N: customer reference photos (one per page). Last page: Design Summary + Attachment Note + Shopping Links table + "The FlowSpace Design Team" sign-off.
+- **`AdminDeliverable.jsx`** — full deliverable editor route at `/admin/leads/:leadId/design`. Inline list editors, zone editor, shopping list with qty/price columns, wall-color picker (HTML5 color input + hex), 5 image-upload fields with thumbnails. "Save" + "Generate PDF" actions.
+- **"Design" button** added to every lead row in the admin leads tab.
+- Graceful fallbacks: invalid/missing images render labeled placeholders; absent fields render "—".
 
-## Test status
-- Backend: 7/7 pytest (questionnaire + uploads) + 23/23 original = all pass
-- Frontend: 13/13 E2E flows pass (modal CTAs, 11-section nav, max-3 enforcement, multipart upload, /intake full-page, trilingual switching, admin display + photo render)
-- Date: 2026-02-22
+### Session 2 — Questionnaire Modal + GridFS (Feb 2026)
+- 11-section trilingual questionnaire as modal (Landing CTAs) + full page (`/intake`)
+- Lead model extended w/ bothers, feeling, must_stay, storage_needs, style/color prefs, budget, diy_level, daily_improvement
+- `POST /api/uploads/photo` + `GET /api/uploads/photo/{id}` via Motor AsyncIOMotorGridFSBucket
+- Admin panel redesigned with chip-based field display + GridFS photo thumbnails
 
-## Next action items
-- P1: Email notifications — send completed rendering to a "completed folder" inbox + customer confirmation (deferred: user chose to skip until ready to integrate Resend/SendGrid)
-- P1: Branded PDF deliverable when design is "ready"
-- P2: Stripe-success → Questionnaire linkage (attach session_id to lead on `/intake?session_id=...`)
-- P2: Image optimization — auto-compress >2MB uploads on the server
-- P2: Replace seeded Unsplash gallery with real before/after photos
-- P3: Testimonials section under gallery
-- P3: JWT-based admin auth + rate limit
-- P3: Analytics (GA4 + conversion events)
+### Session 1 — MVP (Dec 2025)
+- FastAPI + Stripe via emergentintegrations
+- MongoDB collections: leads, gallery, payment_transactions
+- React + Tailwind + shadcn UI; Outfit + Manrope fonts
+- Trilingual EN/ES/PT with browser auto-detect
+- 9-section landing page; Before/After slider; Admin auth via X-Admin-Token
+- Rebrand ClearSpace → FlowSpace
+
+## Test status (cumulative)
+| Iteration | Backend | Frontend |
+|-----------|---------|----------|
+| 1 | 22/23 → 23/23 | 15/15 |
+| 2 | regression OK | rebrand OK |
+| 3 (Questionnaire+GridFS) | 7/7 | 13/13 |
+| **4 (PDF Deliverable)** | **11/11** | **all flows** |
+
+## Next action items (deferred per user)
+- **P1: Stripe integration revival** — user paused; was working in MVP
+- **P1: Email notifications** — send completed rendering PDF to "completed folder" inbox + customer confirmation (Resend recommended)
+- P2: Public share link for deliverable PDF (`/d/{token}`) so customer can view without admin auth
+- P2: Auto-suggest deliverable fields from questionnaire answers (style/color prefs → wall color, storage_needs → needs list)
+- P2: Server-side image compression for very large uploads
+- P2: Replace seeded Unsplash gallery with real before/after photos via admin upload
+- P3: Testimonials section, JWT admin auth, GA4 analytics
+- P3 (refactor): Extract Stripe + Deliverable sections from `server.py` into `routers/` modules (file is ~625 lines)
