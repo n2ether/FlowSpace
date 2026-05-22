@@ -20,6 +20,12 @@ Create a webpage + app for a personalized home organization business. Hero with 
 
 ## Implemented
 
+### Session 4 — AI "Draft my plan" (Feb 22, 2026)
+- **`/app/backend/ai_drafter.py`** — Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) via emergentintegrations + Emergent Universal Key. Humanizes questionnaire keys (bothers/feeling/storage/style/colors/budget/diy) into a natural prompt, asks for strict JSON, tolerantly parses the response (strips fences, regex-extracts JSON object), coerces types, validates wall_color_hex.
+- **`POST /api/admin/leads/{id}/deliverable/draft`** — admin-only endpoint that returns `{draft: {...}}` matching the Deliverable schema. Typical latency: 15–30s.
+- **"Draft with AI" button** on the deliverable editor (violet styling, Sparkles icon, `data-testid=deliverable-ai-draft`).
+- **Fill-empty-only merge logic** in `applyDraft()` — preserves anything the admin has already typed (text fields, lists with any content, custom hex). Wall-color hex replaces only the default `#cfd7d3`.
+
 ### Session 3 — Branded PDF Deliverable (Feb 22, 2026)
 - **`/app/backend/pdf_generator.py`** — reportlab-based PDF builder. Brand bar w/ logo + tagline ("Clear space. Create flow. Live better.") + page numbers on every page.
 - **`Deliverable` model + 3 admin endpoints** (`GET/PUT /api/admin/leads/{id}/deliverable`, `GET .../pdf`). Idempotent upsert into `deliverables` collection.
@@ -49,7 +55,8 @@ Create a webpage + app for a personalized home organization business. Hero with 
 | 1 | 22/23 → 23/23 | 15/15 |
 | 2 | regression OK | rebrand OK |
 | 3 (Questionnaire+GridFS) | 7/7 | 13/13 |
-| **4 (PDF Deliverable)** | **11/11** | **all flows** |
+| 4 (PDF Deliverable) | 11/11 | all flows |
+| **5 (AI Draft)** | **15/15** | **all flows** |
 
 ## Next action items (deferred per user)
 - **P1: Stripe integration revival** — user paused; was working in MVP
