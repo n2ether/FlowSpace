@@ -1,5 +1,5 @@
 import React from "react";
-import { Dialog, DialogContent } from "./ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { useLang } from "../context/LanguageContext";
 import Questionnaire from "./Questionnaire";
 
@@ -13,6 +13,8 @@ const QuestionnaireModal = ({ open, onOpenChange, presetPackage = "" }) => {
                 className="max-h-[92vh] w-[95vw] max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-0 shadow-2xl"
                 data-testid="questionnaire-modal"
             >
+                <DialogTitle className="sr-only">{q.title}</DialogTitle>
+                <DialogDescription className="sr-only">{q.sub}</DialogDescription>
                 <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur md:px-10">
                     <h2 className="font-heading text-2xl font-light tracking-tight text-slate-900 md:text-3xl">
                         {q.title}
