@@ -47,8 +47,8 @@ STARTER_GALLERY = [
         "id": str(uuid.uuid4()),
         "title": "Walk-in closet — Daily clarity",
         "category": "closet",
-        "before_url": "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=1400&q=80",
+        "before_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/69dy858e_cluttered_closet.png",
+        "after_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/l8r8pdii_tidy_closet.png",
     },
     {
         "id": str(uuid.uuid4()),
