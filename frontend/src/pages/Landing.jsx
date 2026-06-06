@@ -255,30 +255,11 @@ const WhatYouGet = () => {
 const Packages = () => {
     const { t } = useLang();
     const navigate = useNavigate();
-    const [loadingId, setLoadingId] = useState(null);
 
     const PACKAGE_PRICES = { basic: 10, standard: 20, premium: 30 };
 
-    const startPlan = async (pkgId) => {
-        setLoadingId(pkgId);
-        try {
-            const origin = window.location.origin;
-            const res = await api.post("/checkout/session", {
-                package_id: pkgId,
-                origin_url: origin,
-            });
-            if (res.data?.url) {
-                window.location.href = res.data.url;
-            } else {
-                navigate(`/intake?package=${pkgId}`);
-            }
-        } catch (e) {
-            console.error(e);
-            toast.error("Could not start checkout. Redirecting to intake form.");
-            navigate(`/intake?package=${pkgId}`);
-        } finally {
-            setLoadingId(null);
-        }
+    const startPlan = (pkgId) => {
+        navigate(`/intake?package=${pkgId}`);
     };
 
     const plans = [
@@ -343,7 +324,6 @@ const Packages = () => {
 
                             <Button
                                 onClick={() => startPlan(p.id)}
-                                disabled={loadingId === p.id}
                                 className={`mt-8 w-full rounded-full py-6 text-base ${
                                     p.featured
                                         ? "bg-emerald-500 text-white hover:bg-emerald-600"
@@ -351,7 +331,7 @@ const Packages = () => {
                                 }`}
                                 data-testid={`package-cta-${p.id}`}
                             >
-                                {loadingId === p.id ? "..." : t.packages.cta}
+                                {t.packages.cta}
                                 <ArrowUpRight className="ml-2 h-4 w-4" />
                             </Button>
                         </motion.div>

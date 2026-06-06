@@ -106,7 +106,7 @@ const Header = () => {
                     </DropdownMenu>
 
                     <Button
-                        onClick={() => scrollTo("packages")}
+                        onClick={() => navigate("/intake")}
                         className="hidden rounded-full bg-emerald-500 px-5 text-white shadow-sm hover:bg-emerald-600 md:inline-flex"
                         data-testid="header-cta-start"
                     >
@@ -153,7 +153,10 @@ const Header = () => {
                             ))}
                         </div>
                         <Button
-                            onClick={() => scrollTo("packages")}
+                            onClick={() => {
+                                setOpen(false);
+                                navigate("/intake");
+                            }}
                             className="mt-3 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
                             data-testid="mobile-cta-start"
                         >
