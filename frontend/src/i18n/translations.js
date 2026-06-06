@@ -106,7 +106,7 @@ export const translations = {
             eyebrow: "Real results",
             title: "Real transformations",
             sub: "From chaos to clarity. Slide to see the change.",
-            filters: { all: "All", garage: "Garage", closet: "Closet", storage: "Storage" },
+            filters: { all: "All", garage: "Garage", closet: "Closet", laundry: "Laundry" },
         },
         who: {
             eyebrow: "Who it's for",
@@ -299,7 +299,7 @@ export const translations = {
             eyebrow: "Resultados reales",
             title: "Transformaciones reales",
             sub: "Del caos a la claridad. Desliza para ver el cambio.",
-            filters: { all: "Todo", garage: "Garaje", closet: "Armario", storage: "Despensa" },
+            filters: { all: "Todo", garage: "Garaje", closet: "Armario", laundry: "Lavadero" },
         },
         who: {
             eyebrow: "Para quién es",
@@ -492,7 +492,7 @@ export const translations = {
             eyebrow: "Resultados reais",
             title: "Transformações reais",
             sub: "Do caos à clareza. Deslize para ver a mudança.",
-            filters: { all: "Tudo", garage: "Garagem", closet: "Closet", storage: "Despensa" },
+            filters: { all: "Tudo", garage: "Garagem", closet: "Closet", laundry: "Lavanderia" },
         },
         who: {
             eyebrow: "Para quem é",

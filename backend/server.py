@@ -40,8 +40,8 @@ STARTER_GALLERY = [
         "id": str(uuid.uuid4()),
         "title": "Garage — Workshop reset",
         "category": "garage",
-        "before_url": "https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=1400&q=80",
+        "before_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/e8nmvr9k_cluttered_garage.png",
+        "after_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/9sy0qc1i_organized_garage.png",
     },
     {
         "id": str(uuid.uuid4()),
@@ -52,10 +52,10 @@ STARTER_GALLERY = [
     },
     {
         "id": str(uuid.uuid4()),
-        "title": "Pantry — Categorized storage",
-        "category": "storage",
-        "before_url": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=1400&q=80",
+        "title": "Laundry room — Wash, dry, fold, repeat",
+        "category": "laundry",
+        "before_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/a8ic5ch6_cluttered_laundry_room.png",
+        "after_url": "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/dlxnx33a_tidy_laundry_room.png",
     },
 ]
 

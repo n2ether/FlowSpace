@@ -374,7 +374,7 @@ const Gallery = () => {
     }, []);
 
     const filtered = filter === "all" ? items : items.filter((i) => i.category === filter);
-    const cats = ["all", "garage", "closet", "storage"];
+    const cats = ["all", "garage", "closet", "laundry"];
 
     return (
         <section id="gallery" className="relative bg-slate-50 section-pad">
