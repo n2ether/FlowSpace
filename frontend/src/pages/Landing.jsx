@@ -93,10 +93,6 @@ const Hero = () => {
 
                     <div className="flex flex-wrap items-center gap-5 pt-2 text-sm text-slate-500">
                         <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-emerald-600" />
-                            <span>{t.hero.delivery}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
                             <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
                             <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
                             <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
@@ -113,7 +109,7 @@ const Hero = () => {
                         <div className="absolute -bottom-6 -right-6 hidden h-28 w-28 rounded-2xl bg-emerald-50 md:block" />
                         <BeforeAfterSlider
                             beforeUrl="https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1600&q=80"
-                            afterUrl="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80"
+                            afterUrl="https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=1600&q=80"
                             beforeLabel={t.hero.beforeLabel}
                             afterLabel={t.hero.afterLabel}
                             className="relative aspect-[4/5] w-full shadow-xl"
@@ -201,10 +197,6 @@ const HowItWorks = () => {
                         );
                     })}
                 </div>
-
-                <div className="mt-10 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-                    <Clock className="h-4 w-4" /> {t.how.delivery}
-                </div>
             </div>
         </section>
     );
@@ -239,7 +231,7 @@ const WhatYouGet = () => {
                 <motion.div {...fadeUp} transition={{ duration: 0.7, delay: 0.1 }}>
                     <div className="grid grid-cols-2 grid-rows-2 gap-4">
                         <img
-                            src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80"
+                            src="https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=900&q=80"
                             alt="Layout"
                             className="col-span-2 aspect-[16/9] w-full rounded-2xl object-cover"
                         />
@@ -265,7 +257,7 @@ const Packages = () => {
     const navigate = useNavigate();
     const [loadingId, setLoadingId] = useState(null);
 
-    const PACKAGE_PRICES = { basic: 79, standard: 149, premium: 299 };
+    const PACKAGE_PRICES = { basic: 10, standard: 20, premium: 30 };
 
     const startPlan = async (pkgId) => {
         setLoadingId(pkgId);
@@ -589,3 +581,4 @@ const Landing = () => {
 };
 
 export default Landing;
+;

@@ -30,9 +30,9 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
 
 # Server-side package definitions
 PACKAGES: Dict[str, Dict[str, Any]] = {
-    "basic": {"id": "basic", "name": "Basic", "price": 79.0, "currency": "usd"},
-    "standard": {"id": "standard", "name": "Standard", "price": 149.0, "currency": "usd"},
-    "premium": {"id": "premium", "name": "Premium", "price": 299.0, "currency": "usd"},
+    "basic": {"id": "basic", "name": "Basic", "price": 10.0, "currency": "usd"},
+    "standard": {"id": "standard", "name": "Standard", "price": 20.0, "currency": "usd"},
+    "premium": {"id": "premium", "name": "Premium", "price": 30.0, "currency": "usd"},
 }
 
 STARTER_GALLERY = [
@@ -41,7 +41,7 @@ STARTER_GALLERY = [
         "title": "Garage — Workshop reset",
         "category": "garage",
         "before_url": "https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1400&q=80",
+        "after_url": "https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=1400&q=80",
     },
     {
         "id": str(uuid.uuid4()),

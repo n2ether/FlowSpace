@@ -97,7 +97,7 @@ export const translations = {
                 features: [
                     "Everything in Standard",
                     "3D mockup of final space",
-                    "Priority design (24h)",
+                    "Priority design queue",
                     "Revisions included",
                 ],
             },
@@ -132,7 +132,7 @@ export const translations = {
                 },
                 {
                     q: "How long does it take?",
-                    a: "Most plans are delivered in 24–48 hours. Premium gets priority 24h delivery.",
+                    a: "Timelines depend on the size of your space. We share a clear plan and schedule after reviewing your photos.",
                 },
                 {
                     q: "Do I need to install anything complicated?",
@@ -290,7 +290,7 @@ export const translations = {
                 features: [
                     "Todo lo del Estándar",
                     "Maqueta 3D del espacio final",
-                    "Diseño prioritario (24h)",
+                    "Diseño prioritario",
                     "Revisiones incluidas",
                 ],
             },
@@ -325,7 +325,7 @@ export const translations = {
                 },
                 {
                     q: "¿Cuánto tarda?",
-                    a: "La mayoría de planes se entregan en 24–48 horas. Premium tiene prioridad 24h.",
+                    a: "El plazo depende del tamaño de tu espacio. Te compartimos un plan claro y un calendario tras revisar tus fotos.",
                 },
                 {
                     q: "¿Necesito instalar algo complicado?",
@@ -483,7 +483,7 @@ export const translations = {
                 features: [
                     "Tudo do Padrão",
                     "Mockup 3D do espaço final",
-                    "Design prioritário (24h)",
+                    "Design prioritário",
                     "Revisões incluídas",
                 ],
             },
@@ -518,7 +518,7 @@ export const translations = {
                 },
                 {
                     q: "Quanto tempo leva?",
-                    a: "A maioria dos planos é entregue em 24–48 horas. Premium tem prioridade 24h.",
+                    a: "O prazo depende do tamanho do seu espaço. Compartilhamos um plano claro e um cronograma após revisar suas fotos.",
                 },
                 {
                     q: "Preciso instalar algo complicado?",
