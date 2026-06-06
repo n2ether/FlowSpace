@@ -231,17 +231,17 @@ const WhatYouGet = () => {
                 <motion.div {...fadeUp} transition={{ duration: 0.7, delay: 0.1 }}>
                     <div className="grid grid-cols-2 grid-rows-2 gap-4">
                         <img
-                            src="https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=900&q=80"
+                            src="https://customer-assets.emergentagent.com/job_space-transformed/artifacts/9sy0qc1i_organized_garage.png"
                             alt="Layout"
                             className="col-span-2 aspect-[16/9] w-full rounded-2xl object-cover"
                         />
                         <img
-                            src="https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=700&q=80"
+                            src="https://customer-assets.emergentagent.com/job_space-transformed/artifacts/l8r8pdii_tidy_closet.png"
                             alt="Categories"
                             className="aspect-square w-full rounded-2xl object-cover"
                         />
                         <img
-                            src="https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=700&q=80"
+                            src="https://customer-assets.emergentagent.com/job_space-transformed/artifacts/dlxnx33a_tidy_laundry_room.png"
                             alt="Shopping list"
                             className="aspect-square w-full rounded-2xl object-cover"
                         />
