@@ -153,8 +153,11 @@ export const translations = {
             back: "Back",
             next: "Next",
             submit: "Submit project",
-            thankYou: "Thank you!",
-            thankYouSub: "We've received your project. Our team will reach out within 24 hours.",
+            thankYou: "We've received your project.",
+            thankYouSub: "Check your email for your personalized plan PDF.",
+            downloadBtn: "Download my plan PDF",
+            generating: "Generating your plan…",
+            redirectingIn: "Redirecting in",
             fields: {
                 name: "Your name",
                 email: "Email",

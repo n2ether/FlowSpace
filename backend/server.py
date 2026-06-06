@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,6 +11,9 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone
 
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
 from emergentintegrations.payments.stripe.checkout import (
     StripeCheckout,
     CheckoutSessionResponse,
@@ -18,8 +22,7 @@ from emergentintegrations.payments.stripe.checkout import (
 )
 import stripe as stripe_sdk
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+from plan_service import build_plan_pdf_for_lead
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -197,6 +200,25 @@ async def list_gallery():
     await seed_gallery_if_empty()
     items = await db.gallery.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [_hydrate(it, ["created_at"]) for it in items]
+
+
+@api_router.get("/leads/{lead_id}/plan.pdf")
+async def download_lead_plan(lead_id: str):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    try:
+        pdf_bytes = await build_plan_pdf_for_lead(lead)
+    except Exception as e:
+        logging.exception("PDF generation failed")
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {e}")
+    safe_name = (lead.get("name") or "FlowSpace").replace(" ", "_")
+    filename = f"FlowSpace_Plan_{safe_name}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ------------------------- Admin Routes -------------------------

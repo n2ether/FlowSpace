@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Download, Loader2, Upload, X } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { Button } from "../components/ui/button";
@@ -17,11 +17,12 @@ import {
 } from "../components/ui/select";
 import { Progress } from "../components/ui/progress";
 import { useLang } from "../context/LanguageContext";
-import { api } from "../lib/api";
+import { api, API } from "../lib/api";
 import { toast } from "sonner";
 
-const MAX_PHOTOS = 6;
-const MAX_FILE_BYTES = 1.5 * 1024 * 1024; // 1.5MB per photo
+const MAX_PHOTOS = 2;
+const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
+const REDIRECT_SECONDS = 3;
 
 const Intake = () => {
     const { t, lang } = useLang();
@@ -32,15 +33,16 @@ const Intake = () => {
     const [step, setStep] = useState(0);
     const [submitting, setSubmitting] = useState(false);
     const [done, setDone] = useState(false);
+    const [leadId, setLeadId] = useState(null);
+    const [downloading, setDownloading] = useState(false);
+    const [countdown, setCountdown] = useState(REDIRECT_SECONDS);
 
     const [form, setForm] = useState({
         name: "",
         email: "",
         phone: "",
         space_type: "",
-        biggest_challenge: "",
         goals: "",
-        timeline: "",
         package_id: presetPackage,
         photos: [],
     });
@@ -48,15 +50,15 @@ const Intake = () => {
     const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
     const steps = [
-        { title: t.intake.fields.spaceType, id: "space" },
-        { title: t.intake.fields.challenge, id: "needs" },
-        { title: t.intake.fields.photos, id: "photos" },
-        { title: t.intake.fields.name, id: "contact" },
+        { id: "space", title: t.intake.fields.spaceType },
+        { id: "goals", title: t.intake.fields.goals },
+        { id: "photos", title: t.intake.fields.photos },
+        { id: "contact", title: t.intake.fields.name },
     ];
 
     const canNext = () => {
         if (step === 0) return !!form.space_type;
-        if (step === 1) return (form.biggest_challenge || "").trim().length > 0;
+        if (step === 1) return (form.goals || "").trim().length > 0;
         if (step === 2) return true;
         if (step === 3)
             return (
@@ -68,7 +70,13 @@ const Intake = () => {
 
     const next = () => {
         if (!canNext()) {
-            toast.error(lang === "es" ? "Completa este paso" : lang === "pt" ? "Complete esta etapa" : "Please complete this step");
+            toast.error(
+                lang === "es"
+                    ? "Completa este paso"
+                    : lang === "pt"
+                      ? "Complete esta etapa"
+                      : "Please complete this step",
+            );
             return;
         }
         if (step < steps.length - 1) setStep(step + 1);
@@ -83,6 +91,16 @@ const Intake = () => {
         const arr = Array.from(files || []);
         if (arr.length === 0) return;
         const remaining = MAX_PHOTOS - form.photos.length;
+        if (remaining <= 0) {
+            toast.error(
+                lang === "es"
+                    ? `Máximo ${MAX_PHOTOS} fotos`
+                    : lang === "pt"
+                      ? `Máximo ${MAX_PHOTOS} fotos`
+                      : `Maximum ${MAX_PHOTOS} photos`,
+            );
+            return;
+        }
         const sliced = arr.slice(0, remaining);
         const encoded = [];
         for (const f of sliced) {
@@ -102,33 +120,64 @@ const Intake = () => {
     };
 
     const removePhoto = (idx) => {
-        update(
-            "photos",
-            form.photos.filter((_, i) => i !== idx),
-        );
+        update("photos", form.photos.filter((_, i) => i !== idx));
     };
 
     const submit = async () => {
         setSubmitting(true);
         try {
-            await api.post("/leads", {
+            const res = await api.post("/leads", {
                 name: form.name,
                 email: form.email,
                 phone: form.phone || null,
                 space_type: form.space_type,
                 package_id: form.package_id || null,
-                biggest_challenge: form.biggest_challenge,
                 goals: form.goals,
-                timeline: form.timeline,
                 photos: form.photos,
                 language: lang,
             });
+            setLeadId(res.data?.id || null);
             setDone(true);
         } catch (e) {
             console.error(e);
             toast.error("Submission failed. Please try again.");
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    // Countdown + auto-redirect after thank-you. Pause while downloading.
+    useEffect(() => {
+        if (!done) return;
+        if (downloading) return; // hold redirect while PDF is generating
+        if (countdown <= 0) {
+            navigate("/");
+            return;
+        }
+        const t = setTimeout(() => setCountdown((s) => s - 1), 1000);
+        return () => clearTimeout(t);
+    }, [done, countdown, downloading, navigate]);
+
+    const downloadPDF = async () => {
+        if (!leadId) return;
+        setDownloading(true);
+        try {
+            const res = await fetch(`${API}/leads/${leadId}/plan.pdf`);
+            if (!res.ok) throw new Error("Plan generation failed");
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `FlowSpace_Plan_${form.name.replace(/\s+/g, "_") || "plan"}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error(e);
+            toast.error("Could not generate the plan. Please try again later.");
+        } finally {
+            setDownloading(false);
         }
     };
 
@@ -154,7 +203,11 @@ const Intake = () => {
                                 </span>
                                 <span>{steps[step].title}</span>
                             </div>
-                            <Progress value={progress} className="mb-8 h-1.5" data-testid="intake-progress" />
+                            <Progress
+                                value={progress}
+                                className="mb-8 h-1.5"
+                                data-testid="intake-progress"
+                            />
 
                             <AnimatePresence mode="wait">
                                 <motion.div
@@ -191,58 +244,18 @@ const Intake = () => {
                                                     )}
                                                 </SelectContent>
                                             </Select>
-
-                                            <Label className="mt-2">{t.intake.fields.package}</Label>
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {[
-                                                    { id: "basic", label: t.packages.basic.name },
-                                                    { id: "standard", label: t.packages.standard.name },
-                                                    { id: "premium", label: t.packages.premium.name },
-                                                ].map((p) => (
-                                                    <button
-                                                        key={p.id}
-                                                        type="button"
-                                                        onClick={() => update("package_id", p.id)}
-                                                        className={`rounded-xl border px-4 py-3 text-sm font-medium transition-all ${
-                                                            form.package_id === p.id
-                                                                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                                                                : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
-                                                        }`}
-                                                        data-testid={`intake-pkg-${p.id}`}
-                                                    >
-                                                        {p.label}
-                                                    </button>
-                                                ))}
-                                            </div>
                                         </>
                                     )}
 
                                     {step === 1 && (
                                         <>
-                                            <Label>{t.intake.fields.challenge}</Label>
-                                            <Textarea
-                                                value={form.biggest_challenge}
-                                                onChange={(e) =>
-                                                    update("biggest_challenge", e.target.value)
-                                                }
-                                                placeholder={t.intake.placeholders.challenge}
-                                                rows={3}
-                                                data-testid="intake-challenge-input"
-                                            />
-                                            <Label className="mt-2">{t.intake.fields.goals}</Label>
+                                            <Label>{t.intake.fields.goals}</Label>
                                             <Textarea
                                                 value={form.goals}
                                                 onChange={(e) => update("goals", e.target.value)}
                                                 placeholder={t.intake.placeholders.goals}
-                                                rows={3}
+                                                rows={6}
                                                 data-testid="intake-goals-input"
-                                            />
-                                            <Label className="mt-2">{t.intake.fields.timeline}</Label>
-                                            <Input
-                                                value={form.timeline}
-                                                onChange={(e) => update("timeline", e.target.value)}
-                                                placeholder="ASAP / 2 weeks / 1 month"
-                                                data-testid="intake-timeline-input"
                                             />
                                         </>
                                     )}
@@ -260,7 +273,11 @@ const Intake = () => {
                                                     {t.intake.fields.photos}
                                                 </span>
                                                 <span className="text-xs text-slate-500">
-                                                    {t.intake.fields.photosHelp}
+                                                    {lang === "es"
+                                                        ? `Hasta ${MAX_PHOTOS} fotos (JPG/PNG).`
+                                                        : lang === "pt"
+                                                          ? `Até ${MAX_PHOTOS} fotos (JPG/PNG).`
+                                                          : `Up to ${MAX_PHOTOS} photos (JPG/PNG).`}
                                                 </span>
                                             </label>
                                             <input
@@ -273,7 +290,7 @@ const Intake = () => {
                                                 data-testid="intake-photo-input"
                                             />
                                             {form.photos.length > 0 && (
-                                                <div className="mt-2 grid grid-cols-3 gap-3">
+                                                <div className="mt-2 grid grid-cols-2 gap-3">
                                                     {form.photos.map((src, i) => (
                                                         <div
                                                             key={i}
@@ -363,7 +380,7 @@ const Intake = () => {
                         <motion.div
                             initial={{ opacity: 0, y: 12 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="rounded-3xl border border-emerald-200 bg-white p-10 text-center shadow-sm"
+                            className="relative rounded-3xl border border-emerald-200 bg-white p-10 text-center shadow-sm"
                             data-testid="intake-done"
                         >
                             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-white">
@@ -373,13 +390,37 @@ const Intake = () => {
                                 {t.intake.thankYou}
                             </h2>
                             <p className="mt-3 text-slate-600">{t.intake.thankYouSub}</p>
+
                             <Button
-                                onClick={() => navigate("/")}
-                                className="mt-6 rounded-full bg-slate-900 text-white hover:bg-slate-700"
-                                data-testid="intake-back-home"
+                                onClick={downloadPDF}
+                                disabled={downloading || !leadId}
+                                className="mt-6 rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600 disabled:opacity-70"
+                                data-testid="intake-download-pdf"
                             >
-                                {t.success.backHome}
+                                {downloading ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        {t.intake.generating}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        {t.intake.downloadBtn}
+                                    </>
+                                )}
                             </Button>
+
+                            <div
+                                className="absolute bottom-4 right-4 flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600"
+                                data-testid="intake-countdown"
+                            >
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 font-mono text-[10px] font-bold text-white">
+                                    {countdown}
+                                </span>
+                                <span>
+                                    {t.intake.redirectingIn} {countdown}s
+                                </span>
+                            </div>
                         </motion.div>
                     )}
                 </div>
