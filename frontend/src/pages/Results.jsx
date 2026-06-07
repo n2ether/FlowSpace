@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
     Loader2, AlertCircle, Download, ArrowLeft, Gauge, DollarSign, Clock,
-    Wrench, ShoppingBag, ListChecks, ExternalLink, Lock,
+    Wrench, ShoppingBag, ListChecks, ExternalLink, Lock, Mail,
 } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 import { ProjectCompare } from "../components/AuthImage";
@@ -39,6 +39,7 @@ const Results = () => {
     const [notFound, setNotFound] = useState(false);
     const attempts = useRef(0);
     const [downloading, setDownloading] = useState(false);
+    const [emailing, setEmailing] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -77,6 +78,18 @@ const Results = () => {
             toast.error("PDF not available.");
         } finally {
             setDownloading(false);
+        }
+    };
+
+    const emailReport = async () => {
+        setEmailing(true);
+        try {
+            const r = await authApi.post(`/projects/${id}/email`);
+            toast.success(`${t.app.emailSent} ${r.data.email}`);
+        } catch {
+            toast.error(t.app.emailFailed);
+        } finally {
+            setEmailing(false);
         }
     };
 
@@ -141,12 +154,20 @@ const Results = () => {
                                 {ROOM_LABELS[project.room_type] || project.room_type} — {t.app.resultTitle}
                             </h1>
                             {project.pdf_storage_path ? (
-                                <Button onClick={downloadPdf} disabled={downloading}
-                                    className="rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600"
-                                    data-testid="results-download-pdf">
-                                    {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                                    {t.app.downloadPdf}
-                                </Button>
+                                <div className="flex flex-wrap gap-2">
+                                    <Button onClick={downloadPdf} disabled={downloading}
+                                        className="rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600"
+                                        data-testid="results-download-pdf">
+                                        {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                                        {t.app.downloadPdf}
+                                    </Button>
+                                    <Button onClick={emailReport} disabled={emailing} variant="outline"
+                                        className="rounded-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                        data-testid="results-email-pdf">
+                                        {emailing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                                        {t.app.emailReport}
+                                    </Button>
+                                </div>
                             ) : (
                                 <Button onClick={() => navigate("/app/billing")} variant="outline"
                                     className="rounded-full border-amber-300 text-amber-700 hover:bg-amber-50"

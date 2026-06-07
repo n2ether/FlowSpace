@@ -10,7 +10,8 @@ from pydantic import BaseModel
 
 from db import db
 from auth import get_current_user
-from plans import plan_cfg, ROOM_TYPES, STYLES
+from plans import plan_cfg, ROOM_TYPES, STYLES, ROOM_LABELS
+import email_service
 import replicate_service
 import room_service
 import storage_service
@@ -47,9 +48,11 @@ async def _process(project_id: str, user_id: str, plan: str, room_type: str, sty
         plan_data = await room_service.generate_room_plan(room_type, style, language)
 
         pdf_path = None
+        email_sent = False
         if cfg["pdf"]:
-            udoc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "name": 1})
+            udoc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "name": 1, "email": 1})
             uname = (udoc or {}).get("name", "there")
+            uemail = (udoc or {}).get("email", "")
             _, before_raw = room_service.strip_data_url(data_uri)
             pdf_bytes = await asyncio.to_thread(
                 room_service.build_room_pdf,
@@ -58,6 +61,9 @@ async def _process(project_id: str, user_id: str, plan: str, room_type: str, sty
             )
             pdf_path = f"{APP_NAME}/project-pdfs/{user_id}/{uuid.uuid4().hex}.pdf"
             await storage_service.put_object_async(pdf_path, pdf_bytes, "application/pdf")
+            email_sent = await email_service.send_plan_email(
+                uemail, uname, ROOM_LABELS.get(room_type, room_type), pdf_bytes
+            )
 
         await db.projects.update_one(
             {"id": project_id},
@@ -70,6 +76,7 @@ async def _process(project_id: str, user_id: str, plan: str, room_type: str, sty
                 "estimated_time": plan_data.get("estimated_time"),
                 "difficulty": plan_data.get("difficulty"),
                 "pdf_storage_path": pdf_path,
+                "email_sent": email_sent,
                 "watermarked": cfg["watermark"],
                 "status": "complete",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -182,3 +189,23 @@ async def project_pdf(project_id: str, request: Request):
         content=data, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="FlowSpace_{project_id[:8]}.pdf"'},
     )
+
+
+@projects_router.post("/{project_id}/email")
+async def email_project_pdf(project_id: str, request: Request):
+    user = await get_current_user(request)
+    p = await db.projects.find_one({"id": project_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    path = p.get("pdf_storage_path")
+    if not path:
+        raise HTTPException(status_code=403, detail="PDF not available on your plan")
+    pdf_bytes, _ = await storage_service.get_object_async(path)
+    ok = await email_service.send_plan_email(
+        user["email"], user.get("name", "there"),
+        ROOM_LABELS.get(p.get("room_type"), p.get("room_type", "space")), pdf_bytes,
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail="email_unavailable")
+    await db.projects.update_one({"id": project_id}, {"$set": {"email_sent": True}})
+    return {"ok": True, "email": user["email"]}
