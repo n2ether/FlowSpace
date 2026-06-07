@@ -1,4 +1,5 @@
 """Stripe subscription billing for FlowSpace (live account, official SDK)."""
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -200,10 +201,12 @@ async def webhook(request: Request):
         logger.warning("Webhook received but STRIPE_WEBHOOK_SECRET is not set; ignoring.")
         return {"received": True, "ignored": "no_webhook_secret"}
     try:
-        event = stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
+        stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Signature verified — use a plain dict for handler logic (avoids StripeObject quirks).
+    event = json.loads(payload)
     handler = _WEBHOOK_HANDLERS.get(event["type"])
     if handler:
         await handler(event["data"]["object"])
