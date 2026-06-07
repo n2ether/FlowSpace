@@ -186,7 +186,7 @@ const Results = () => {
                                         <p className="mt-3 text-slate-600">{plan.summary}</p>
                                         <ol className="mt-5 space-y-4">
                                             {(plan.steps || []).map((s, i) => (
-                                                <li key={i} className="flex gap-3" data-testid={`results-step-${i}`}>
+                                                <li key={`step-${i}-${s.title || ""}`} className="flex gap-3" data-testid={`results-step-${i}`}>
                                                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-semibold text-white">{i + 1}</span>
                                                     <div>
                                                         <div className="font-medium text-slate-900">{s.title}</div>
@@ -204,7 +204,7 @@ const Results = () => {
                                         </div>
                                         <ul className="mt-4 space-y-4">
                                             {(plan.shopping_list || []).map((item, i) => (
-                                                <li key={i} className="border-b border-slate-100 pb-4 last:border-0" data-testid={`results-item-${i}`}>
+                                                <li key={`item-${i}-${item.name || ""}`} className="border-b border-slate-100 pb-4 last:border-0" data-testid={`results-item-${i}`}>
                                                     <div className="flex items-start justify-between gap-2">
                                                         <span className="font-medium text-slate-900">{item.name} <span className="text-slate-400">×{item.quantity || 1}</span></span>
                                                         <span className="shrink-0 text-sm font-medium text-emerald-700">{item.price_range || `$${item.est_price || 0}`}</span>
@@ -213,7 +213,7 @@ const Results = () => {
                                                     {item.affiliate_links && (
                                                         <div className="mt-2 flex flex-wrap gap-2">
                                                             {item.affiliate_links.map((l, j) => (
-                                                                <a key={j} href={l.url} target="_blank" rel="noreferrer"
+                                                                <a key={l.store || j} href={l.url} target="_blank" rel="noreferrer"
                                                                     className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
                                                                     data-testid={`results-affiliate-${i}-${j}`}>
                                                                     {l.store} <ExternalLink className="h-3 w-3" />

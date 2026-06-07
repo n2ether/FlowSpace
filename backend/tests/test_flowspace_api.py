@@ -15,7 +15,7 @@ import pymongo
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://space-transform-59.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN_PASSWORD = "garage2025"
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
 
 MONGO = pymongo.MongoClient("mongodb://localhost:27017")["test_database"]
 

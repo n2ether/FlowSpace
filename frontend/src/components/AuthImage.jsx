@@ -16,7 +16,7 @@ export const AuthImage = ({ path, alt = "", className = "", testId }) => {
                     setUrl(obj);
                 }
             })
-            .catch(() => {});
+            .catch((e) => console.error("AuthImage load failed", e));
         return () => {
             active = false;
             if (obj) URL.revokeObjectURL(obj);
@@ -43,8 +43,8 @@ export const ProjectCompare = ({ projectId, beforeLabel, afterLabel, className =
                 const u = URL.createObjectURL(b);
                 urls.push(u);
                 if (active) setter(u);
-            } catch {
-                /* ignore */
+            } catch (e) {
+                console.error("ProjectCompare image load failed", e);
             }
         };
         load("original", setBefore);

@@ -1,5 +1,11 @@
-import datetime, uuid, base64, time, json
-import pymongo, requests
+import base64
+import datetime
+import json
+import time
+import uuid
+
+import pymongo
+import requests
 
 API = "https://space-transform-59.preview.emergentagent.com/api"
 c = pymongo.MongoClient("mongodb://localhost:27017")["test_database"]

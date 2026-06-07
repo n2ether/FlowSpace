@@ -159,6 +159,36 @@ async def portal(payload: PortalReq, request: Request):
     return {"url": ps.url}
 
 
+async def _wh_checkout_completed(obj: dict):
+    meta = obj.get("metadata") or {}
+    if obj.get("payment_status") == "paid" and meta.get("user_id"):
+        await _activate_plan(meta["user_id"], meta.get("plan", "pro"),
+                             obj.get("subscription"), obj.get("customer"))
+
+
+async def _wh_subscription_deleted(obj: dict):
+    uid = (obj.get("metadata") or {}).get("user_id")
+    if uid:
+        await _activate_plan(uid, "free")
+        await db.subscriptions.update_one({"user_id": uid}, {"$set": {"status": "canceled"}})
+
+
+async def _wh_subscription_updated(obj: dict):
+    uid = (obj.get("metadata") or {}).get("user_id")
+    items = (obj.get("items") or {}).get("data") or []
+    price_id = items[0]["price"]["id"] if items else None
+    plan = PRICE_TO_PLAN.get(price_id)
+    if uid and plan and obj.get("status") == "active":
+        await _activate_plan(uid, plan, obj.get("id"), obj.get("customer"))
+
+
+_WEBHOOK_HANDLERS = {
+    "checkout.session.completed": _wh_checkout_completed,
+    "customer.subscription.deleted": _wh_subscription_deleted,
+    "customer.subscription.updated": _wh_subscription_updated,
+}
+
+
 @billing_router.post("/webhook")
 async def webhook(request: Request):
     payload = await request.body()
@@ -174,27 +204,7 @@ async def webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    etype = event["type"]
-    obj = event["data"]["object"]
-
-    if etype == "checkout.session.completed":
-        meta = obj.get("metadata") or {}
-        if obj.get("payment_status") == "paid" and meta.get("user_id"):
-            await _activate_plan(meta["user_id"], meta.get("plan", "pro"),
-                                 obj.get("subscription"), obj.get("customer"))
-    elif etype in ("customer.subscription.deleted",):
-        meta = obj.get("metadata") or {}
-        uid = meta.get("user_id")
-        if uid:
-            await _activate_plan(uid, "free")
-            await db.subscriptions.update_one({"user_id": uid}, {"$set": {"status": "canceled"}})
-    elif etype == "customer.subscription.updated":
-        meta = obj.get("metadata") or {}
-        uid = meta.get("user_id")
-        items = (obj.get("items") or {}).get("data") or []
-        price_id = items[0]["price"]["id"] if items else None
-        plan = PRICE_TO_PLAN.get(price_id)
-        if uid and plan and obj.get("status") == "active":
-            await _activate_plan(uid, plan, obj.get("id"), obj.get("customer"))
-
+    handler = _WEBHOOK_HANDLERS.get(event["type"])
+    if handler:
+        await handler(event["data"]["object"])
     return {"received": True}
