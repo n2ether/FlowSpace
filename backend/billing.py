@@ -163,14 +163,16 @@ async def portal(payload: PortalReq, request: Request):
 async def webhook(request: Request):
     payload = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
-    if WEBHOOK_SECRET:
-        try:
-            event = stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    else:
-        import json
-        event = json.loads(payload)
+    if not WEBHOOK_SECRET:
+        # No signing secret configured yet → cannot trust the payload.
+        # The primary activation path is /billing/status (verified server-side via Stripe),
+        # so we safely ignore unsigned webhooks to prevent spoofed plan upgrades.
+        logger.warning("Webhook received but STRIPE_WEBHOOK_SECRET is not set; ignoring.")
+        return {"received": True, "ignored": "no_webhook_secret"}
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     etype = event["type"]
     obj = event["data"]["object"]

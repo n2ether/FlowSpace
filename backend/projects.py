@@ -1,4 +1,5 @@
 """Project (room transformation) routes + background AI pipeline."""
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -50,7 +51,7 @@ async def _process(project_id: str, user_id: str, plan: str, room_type: str, sty
             udoc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "name": 1})
             uname = (udoc or {}).get("name", "there")
             _, before_raw = room_service.strip_data_url(data_uri)
-            pdf_bytes = await __import__("asyncio").to_thread(
+            pdf_bytes = await asyncio.to_thread(
                 room_service.build_room_pdf,
                 user_name=uname, room_type=room_type, style=style, plan=plan_data,
                 before_bytes=before_raw, after_bytes=gen_bytes, with_affiliate=cfg["affiliate"],
