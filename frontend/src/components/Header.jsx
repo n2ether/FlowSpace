@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLang } from "../context/LanguageContext";
+import { useAuth } from "../context/AuthContext";
 import { LANGS } from "../i18n/translations";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { Button } from "./ui/button";
@@ -13,11 +14,13 @@ import {
 
 const Header = () => {
     const { t, lang, setLang } = useLang();
+    const { user } = useAuth();
     const [open, setOpen] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
 
     const isLanding = location.pathname === "/";
+    const goApp = () => navigate(user ? "/app" : "/app/new");
 
     const scrollTo = (id) => {
         setOpen(false);
@@ -106,11 +109,11 @@ const Header = () => {
                     </DropdownMenu>
 
                     <Button
-                        onClick={() => navigate("/intake")}
+                        onClick={goApp}
                         className="hidden rounded-full bg-emerald-500 px-5 text-white shadow-sm hover:bg-emerald-600 md:inline-flex"
                         data-testid="header-cta-start"
                     >
-                        {t.nav.cta}
+                        {user ? t.app.dashboard : t.nav.cta}
                     </Button>
 
                     <button
@@ -155,12 +158,12 @@ const Header = () => {
                         <Button
                             onClick={() => {
                                 setOpen(false);
-                                navigate("/intake");
+                                goApp();
                             }}
                             className="mt-3 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
                             data-testid="mobile-cta-start"
                         >
-                            {t.nav.cta}
+                            {user ? t.app.dashboard : t.nav.cta}
                         </Button>
                     </div>
                 </div>

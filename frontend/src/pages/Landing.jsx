@@ -74,7 +74,7 @@ const Hero = () => {
 
                     <div className="flex flex-wrap items-center gap-3 pt-2">
                         <Button
-                            onClick={() => navigate("/intake")}
+                            onClick={() => navigate("/app/new")}
                             className="group rounded-full bg-emerald-500 px-6 py-6 text-base font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-600 hover:shadow-md"
                             data-testid="hero-cta-start"
                         >
@@ -259,7 +259,7 @@ const Packages = () => {
     const PACKAGE_PRICES = { basic: 10, standard: 20, premium: 30 };
 
     const startPlan = (pkgId) => {
-        navigate(`/intake?package=${pkgId}`);
+        navigate("/app/new");
     };
 
     const plans = [
@@ -514,7 +514,7 @@ const FinalCTA = () => {
                         </div>
                         <div className="flex md:justify-end">
                             <Button
-                                onClick={() => navigate("/intake")}
+                                onClick={() => navigate("/app/new")}
                                 className="group rounded-full bg-white px-7 py-7 text-base font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
                                 data-testid="final-cta-start"
                             >

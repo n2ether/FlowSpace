@@ -8,6 +8,13 @@ export const api = axios.create({
     headers: { "Content-Type": "application/json" },
 });
 
+// Authenticated client — sends the httpOnly session cookie.
+export const authApi = axios.create({
+    baseURL: API,
+    headers: { "Content-Type": "application/json" },
+    withCredentials: true,
+});
+
 export const adminClient = (token) =>
     axios.create({
         baseURL: API,
