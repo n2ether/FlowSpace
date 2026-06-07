@@ -29,8 +29,8 @@ shopping list with affiliate links, and a downloadable branded PDF report.
 - Verified: full E2E pipeline (Replicate gen, plan score 92, PDF) via test_e2e_pipeline.py; 22/22 backend pytest; 7/7 UI flows; landing visually unchanged.
 
 ## Next action items / backlog
+- ✅ DONE (Jun 2026): PDF email delivery via Resend — auto-sends on Pro/Premium completion + on-demand "Email me the report" button; sends from verified `reports@flowspace.solutions`, BCC `camila@flowspace.solutions`. Validated end-to-end (endpoint 200, external delivery confirmed).
 - P0 (user, post-deploy): Set STRIPE_WEBHOOK_SECRET in backend/.env and register webhook URL /api/billing/webhook (unsigned webhooks are now ignored for safety).
-- P1: Email delivery — forward generated PDF/notifications to camila@flowspace.solutions and the user (needs Resend/SendGrid key).
 - P1: Real affiliate tags/IDs (currently store-search URLs for Amazon/Home Depot/Lowe's/Container Store).
 - P2: Atomic credit decrement (findOneAndUpdate) to close concurrent double-submit race.
 - P2: Pin Stripe success/cancel origin to a trusted host (currently uses client origin_url).
