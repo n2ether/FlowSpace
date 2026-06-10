@@ -17,6 +17,8 @@ import email_service
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "camila@flowspace.solutions").lower()
+PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "https://flowspace.solutions")
+ALLOWED_RESET_HOSTS = ("flowspace.solutions", "www.flowspace.solutions")
 MAX_FAILED = 5
 LOCKOUT_MINUTES = 15
 
@@ -190,6 +192,18 @@ async def logout(response: Response):
     return {"ok": True}
 
 
+def _safe_reset_base(origin_url: str) -> str:
+    """Only honor a client-supplied origin if it's a trusted host; else use the canonical app URL."""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(origin_url).hostname or "").lower()
+        if host in ALLOWED_RESET_HOSTS or host.endswith(".preview.emergentagent.com"):
+            return origin_url.rstrip("/")
+    except Exception:
+        pass
+    return PUBLIC_APP_URL.rstrip("/")
+
+
 @auth_router.post("/forgot-password")
 async def forgot_password(payload: ForgotReq):
     email = payload.email.lower().strip()
@@ -202,7 +216,7 @@ async def forgot_password(payload: ForgotReq):
             "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-        link = f"{payload.origin_url.rstrip('/')}/reset-password?token={token}"
+        link = f"{_safe_reset_base(payload.origin_url)}/reset-password?token={token}"
         await email_service.send_password_reset_email(email, user.get("name", "there"), link)
     return {"ok": True}
 

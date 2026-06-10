@@ -9,13 +9,18 @@ Does NOT call Replicate (paid). E2E pipeline already validated by test_e2e_pipel
 import os
 import uuid
 import datetime
+import jwt
 import pytest
 import requests
 import pymongo
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://space-transform-59.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
+JWT_SECRET = os.environ["JWT_SECRET"]
 
 MONGO = pymongo.MongoClient("mongodb://localhost:27017")["test_database"]
 
@@ -24,52 +29,49 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def _mint_token(uid, email):
+    """Create a valid JWT access token (matches backend auth.create_access_token)."""
+    payload = {
+        "sub": uid, "email": email, "type": "access",
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
 # ------------------------- fixtures ---------------------------------
 
 @pytest.fixture(scope="module")
 def free_user():
     """Seed a FREE user already at the limit (used=1, limit=1)."""
     uid = "TEST_free_" + uuid.uuid4().hex[:8]
-    tok = "test_session_" + uuid.uuid4().hex
     now = _now()
+    email = f"{uid}@example.com"
     MONGO.users.insert_one({
-        "user_id": uid, "email": f"{uid}@example.com", "name": "Free Tester",
+        "user_id": uid, "email": email, "name": "Free Tester",
         "picture": "", "subscription_plan": "free", "stripe_customer_id": None,
         "monthly_generation_limit": 1, "monthly_generations_used": 1,
         "period_start": now.isoformat(), "is_admin": False,
         "created_at": now.isoformat(),
     })
-    MONGO.user_sessions.insert_one({
-        "user_id": uid, "session_token": tok,
-        "expires_at": (now + datetime.timedelta(days=7)).isoformat(),
-        "created_at": now.isoformat(),
-    })
-    yield {"user_id": uid, "token": tok}
+    yield {"user_id": uid, "token": _mint_token(uid, email)}
     MONGO.users.delete_many({"user_id": uid})
-    MONGO.user_sessions.delete_many({"user_id": uid})
 
 
 @pytest.fixture(scope="module")
 def pro_user():
     """Seed a PRO user with credits available (no Replicate call will be made)."""
     uid = "TEST_pro_" + uuid.uuid4().hex[:8]
-    tok = "test_session_" + uuid.uuid4().hex
     now = _now()
+    email = f"{uid}@example.com"
     MONGO.users.insert_one({
-        "user_id": uid, "email": f"{uid}@example.com", "name": "Pro Tester",
+        "user_id": uid, "email": email, "name": "Pro Tester",
         "picture": "", "subscription_plan": "pro", "stripe_customer_id": None,
         "monthly_generation_limit": 10, "monthly_generations_used": 0,
         "period_start": now.isoformat(), "is_admin": False,
         "created_at": now.isoformat(),
     })
-    MONGO.user_sessions.insert_one({
-        "user_id": uid, "session_token": tok,
-        "expires_at": (now + datetime.timedelta(days=7)).isoformat(),
-        "created_at": now.isoformat(),
-    })
-    yield {"user_id": uid, "token": tok}
+    yield {"user_id": uid, "token": _mint_token(uid, email)}
     MONGO.users.delete_many({"user_id": uid})
-    MONGO.user_sessions.delete_many({"user_id": uid})
     MONGO.projects.delete_many({"user_id": uid})
 
 
@@ -115,7 +117,7 @@ def test_auth_me_with_bearer(pro_user):
 
 def test_auth_me_with_cookie(pro_user):
     s = requests.Session()
-    s.cookies.set("session_token", pro_user["token"])
+    s.cookies.set("access_token", pro_user["token"])
     r = s.get(f"{API}/auth/me", timeout=20)
     assert r.status_code == 200
     assert r.json().get("user_id") == pro_user["user_id"]

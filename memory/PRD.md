@@ -10,7 +10,7 @@ shopping list with affiliate links, and a downloadable branded PDF report.
 
 ## Tech stack (as built on the Emergent platform)
 - React + FastAPI + MongoDB (platform-managed; Node/Supabase from the original spec mapped to this stack).
-- Auth: Emergent-managed Google OAuth (cookie session_token + Bearer fallback).
+- Auth: **Email + password (JWT)** — single login/signup screen accepting any email; bcrypt hashing, httpOnly `access_token` cookie (7-day) + Bearer; brute-force lockout; password reset via Resend email (`/reset-password`). (Replaced Emergent Google OAuth in Jun 2026 to remove a confusing double-prompt.)
 - AI image: Replicate `black-forest-labs/flux-kontext-pro` (image-to-image, match_input_image).
 - AI text: GPT-5.2 via Emergent Universal Key (organization plan + shopping list).
 - Storage: Emergent Object Storage (original-room-images / generated-room-images / project-pdfs), served via authed backend endpoints.
@@ -29,7 +29,9 @@ shopping list with affiliate links, and a downloadable branded PDF report.
 - Verified: full E2E pipeline (Replicate gen, plan score 92, PDF) via test_e2e_pipeline.py; 22/22 backend pytest; 7/7 UI flows; landing visually unchanged.
 
 ## Next action items / backlog
-- ✅ DONE (Jun 2026): PDF email delivery via Resend — auto-sends on Pro/Premium completion + on-demand "Email me the report" button; sends from verified `reports@flowspace.solutions`, BCC `camila@flowspace.solutions`. Validated end-to-end.
+- ✅ DONE (Jun 2026): Replaced Google OAuth with **email/password JWT auth** — single login/signup screen (any email), password reset via email, brute-force lockout, trilingual. Tested 9/9 UI flows + 22/22 API tests. Reset links pinned to trusted hosts.
+- USER ACTION: **Redeploy** to push the new login experience to https://flowspace.solutions (the live site still has the old Google login until you redeploy).
+- ✅ DONE (Jun 2026): PDF email delivery via Resend (auto + on-demand, BCC camila).
 - ✅ DONE (Jun 2026): Stripe webhook — endpoint `we_1TfnOI…` registered at `https://flowspace.solutions/api/billing/webhook` (events: checkout.session.completed, customer.subscription.updated/deleted). STRIPE_WEBHOOK_SECRET set; signature verification active (forged→400); upgrade/cancel sync verified. Deployment-readiness check PASSED.
 - USER ACTION: Click **Deploy** to push to production. Webhook delivery activates once flowspace.solutions points at the deployed app (Stripe retries until then).
 - P1: Real affiliate tags/IDs (currently store-search URLs for Amazon/Home Depot/Lowe's/Container Store).

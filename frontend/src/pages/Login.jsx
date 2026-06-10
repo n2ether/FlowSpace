@@ -44,10 +44,8 @@ const Login = () => {
         try {
             if (mode === "signin") {
                 await login(email, password);
-                navigate("/app");
             } else if (mode === "signup") {
                 await register(email, password, name);
-                navigate("/app");
             } else {
                 await authApi.post("/auth/forgot-password", { email, origin_url: window.location.origin });
                 setForgotSent(true);
