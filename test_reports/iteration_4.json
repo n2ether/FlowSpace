@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend-only regression of the NEW email/password JWT auth that replaced Emergent Google OAuth. Ran end-to-end Playwright covering all 8 requested flows on the public preview URL. RESULT: 9/9 real assertions PASS, 0 bugs. Verified: (1) /login renders single screen with login-card + login-title 'Sign in', auth-email/password/forgot-link/switch-btn — no Google button present. (2) Signup with auth+random@gmail.com creates account, sets httpOnly access_token cookie, navigates to /app showing dashboard-title; /api/auth/me returns the new user. (3) nav-logout clears cookie and redirects to /login; signing back in with same creds lands on dashboard. (4) Wrong password shows auth-error 'Invalid email or password' and stays on /login (no crash). (5) Duplicate-email signup returns 409 with friendly text 'An account with this email already exists' in auth-error; short password (<8) is rejected by API with HTTP 400 (confirmed in console logs — script tried to read body twice but server response was the desired 400). (6) auth-forgot-link switches to forgot mode (password input hidden), submitting email shows forgot-sent. (7) /app, /app/new, /app/billing all redirect to /login when logged out. (8) After login: dashboard loads, /app/billing shows billing-plan-free/pro/premium, /app/new shows new-room-select (form renders — not submitted, per instruction). (9) Landing at / still renders FlowSpace content and the hero/header CTA to /app/new correctly redirects to /login when logged out. No project was created via UI (Replicate not hit). No live Stripe checkout was opened.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_flowspace_api.py (existing — not re-run this iteration; frontend-only request)",
+    "/app/test_reports/pytest/pytest_results.xml (from iteration_3)"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Login.jsx — `formatApiError(err.response?.data?.detail) || err.message` works, but when the network itself fails (no response), err.message is generic 'Network Error'. Consider a friendlier fallback like 'Network error — please try again'.",
+    "AuthContext — checkAuth fires on every mount and swallows the 401 silently (correct for the public landing), but it floods console with `Failed to load resource: 401` on every page load while logged out. Consider routing /auth/me through a quiet path or suppressing the 401 noise in production builds.",
+    "Login.jsx submit() does navigate('/app') AFTER await login/register, but AuthContext also navigates via the useEffect on user change. Two navigations happen in the same tick — harmless but redundant; remove one to avoid double-history entries.",
+    "Password reset email link is generated from client-supplied origin_url (auth.py /forgot-password). An attacker could pass a phishing origin and the email would link there. Pin origin to a server-side allowed list or the backend's own canonical URL.",
+    "Previously flagged (still open): STRIPE_WEBHOOK_SECRET empty; /api/billing/checkout uses untrusted origin_url; credit-limit race window on concurrent POSTs."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request; backend register/login/me/logout were curl-verified live and returned 200/200/200/200)", "frontend": "100% (9/9 end-to-end flows incl. signup→dashboard, signin, logout, wrong pw, duplicate email 409, short pw 400, forgot-password, protected-route redirect, landing CTA)"},
+  "test_credentials": "Created a fresh user during the run: email qa+<random>@gmail.com / password 'supersecret1' (free plan, monthly_generation_limit=1). Admin password garage2025 unchanged.",
+  "seed_data_creation": "One new user_id=user_06b410c0fd0f (qa+7vr9ukae@gmail.com) plus the earlier curl-created user (qa+1781089915@gmail.com) — both Free plan, no projects/transactions. Safe to delete.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth has been fully migrated to email+password JWT. Login screen testids: login-card, login-title, auth-name(signup only), auth-email, auth-password, auth-submit, auth-switch-btn, auth-forgot-link, auth-error, forgot-sent, forgot-back/cancel, login-back-home. Cookie name is access_token (httpOnly, samesite=lax, secure). To seed a logged-in browser session, POST /api/auth/register or /api/auth/login from the page context with credentials:'include' — cookie flows automatically (same-origin). Bearer header is also accepted. Do NOT click billing-choose-* buttons (LIVE Stripe) and do NOT submit the /app/new form (Replicate cost). The /api/auth/me 401 console-error noise on logged-out pages is harmless.",
+  "rca of the issue": "No bugs to RCA. Main agent's earlier concern that 'mode-switch click didn't register and 0 users were created' is NOT reproducible — auth-switch-btn click works in real Chromium and a fresh user was created end-to-end in this run (user_06b410c0fd0f). Earlier failure was likely due to clicking before the React hydration completed; using wait_for_selector before clicking fixes it."
+}

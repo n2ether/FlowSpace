@@ -74,3 +74,50 @@ async def send_plan_email(to_email: str, user_name: str, room_label: str, pdf_by
     except Exception as e:
         logger.error(f"Plan email failed for {to_email}: {e}")
         return False
+
+
+
+def _reset_html(name: str, link: str) -> str:
+    first = (name or "there").split(" ")[0]
+    return f"""\
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 0;font-family:Helvetica,Arial,sans-serif;">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+      <tr><td style="padding:28px 32px 8px 32px;">
+        <span style="font-size:20px;font-weight:700;color:#0f172a;">FlowSpace Solutions</span>
+      </td></tr>
+      <tr><td style="height:1px;background:#e2e8f0;"></td></tr>
+      <tr><td style="padding:28px 32px;">
+        <h1 style="margin:0 0 12px 0;font-size:22px;font-weight:300;color:#0f172a;">Reset your password</h1>
+        <p style="margin:0 0 20px 0;font-size:15px;line-height:1.6;color:#475569;">
+          Hi {first}, we received a request to reset your FlowSpace password. Click the button below to choose a new one. This link expires in 1 hour.
+        </p>
+        <a href="{link}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 28px;border-radius:9999px;">Reset password</a>
+        <p style="margin:20px 0 0 0;font-size:13px;color:#94a3b8;">If you didn't request this, you can safely ignore this email.</p>
+      </td></tr>
+      <tr><td style="padding:16px 32px 28px 32px;border-top:1px solid #e2e8f0;">
+        <span style="font-size:13px;color:#94a3b8;">FlowSpace Solutions · flowspace.solutions</span>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>"""
+
+
+def _send_simple(to_email: str, subject: str, html: str):
+    resend.api_key = RESEND_API_KEY
+    return resend.Emails.send({
+        "from": f"FlowSpace Solutions <{SENDER_EMAIL}>",
+        "to": [to_email], "subject": subject, "html": html,
+    })
+
+
+async def send_password_reset_email(to_email: str, name: str, link: str) -> bool:
+    if not RESEND_API_KEY or not to_email:
+        logger.warning("RESEND_API_KEY not set — skipping reset email")
+        return False
+    try:
+        await asyncio.to_thread(_send_simple, to_email, "Reset your FlowSpace password", _reset_html(name, link))
+        return True
+    except Exception as e:
+        logger.error(f"Reset email failed for {to_email}: {e}")
+        return False

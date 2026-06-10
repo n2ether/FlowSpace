@@ -1,13 +1,13 @@
 import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { LanguageProvider } from "./context/LanguageContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { Toaster } from "./components/ui/sonner";
 import { Loader2 } from "lucide-react";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
-import AuthCallback from "./pages/AuthCallback";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import NewProject from "./pages/NewProject";
 import Results from "./pages/Results";
@@ -28,33 +28,23 @@ const ProtectedRoute = ({ children }) => {
     return children;
 };
 
-function AppRoutes() {
-    const location = useLocation();
-    // Process OAuth callback BEFORE any protected route runs (prevents race conditions).
-    if (location.hash?.includes("session_id=")) {
-        return <AuthCallback />;
-    }
-    return (
-        <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/app/new" element={<ProtectedRoute><NewProject /></ProtectedRoute>} />
-            <Route path="/app/project/:id" element={<ProtectedRoute><Results /></ProtectedRoute>} />
-            <Route path="/app/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-    );
-}
-
 function App() {
     return (
         <LanguageProvider>
             <AuthProvider>
                 <BrowserRouter>
-                    <AppRoutes />
+                    <Routes>
+                        <Route path="/" element={<Landing />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/reset-password" element={<ResetPassword />} />
+                        <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                        <Route path="/app/new" element={<ProtectedRoute><NewProject /></ProtectedRoute>} />
+                        <Route path="/app/project/:id" element={<ProtectedRoute><Results /></ProtectedRoute>} />
+                        <Route path="/app/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+                        <Route path="/admin/login" element={<AdminLogin />} />
+                        <Route path="/admin" element={<Admin />} />
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
                     <Toaster position="top-right" richColors />
                 </BrowserRouter>
             </AuthProvider>

@@ -19,19 +19,19 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     useEffect(() => {
-        // CRITICAL: If returning from OAuth callback, skip the /me check.
-        // AuthCallback will exchange the session_id and establish the session first.
-        if (window.location.hash?.includes("session_id=")) {
-            setLoading(false);
-            return;
-        }
         checkAuth();
     }, [checkAuth]);
 
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const login = () => {
-        const redirectUrl = window.location.origin + "/app";
-        window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    const login = async (email, password) => {
+        const r = await authApi.post("/auth/login", { email, password });
+        setUser(r.data);
+        return r.data;
+    };
+
+    const register = async (email, password, name) => {
+        const r = await authApi.post("/auth/register", { email, password, name });
+        setUser(r.data);
+        return r.data;
     };
 
     const logout = async () => {
@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, setUser, loading, checkAuth, login, logout }}>
+        <AuthContext.Provider value={{ user, setUser, loading, checkAuth, login, register, logout }}>
             {children}
         </AuthContext.Provider>
     );

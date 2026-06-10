@@ -1,47 +1,35 @@
-# Auth-Gated App Testing Playbook (FlowSpace)
+# Auth-Gated App Testing Playbook (FlowSpace) — Email/Password JWT
 
-Authentication: Emergent-managed Google OAuth.
-- Cookie name: `session_token` (httpOnly). Backend also accepts `Authorization: Bearer <session_token>`.
-- Collections: `users` (custom `user_id`), `user_sessions` (`session_token`, `expires_at`).
+Authentication is now **email + password (JWT)**. Google OAuth has been removed.
+- Token: JWT in an httpOnly cookie `access_token` (7-day). Backend also accepts `Authorization: Bearer <token>`.
+- Collections: `users` (custom `user_id`, `password_hash` bcrypt `$2b$`), `password_reset_tokens`, `login_attempts`.
 
-## Seed a test user + session
-```python
-import pymongo, datetime, uuid
-c = pymongo.MongoClient("mongodb://localhost:27017")["test_database"]
-uid = "user_test" + uuid.uuid4().hex[:8]
-tok = "test_session_" + uuid.uuid4().hex
-c.users.insert_one({
-  "user_id": uid, "email": f"{uid}@example.com", "name": "Test User",
-  "picture": "", "subscription_plan": "free", "stripe_customer_id": None,
-  "monthly_generation_limit": 1, "monthly_generations_used": 0,
-  "period_start": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-  "is_admin": False, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-})
-c.user_sessions.insert_one({
-  "user_id": uid, "session_token": tok,
-  "expires_at": (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=7)).isoformat(),
-  "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-})
-print(uid, tok)
+## Auth endpoints (all under /api/auth)
+- POST `/register` {email, password (min 8), name?} → creates Free user, sets cookie, returns user
+- POST `/login` {email, password} → sets cookie, returns user (5 fails = 15-min lockout, 429)
+- GET `/me` → current user (401 if not authed)
+- POST `/logout` → clears cookie
+- POST `/forgot-password` {email, origin_url} → always returns {ok:true}; emails a reset link if the email exists (Resend)
+- POST `/reset-password` {token, password} → sets new password, logs in
+
+## Frontend login screen (single screen, /login)
+- data-testids: `login-card`, `login-title`, `auth-name` (signup only), `auth-email`, `auth-password`,
+  `auth-submit`, `auth-switch-btn` (toggles Sign in ↔ Sign up), `auth-forgot-link`, `auth-error`,
+  `forgot-sent`, `forgot-back`, `login-back-home`.
+- Reset page `/reset-password?token=...`: `reset-card`, `reset-password`, `reset-confirm`, `reset-submit`.
+
+## Quick API test
+```
+curl -c ck.txt -X POST $URL/api/auth/register -H 'Content-Type: application/json' -d '{"email":"qa1@gmail.com","password":"supersecret1","name":"QA"}'
+curl -b ck.txt $URL/api/auth/me
 ```
 
-## Browser cookie for Playwright
-```python
-await page.context.add_cookies([{
-  "name": "session_token", "value": "<TOKEN>",
-  "domain": "space-transform-59.preview.emergentagent.com", "path": "/",
-  "httpOnly": True, "secure": True, "sameSite": "None"
-}])
-```
+## Seed a logged-in session for protected-route tests
+Register/login via API (above) saves the `access_token` cookie; reuse it (cookie or Bearer) to hit
+`/app`, `/api/projects`, `/api/billing/*`. Plans: free=1 lifetime, pro=10/mo, premium=unlimited.
+Set a user's `subscription_plan` to "pro" in Mongo to test PDF/email features without paying.
 
-## Key flows to test
-- `/login` → Google button (cannot complete real OAuth in automation; use seeded cookie to reach `/app`).
-- `/app` dashboard loads projects, shows credits/plan.
-- `/app/new` → select room + style + upload photo → POST `/api/projects` → redirect to results, polls to `complete`.
-- `/app/project/:id` shows before/after slider, plan steps, shopping list, affiliate links, PDF button (Pro/Premium only).
-- `/app/billing` plans; checkout uses LIVE Stripe (do NOT complete a live payment in tests).
-- Admin: `/admin/login` password `garage2025` → tabs (Overview, Users, Projects, Subscriptions, Transactions, Affiliate, Gallery).
+## Admin (separate, unchanged)
+- /admin/login password `garage2025`. Tabs: Overview/Users/Projects/Subscriptions/Transactions/Affiliate/Gallery.
 
-## Plans / credits
-free=1 lifetime (watermark, no PDF), pro=10/mo (PDF), premium=unlimited (PDF + affiliate).
-To test paid features, set a seeded user's `subscription_plan` to "pro" and `monthly_generation_limit` 10.
+## NOTE — Replicate calls cost money; create at most ONE project via UI in tests.
