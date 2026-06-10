@@ -9,9 +9,9 @@ import { useLang } from "../context/LanguageContext";
 import { toast } from "sonner";
 
 const PLAN_FEATURES = {
-    free: ["1 transformation total", "Watermarked image", "Basic recommendations"],
-    pro: ["10 transformations / month", "HD image downloads", "PDF organization report", "Full shopping list"],
-    premium: ["Unlimited transformations*", "HD downloads", "Detailed plans + PDF", "Affiliate recommendations", "Multiple style variations"],
+    free: ["1 transformation total", "1 photo", "Watermarked image", "Basic recommendations"],
+    pro: ["10 transformations / month", "Up to 3 photos per project", "HD image downloads", "PDF organization report", "Full shopping list"],
+    premium: ["Unlimited transformations*", "Unlimited photos per project", "HD downloads", "Detailed plans + PDF", "Affiliate recommendations", "Multiple style variations"],
 };
 
 const Billing = () => {

@@ -20,6 +20,7 @@ const StatusBadge = ({ status }) => {
     const { t } = useLang();
     const map = {
         complete: { cls: "bg-emerald-50 text-emerald-700", Icon: CheckCircle2, label: t.app.complete },
+        partial: { cls: "bg-amber-50 text-amber-700", Icon: CheckCircle2, label: t.app.partial },
         processing: { cls: "bg-blue-50 text-blue-700", Icon: Clock, label: t.app.processing },
         failed: { cls: "bg-red-50 text-red-600", Icon: AlertCircle, label: t.app.failed },
     };
@@ -115,15 +116,27 @@ const Dashboard = () => {
                             className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition-all hover:-translate-y-1 hover:shadow-lg"
                             data-testid={`project-card-${p.id}`}>
                             <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-                                {p.status === "complete" && p.generated_storage_path ? (
-                                    <AuthImage path={`/projects/${p.id}/image/generated`} alt={p.room_type}
-                                        className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                                ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-slate-400">
-                                        {p.status === "failed"
-                                            ? <AlertCircle className="h-8 w-8 text-red-400" />
-                                            : <Clock className="h-8 w-8 animate-pulse" />}
-                                    </div>
+                                {(() => {
+                                    const doneIdx = (p.items || []).findIndex((it) => it.status === "complete");
+                                    if (doneIdx >= 0) {
+                                        return (
+                                            <AuthImage path={`/projects/${p.id}/photo/${doneIdx}/generated`} alt={p.room_type}
+                                                className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                                        );
+                                    }
+                                    return (
+                                        <div className="flex h-full w-full items-center justify-center text-slate-400">
+                                            {p.status === "failed"
+                                                ? <AlertCircle className="h-8 w-8 text-red-400" />
+                                                : <Clock className="h-8 w-8 animate-pulse" />}
+                                        </div>
+                                    );
+                                })()}
+                                {(p.photo_count || (p.items || []).length) > 1 && (
+                                    <span className="absolute right-2 top-2 rounded-full bg-slate-900/75 px-2 py-0.5 text-xs font-medium text-white"
+                                        data-testid={`project-photo-count-${p.id}`}>
+                                        {p.photo_count || p.items.length} photos
+                                    </span>
                                 )}
                             </div>
                             <div className="flex items-center justify-between p-4">

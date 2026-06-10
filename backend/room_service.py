@@ -284,13 +284,15 @@ def _image_box(c, raw: bytes, x, y, w, h, label=""):
 
 def build_room_pdf(
     *, user_name: str, room_type: str, style: str, plan: Dict,
-    before_bytes: bytes, after_bytes: Optional[bytes], with_affiliate: bool = True,
+    pairs: list, with_affiliate: bool = True,
 ) -> bytes:
+    """pairs: list of (before_bytes, after_bytes) tuples — one per uploaded photo."""
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=LETTER)
     width, height = LETTER
     room = ROOM_LABELS.get(room_type, room_type)
     style_label = STYLE_LABELS.get(style, style)
+    first_before, first_after = pairs[0] if pairs else (None, None)
 
     # Header
     _logo(c, 0.6 * inch, height - 0.85 * inch)
@@ -301,17 +303,21 @@ def build_room_pdf(
     c.setStrokeColor(BRAND_LINE)
     c.line(0.6 * inch, height - 1.0 * inch, width - 0.6 * inch, height - 1.0 * inch)
 
+    title = f"Your {room} — {style_label}"
+    if len(pairs) > 1:
+        title += f"  ({len(pairs)} views)"
     c.setFont("Helvetica-Bold", 20)
     c.setFillColor(BRAND_INK)
-    c.drawString(0.6 * inch, height - 1.35 * inch, f"Your {room} — {style_label}")
+    c.drawString(0.6 * inch, height - 1.35 * inch, title)
 
-    # Before / after
+    # Before / after (first photo)
     box_h = 1.7 * inch
     box_w = (width - 1.2 * inch - 0.2 * inch) / 2
     top = height - 1.55 * inch - box_h
-    _image_box(c, before_bytes, 0.6 * inch, top, box_w, box_h, "Before")
-    if after_bytes:
-        _image_box(c, after_bytes, 0.6 * inch + box_w + 0.2 * inch, top, box_w, box_h, "After")
+    if first_before:
+        _image_box(c, first_before, 0.6 * inch, top, box_w, box_h, "Before")
+    if first_after:
+        _image_box(c, first_after, 0.6 * inch + box_w + 0.2 * inch, top, box_w, box_h, "After")
 
     y = top - 0.25 * inch
     _section(c, "Organization plan", 0.6 * inch, y)
@@ -341,6 +347,28 @@ def build_room_pdf(
         y -= 12
         y = _wrap(c, step.get("detail", ""), 0.8 * inch, y, width - 1.5 * inch, "Helvetica", 9, BRAND_MUTE, 12)
         y -= 4
+
+    # Additional photos (pairs[1:]) on their own page(s)
+    extra = pairs[1:]
+    if extra:
+        c.showPage()
+        _logo(c, 0.6 * inch, height - 0.85 * inch)
+        c.setStrokeColor(BRAND_LINE)
+        c.line(0.6 * inch, height - 1.0 * inch, width - 0.6 * inch, height - 1.0 * inch)
+        _section(c, "More transformations", 0.6 * inch, height - 1.25 * inch)
+        eh = 1.5 * inch
+        ew = (width - 1.2 * inch - 0.2 * inch) / 2
+        ey = height - 1.45 * inch - eh
+        for bef, aft in extra:
+            if ey < 1.0 * inch:
+                c.showPage()
+                _logo(c, 0.6 * inch, height - 0.85 * inch)
+                ey = height - 1.45 * inch - eh
+            if bef:
+                _image_box(c, bef, 0.6 * inch, ey, ew, eh, "Before")
+            if aft:
+                _image_box(c, aft, 0.6 * inch + ew + 0.2 * inch, ey, ew, eh, "After")
+            ey -= eh + 0.3 * inch
 
     # New page for shopping list
     c.showPage()

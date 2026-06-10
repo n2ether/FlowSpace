@@ -14,6 +14,7 @@ PLAN_LIMITS = {
         "price": 0.0,
         "limit": 1,           # 1 transformation total (lifetime)
         "lifetime": True,     # never resets monthly
+        "max_photos": 1,
         "watermark": True,
         "hd": False,
         "pdf": False,
@@ -24,6 +25,7 @@ PLAN_LIMITS = {
         "price": 9.99,
         "limit": 10,          # per month
         "lifetime": False,
+        "max_photos": 3,
         "watermark": False,
         "hd": True,
         "pdf": True,
@@ -34,6 +36,7 @@ PLAN_LIMITS = {
         "price": 19.99,
         "limit": 1000,        # unlimited (fair-use cap)
         "lifetime": False,
+        "max_photos": 10,     # "unlimited" — practical per-project cap
         "watermark": False,
         "hd": True,
         "pdf": True,

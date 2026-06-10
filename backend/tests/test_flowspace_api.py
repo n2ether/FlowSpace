@@ -153,7 +153,7 @@ def test_free_user_at_limit_blocked_with_402(free_user):
     # Tiny 1x1 png base64
     photo = ("data:image/png;base64,"
              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII=")
-    payload = {"room_type": "garage", "style": "modern", "photo": photo, "language": "en"}
+    payload = {"room_type": "garage", "style": "modern", "photos": [photo], "language": "en"}
     r = requests.post(f"{API}/projects", json=payload,
                       headers={"Authorization": f"Bearer {free_user['token']}"},
                       timeout=30)
@@ -161,11 +161,22 @@ def test_free_user_at_limit_blocked_with_402(free_user):
     assert "credit" in r.text.lower() or "limit" in r.text.lower()
 
 
+def test_free_user_too_many_photos_400(free_user):
+    """Free plan max_photos=1 — sending 2 photos must be rejected before any Replicate call."""
+    photo = ("data:image/png;base64,"
+             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII=")
+    r = requests.post(f"{API}/projects",
+                      json={"room_type": "garage", "style": "modern", "photos": [photo, photo], "language": "en"},
+                      headers={"Authorization": f"Bearer {free_user['token']}"}, timeout=30)
+    assert r.status_code == 400
+    assert "photo" in r.text.lower()
+
+
 def test_invalid_room_type_400(pro_user):
     photo = ("data:image/png;base64,"
              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII=")
     r = requests.post(f"{API}/projects",
-                      json={"room_type": "invalid_room", "style": "modern", "photo": photo, "language": "en"},
+                      json={"room_type": "invalid_room", "style": "modern", "photos": [photo], "language": "en"},
                       headers={"Authorization": f"Bearer {pro_user['token']}"}, timeout=30)
     assert r.status_code == 400
 
@@ -174,7 +185,7 @@ def test_invalid_style_400(pro_user):
     photo = ("data:image/png;base64,"
              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAeImBZsAAAAASUVORK5CYII=")
     r = requests.post(f"{API}/projects",
-                      json={"room_type": "garage", "style": "invalid_style", "photo": photo, "language": "en"},
+                      json={"room_type": "garage", "style": "invalid_style", "photos": [photo], "language": "en"},
                       headers={"Authorization": f"Bearer {pro_user['token']}"}, timeout=30)
     assert r.status_code == 400
 

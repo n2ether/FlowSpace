@@ -27,8 +27,8 @@ export const AuthImage = ({ path, alt = "", className = "", testId }) => {
     return <img src={url} alt={alt} className={className} data-testid={testId} />;
 };
 
-// Loads both project images as blobs then renders the comparison slider.
-export const ProjectCompare = ({ projectId, beforeLabel, afterLabel, className = "", testIdPrefix }) => {
+// Loads a project's before/after images (by photo index) as blobs, then renders the slider.
+export const ProjectCompare = ({ projectId, idx = 0, beforeLabel, afterLabel, className = "", testIdPrefix }) => {
     const [before, setBefore] = useState(null);
     const [after, setAfter] = useState(null);
 
@@ -37,7 +37,7 @@ export const ProjectCompare = ({ projectId, beforeLabel, afterLabel, className =
         const urls = [];
         const load = async (which, setter) => {
             try {
-                const r = await fetch(`${API}/projects/${projectId}/image/${which}`, { credentials: "include" });
+                const r = await fetch(`${API}/projects/${projectId}/photo/${idx}/${which}`, { credentials: "include" });
                 if (!r.ok) return;
                 const b = await r.blob();
                 const u = URL.createObjectURL(b);
@@ -53,7 +53,7 @@ export const ProjectCompare = ({ projectId, beforeLabel, afterLabel, className =
             active = false;
             urls.forEach((u) => URL.revokeObjectURL(u));
         };
-    }, [projectId]);
+    }, [projectId, idx]);
 
     if (!before || !after) {
         return <div className={`animate-pulse rounded-2xl bg-slate-100 ${className}`} data-testid={`${testIdPrefix}-loading`} />;

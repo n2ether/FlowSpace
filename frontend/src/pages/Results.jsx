@@ -146,7 +146,7 @@ const Results = () => {
                     </div>
                 )}
 
-                {status === "complete" && (
+                {(status === "complete" || status === "partial") && (
                     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
                         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
                             <h1 className="font-heading text-3xl font-light tracking-tight text-slate-900 sm:text-4xl"
@@ -177,11 +177,29 @@ const Results = () => {
                             )}
                         </div>
 
-                        <div className="mt-6">
-                            <ProjectCompare projectId={project.id}
-                                beforeLabel={t.hero.beforeLabel} afterLabel={t.hero.afterLabel}
-                                className="aspect-[16/10] w-full shadow-md" testIdPrefix="results-compare" />
+                        <div className="mt-6 space-y-6">
+                            {(project.items || [])
+                                .map((it, i) => ({ it, idx: i }))
+                                .filter(({ it }) => it.status === "complete")
+                                .map(({ idx }, n, arr) => (
+                                    <div key={idx} data-testid={`results-photo-${idx}`}>
+                                        {arr.length > 1 && (
+                                            <div className="mb-2 text-sm font-medium text-slate-500">
+                                                {t.app.view} {n + 1}
+                                            </div>
+                                        )}
+                                        <ProjectCompare projectId={project.id} idx={idx}
+                                            beforeLabel={t.hero.beforeLabel} afterLabel={t.hero.afterLabel}
+                                            className="aspect-[16/10] w-full shadow-md" testIdPrefix={`results-compare-${idx}`} />
+                                    </div>
+                                ))}
                         </div>
+
+                        {status === "partial" && (
+                            <p className="mt-3 rounded-xl bg-amber-50 p-3 text-center text-sm text-amber-800" data-testid="results-partial-note">
+                                {t.app.partialNote}
+                            </p>
+                        )}
 
                         {project.watermarked && (
                             <p className="mt-3 rounded-xl bg-amber-50 p-3 text-center text-sm text-amber-800" data-testid="results-watermark-note">
