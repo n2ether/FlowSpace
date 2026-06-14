@@ -76,9 +76,6 @@ export default function UploadFlow() {
   const handleSubmit = async () => {
     if (!email) return toast.error("Please enter your email");
     if (photos.length === 0) return toast.error("Upload at least one photo");
-    if (plan.price > 0 && !sessionId) {
-      return toast.error("Payment session missing — please re-purchase plan.");
-    }
     try {
       setSubmitting(true);
       toast.info("Generating your AI transformation… this can take 20–60s.");

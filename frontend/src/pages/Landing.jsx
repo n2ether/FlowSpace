@@ -383,7 +383,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-8 text-center text-xs text-slate-500">
-            Plus & Premium are one-time payments. Stripe secure checkout.
+            No payment required. Pick a plan and start uploading.
           </p>
         </div>
       </section>

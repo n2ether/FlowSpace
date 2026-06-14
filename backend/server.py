@@ -283,15 +283,9 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
     if len(payload.photos_base64) > plan["max_photos"]:
         raise HTTPException(status_code=400, detail=f"Max {plan['max_photos']} photos for {plan['name']}")
 
-    # If paid plan, verify the session was paid
-    if plan["price"] > 0:
-        if not payload.session_id:
-            raise HTTPException(status_code=402, detail="Payment required")
-        txn = await db.payment_transactions.find_one({"session_id": payload.session_id}, {"_id": 0})
-        if not txn or txn.get("payment_status") != "paid" or txn.get("plan_id") != payload.plan_id:
-            raise HTTPException(status_code=402, detail="Payment not verified")
-        if txn.get("submission_id"):
-            raise HTTPException(status_code=409, detail="This payment has already been used")
+    # If paid plan, payment verification is currently bypassed —
+    # all plans (Free, Plus, Premium) can submit without a paid session.
+    # (Stripe checkout flow remains in place but is unused from the UI.)
 
     sub_id = str(uuid.uuid4())
     results: List[Dict[str, str]] = []

@@ -1,10 +1,4 @@
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
-import axios from "axios";
-import { toast } from "sonner";
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
 
 const Check = ({ tone = "emerald" }) => (
   <svg
@@ -30,26 +24,10 @@ export default function PricingCard({
   testId,
 }) {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
 
   const handleStart = async () => {
-    if (plan.price === 0) {
-      navigate(`/upload/${plan.id}`);
-      return;
-    }
-    try {
-      setLoading(true);
-      const origin = window.location.origin;
-      const res = await axios.post(`${API}/checkout/session`, {
-        plan_id: plan.id,
-        origin_url: origin,
-      });
-      window.location.href = res.data.url;
-    } catch (e) {
-      console.error(e);
-      toast.error("Could not start checkout. Please try again.");
-      setLoading(false);
-    }
+    // Payment is currently disabled — all plans go straight to upload.
+    navigate(`/upload/${plan.id}`);
   };
 
   return (
@@ -90,19 +68,14 @@ export default function PricingCard({
       </ul>
       <button
         onClick={handleStart}
-        disabled={loading}
         className={`mt-8 w-full rounded-full py-3.5 text-base font-medium shadow transition-all ${
           highlighted
             ? "bg-emerald-500 text-white hover:bg-emerald-600"
             : "bg-slate-900 text-white hover:bg-slate-700"
-        } disabled:opacity-60`}
+        }`}
         data-testid={`${testId}-cta`}
       >
-        {loading
-          ? "Loading…"
-          : plan.price === 0
-          ? "Try it free"
-          : "Choose this plan"}
+        {plan.price === 0 ? "Try it free" : "Choose this plan"}
       </button>
       {plan.pdf && (
         <p
