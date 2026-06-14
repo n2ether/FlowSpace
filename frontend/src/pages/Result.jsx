@@ -71,7 +71,7 @@ export default function Result() {
               Here&rsquo;s your space, reorganized.
             </h1>
             <p className="mt-3 text-slate-600">
-              Drag the slider to compare. A copy has been emailed to you.
+              Drag any slider to compare. {isPaid ? "Your PDF Design Plan is attached to the confirmation email — or download it here." : "A copy of your transformation has been emailed to you."}
             </p>
           </div>
           {isPaid && pdfReady && (

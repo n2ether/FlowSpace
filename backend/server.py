@@ -143,17 +143,32 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
             f"</td></tr>"
         )
 
+    pdf_note = ""
+    attachments = []
+    if submission.get("pdf_base64"):
+        room = submission.get("room_type") or "Room"
+        room_pretty = room.title().replace(" ", "-")
+        filename = f"FlowSpace-{room_pretty}-Design-Plan.pdf"
+        attachments = [{"filename": filename, "content": submission["pdf_base64"]}]
+        pdf_note = (
+            f"<p style='margin:14px 0 0;color:#047857;font-weight:600'>"
+            f"PDF Design Plan attached: {filename}</p>"
+        )
+
     html = f"""
     <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;max-width:640px;margin:auto">
       <h2 style="color:#059669;margin:0 0 8px 0">New FlowSpace submission</h2>
       <p style="margin:0 0 16px 0;color:#475569">A new client just submitted photos for transformation.</p>
       <table cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
         <tr><td><strong>Name:</strong> {submission.get('name') or '—'}</td></tr>
-        <tr><td><strong>Email:</strong> {submission.get('email')}</td></tr>
+        <tr><td><strong>Customer email:</strong> {submission.get('email')}</td></tr>
         <tr><td><strong>Plan:</strong> {plan.get('name', submission.get('plan_id'))}</td></tr>
+        <tr><td><strong>Room type:</strong> {submission.get('room_type') or '—'}</td></tr>
         <tr><td><strong>Photos:</strong> {len(submission.get('results', []))}</td></tr>
+        <tr><td><strong>Notes:</strong> {submission.get('notes') or '—'}</td></tr>
         <tr><td><strong>Submitted:</strong> {submission.get('created_at')}</td></tr>
       </table>
+      {pdf_note}
       <h3 style="margin-top:24px;color:#0f172a">Photos</h3>
       <table cellpadding="0" cellspacing="0" style="width:100%">{rows}</table>
     </div>
@@ -164,10 +179,85 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
         "subject": f"New {plan.get('name', 'FlowSpace')} submission from {submission.get('email')}",
         "html": html,
     }
+    if attachments:
+        params["attachments"] = attachments
     try:
         resend.Emails.send(params)
     except Exception as e:
-        logger.error(f"Resend email failed: {e}")
+        logger.error(f"Resend admin email failed: {e}")
+
+
+def send_customer_email_sync(submission: Dict[str, Any], result_url: str) -> None:
+    """Sends the customer their AI transformation summary (+ PDF for paid plans).
+    In Resend test mode this still goes to the verified ADMIN_EMAIL — the
+    intended recipient is shown in the subject + body so it's clearly visible."""
+    plan = PLANS.get(submission["plan_id"], {})
+    customer_email = submission.get("email", "")
+    name = submission.get("name") or "there"
+
+    attachments = []
+    pdf_block = ""
+    if submission.get("pdf_base64"):
+        room = submission.get("room_type") or "Room"
+        room_pretty = room.title().replace(" ", "-")
+        filename = f"FlowSpace-{room_pretty}-Design-Plan.pdf"
+        attachments = [{"filename": filename, "content": submission["pdf_base64"]}]
+        pdf_block = (
+            "<p style='margin:16px 0 8px;font-weight:600;color:#047857'>"
+            f"Your custom PDF Design Plan ({filename}) is attached to this email."
+            "</p>"
+        )
+    elif plan.get("pdf"):
+        pdf_block = (
+            "<p style='margin:16px 0 8px;color:#92400e'>"
+            "Your PDF Design Plan will be ready shortly — check back on the link below."
+            "</p>"
+        )
+
+    upgrade_block = ""
+    if not plan.get("pdf"):
+        upgrade_block = (
+            "<div style='margin-top:16px;padding:12px 14px;border-radius:10px;"
+            "background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px'>"
+            "<strong>Want the full design plan?</strong> Upgrade to Plus or "
+            "Premium to unlock your PDF Design Plan with floor plan, shopping "
+            "list, wall colors, and action steps."
+            "</div>"
+        )
+
+    html = f"""
+    <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;max-width:560px;margin:auto;padding:8px">
+      <h2 style="color:#059669;margin:0 0 6px 0">Your FlowSpace transformation is ready</h2>
+      <p style="margin:0;color:#475569">Hi {name} — thanks for using FlowSpace.</p>
+      <p style="margin:14px 0 0">
+        We&rsquo;ve generated your AI-organized room visuals on the
+        <strong>{plan.get('name','FlowSpace')}</strong> plan. View them anytime:
+      </p>
+      <p style="margin:16px 0">
+        <a href="{result_url}" style="display:inline-block;padding:11px 18px;
+          background:#10b981;color:#fff;border-radius:9999px;text-decoration:none;
+          font-weight:600">View my transformation</a>
+      </p>
+      {pdf_block}
+      {upgrade_block}
+      <p style="margin-top:22px;font-size:12px;color:#94a3b8">
+        © FlowSpace.Solutions — Clear space. Create flow. Live better.
+      </p>
+    </div>
+    """
+    subject_target = f" (for {customer_email})" if customer_email else ""
+    params = {
+        "from": SENDER_EMAIL,
+        "to": [ADMIN_EMAIL],  # test mode — Resend only allows verified address
+        "subject": f"Your FlowSpace {plan.get('name','')} transformation{subject_target}",
+        "html": html,
+    }
+    if attachments:
+        params["attachments"] = attachments
+    try:
+        resend.Emails.send(params)
+    except Exception as e:
+        logger.error(f"Resend customer email failed: {e}")
 
 # ----- Routes -----
 @api_router.get("/")
@@ -274,7 +364,7 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 @api_router.post("/submissions", response_model=SubmissionOut)
-async def create_submission(payload: SubmissionCreate, background: BackgroundTasks):
+async def create_submission(payload: SubmissionCreate, background: BackgroundTasks, request: Request):
     if payload.plan_id not in PLANS:
         raise HTTPException(status_code=400, detail="Invalid plan")
     plan = PLANS[payload.plan_id]
@@ -344,8 +434,11 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
             {"$set": {"submission_id": sub_id, "updated_at": datetime.now(timezone.utc).isoformat()}},
         )
 
-    # Email admin (non-blocking)
+    # Email admin + customer (non-blocking)
+    origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
+    result_url = f"{origin}/result/{sub_id}"
     background.add_task(send_admin_email_sync, doc)
+    background.add_task(send_customer_email_sync, doc, result_url)
 
     return SubmissionOut(
         id=sub_id,
