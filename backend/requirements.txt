@@ -26,3 +26,5 @@ jq>=1.6.0
 typer>=0.9.0
 emergentintegrations==0.2.0
 resend>=2.0.0
+weasyprint>=69.0
+Pillow>=10.0.0

@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, Request, BackgroundTasks, Response
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -20,6 +21,9 @@ from emergentintegrations.payments.stripe.checkout import (
     CheckoutSessionRequest,
 )
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+from design_plan import generate_design_plan
+from pdf_generator import render_design_plan_pdf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -74,6 +78,8 @@ class SubmissionCreate(BaseModel):
     name: Optional[str] = None
     email: EmailStr
     plan_id: str
+    room_type: Optional[str] = None
+    notes: Optional[str] = None
     photos_base64: List[str]  # data URLs or raw base64
     session_id: Optional[str] = None  # for paid plans
 
@@ -85,6 +91,8 @@ class SubmissionOut(BaseModel):
     id: str
     plan_id: str
     status: str
+    room_type: Optional[str] = None
+    pdf_available: bool = False
     results: List[SubmissionPhotoOut]
 
 # ----- Helpers -----
@@ -294,13 +302,42 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
     for b, a in zip(befores, afters):
         results.append({"before": b, "after": a or ""})
 
+    # For Plus/Premium plans — generate the PDF design plan
+    pdf_b64 = ""
+    design_plan: Optional[Dict[str, Any]] = None
+    if plan["pdf"]:
+        try:
+            primary_after = next((r["after"] for r in results if r["after"]), "")
+            design_plan = await generate_design_plan(
+                room_type=payload.room_type,
+                after_image_b64=primary_after or None,
+                user_notes=payload.notes,
+                api_key=EMERGENT_LLM_KEY,
+            )
+            main_img = primary_after or (results[0]["before"] if results else "")
+            additional = [r["after"] or r["before"] for r in results[1:]]
+            pdf_bytes = await asyncio.to_thread(
+                render_design_plan_pdf,
+                plan=design_plan,
+                main_image_b64=main_img,
+                additional_images=additional,
+                user_name=payload.name,
+            )
+            pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        except Exception as e:
+            logger.error(f"PDF generation failed: {e}", exc_info=True)
+
     doc = {
         "id": sub_id,
         "plan_id": payload.plan_id,
         "name": payload.name,
         "email": payload.email,
+        "room_type": payload.room_type,
+        "notes": payload.notes,
         "session_id": payload.session_id,
         "results": results,
+        "design_plan": design_plan,
+        "pdf_base64": pdf_b64,
         "status": "completed",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -320,6 +357,8 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
         id=sub_id,
         plan_id=payload.plan_id,
         status="completed",
+        room_type=payload.room_type,
+        pdf_available=bool(pdf_b64),
         results=[SubmissionPhotoOut(**r) for r in results],
     )
 
@@ -332,7 +371,32 @@ async def get_submission(sub_id: str):
         id=doc["id"],
         plan_id=doc["plan_id"],
         status=doc.get("status", "completed"),
+        room_type=doc.get("room_type"),
+        pdf_available=bool(doc.get("pdf_base64")),
         results=[SubmissionPhotoOut(**r) for r in doc.get("results", [])],
+    )
+
+@api_router.get("/submissions/{sub_id}/pdf")
+async def download_submission_pdf(sub_id: str):
+    doc = await db.submissions.find_one({"id": sub_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if doc.get("plan_id") not in ("plus", "premium"):
+        raise HTTPException(
+            status_code=402,
+            detail="Upgrade to Plus or Premium to unlock your full PDF Design Plan.",
+        )
+    pdf_b64 = doc.get("pdf_base64") or ""
+    if not pdf_b64:
+        raise HTTPException(status_code=404, detail="PDF not yet generated")
+    pdf_bytes = base64.b64decode(pdf_b64)
+    room_key = (doc.get("design_plan") or {}).get("room_key", "Room")
+    room_pretty = (doc.get("room_type") or room_key or "Room").title().replace(" ", "-")
+    filename = f"FlowSpace-{room_pretty}-Design-Plan.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 app.include_router(api_router)

@@ -6,27 +6,12 @@ export default function Footer() {
     >
       <div className="container-app py-12 grid grid-cols-1 md:grid-cols-3 gap-8">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-                aria-hidden="true"
-              >
-                <path d="M3 21V8l9-5 9 5v13" />
-                <path d="M9 21v-7h6v7" />
-              </svg>
-            </span>
-            <span className="brand-mark text-xl">
-              FlowSpace
-              <span className="text-slate-400 font-light">.Solutions</span>
-            </span>
-          </div>
+          <img
+            src="https://customer-assets.emergentagent.com/job_organize-design/artifacts/rb6cf6gu_FlowSpace%20Logo.png"
+            alt="FlowSpace — Clear space. Create flow. Live better."
+            className="h-12 w-auto"
+            data-testid="footer-logo-image"
+          />
           <p className="mt-3 text-sm text-slate-600 max-w-xs">
             Personalized AI-powered organization systems for garages, closets,
             laundry rooms, storage areas, and every space in between.

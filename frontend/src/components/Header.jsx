@@ -19,28 +19,12 @@ export default function Header() {
           className="flex items-center gap-2"
           data-testid="brand-logo-link"
         >
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-5 w-5"
-              aria-hidden="true"
-            >
-              <path d="M3 21V8l9-5 9 5v13" />
-              <path d="M9 21v-7h6v7" />
-            </svg>
-          </span>
-          <span
-            className="brand-mark text-xl sm:text-[22px]"
-            data-testid="brand-wordmark"
-          >
-            FlowSpace
-            <span className="text-slate-400 font-light">.Solutions</span>
-          </span>
+          <img
+            src="https://customer-assets.emergentagent.com/job_organize-design/artifacts/rb6cf6gu_FlowSpace%20Logo.png"
+            alt="FlowSpace.Solutions — Clear space. Create flow. Live better."
+            className="h-10 sm:h-11 w-auto"
+            data-testid="brand-logo-image"
+          />
         </Link>
 
         <nav className="hidden md:flex items-center gap-7" data-testid="site-nav">

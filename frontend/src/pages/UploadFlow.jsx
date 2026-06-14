@@ -26,6 +26,8 @@ export default function UploadFlow() {
   const [plan, setPlan] = useState(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [roomType, setRoomType] = useState("");
+  const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]); // { dataUrl, file }
   const [submitting, setSubmitting] = useState(false);
 
@@ -84,6 +86,8 @@ export default function UploadFlow() {
         name: name || null,
         email,
         plan_id: planId,
+        room_type: roomType || null,
+        notes: notes || null,
         photos_base64: photos.map((p) => p.dataUrl),
         session_id: sessionId || null,
       });
@@ -253,6 +257,42 @@ export default function UploadFlow() {
                     data-testid="upload-email-input"
                   />
                 </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600">
+                    Room type
+                  </label>
+                  <select
+                    value={roomType}
+                    onChange={(e) => setRoomType(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    data-testid="upload-roomtype-input"
+                  >
+                    <option value="">Choose a room…</option>
+                    <option value="bedroom">Bedroom</option>
+                    <option value="garage">Garage</option>
+                    <option value="closet">Closet</option>
+                    <option value="laundry">Laundry room</option>
+                    <option value="kitchen">Kitchen / Pantry</option>
+                    <option value="living">Living room</option>
+                    <option value="office">Home office</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                {plan.pdf && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">
+                      Notes (optional)
+                    </label>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      rows={2}
+                      placeholder="e.g. coastal calm, budget around $200, two kids"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      data-testid="upload-notes-input"
+                    />
+                  </div>
+                )}
               </div>
 
               <button
