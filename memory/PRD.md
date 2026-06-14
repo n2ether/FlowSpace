@@ -27,13 +27,17 @@ Rebuild FlowSpace.Solutions — an AI-powered room organization service. Users u
 
 ## What's Been Implemented (2026-06-14)
 - Full responsive landing page with sticky header, hero before/after slider, value grid, 3-step "how it works", pricing cards (Free/Plus/Premium), filtered gallery with sliders, who-it's-for grid, FAQ accordion, CTA banner, footer.
-- Plan-based upload flow with drag-and-drop, previews, remove/replace, name + email capture.
+- Plan-based upload flow with drag-and-drop, previews, remove/replace, name + email capture, **room type selector**, **notes textarea (Plus/Premium)**.
 - Stripe one-time checkout for Plus ($10) and Premium ($20); free plan goes directly to upload.
 - Success page polls `/api/checkout/status` and redirects to upload only when paid.
 - Backend AI generation pipeline (Gemini Nano Banana, image-to-image, parallel per-photo).
-- Result page renders each photo as a before/after slider; PDF placeholder copy for Plus/Premium.
+- Result page renders each photo as a before/after slider.
 - Resend email notification to `contact@flowspace.solutions` on every submission (background task).
-- 14/14 backend pytest cases passing; end-to-end frontend flows verified by Playwright.
+- **(Iteration 2) Replaced inline SVG logo with the official FlowSpace logo image in the header and footer.**
+- **(Iteration 2) Full PDF Design Plan generator (Plus/Premium only): landscape one-page deliverable with logo, title, design keywords, summary, sage-green "Designed for how you live" badge, main 3D visual with green label, room needs sidebar (6 items, colored icons), floor plan (top-view SVG with dimensions), room layout & zones (numbered), wall color suggestion + swatch, shopping list table with subtotals + estimated total, green budget range box, additional views row (Plus up to 3, Premium up to 4), and three strategy cards (DESIGN STRATEGY / SIMPLE ACTION PLAN / BENEFITS). Built with WeasyPrint, content powered by Claude Sonnet 4.5 via emergentintegrations with sensible per-room defaults as fallback.**
+- **(Iteration 2) `GET /api/submissions/{id}/pdf` endpoint: returns the PDF with filename `FlowSpace-<RoomType>-Design-Plan.pdf` for Plus/Premium; returns 402 + upgrade copy for Free plan.**
+- **(Iteration 2) Result page now shows "Download My Design Plan" button + ready panel for Plus/Premium, and upgrade prompt panel for Free plan.**
+- Backend pytest 21/21 PASS (14 regression + 7 new PDF flow tests); end-to-end frontend flows verified.
 
 ## Prioritized Backlog
 ### P0 — Blockers for production

@@ -9,7 +9,6 @@ import io
 import logging
 from typing import Any, Dict, List, Optional
 
-from PIL import Image
 from weasyprint import HTML, CSS
 
 logger = logging.getLogger(__name__)

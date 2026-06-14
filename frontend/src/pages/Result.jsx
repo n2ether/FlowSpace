@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
+import { toast } from "sonner";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
@@ -43,6 +44,10 @@ export default function Result() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
+      const msg = e?.response?.status === 402
+        ? "Upgrade to Plus or Premium to unlock your full PDF Design Plan."
+        : "Could not download the PDF — please try again in a moment.";
+      toast.error(msg);
     } finally {
       setDownloading(false);
     }
