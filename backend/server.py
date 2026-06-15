@@ -80,6 +80,7 @@ class SubmissionCreate(BaseModel):
     plan_id: str
     room_type: Optional[str] = None
     notes: Optional[str] = None
+    budget: Optional[str] = None  # e.g. "$100 – $300"
     photos_base64: List[str]  # data URLs or raw base64
     session_id: Optional[str] = None  # for paid plans
 
@@ -129,6 +130,26 @@ async def generate_after_image(before_b64: str) -> Optional[str]:
         logger.error(f"Gemini generation failed: {e}")
     return None
 
+def _photo_attachments(submission: Dict[str, Any]) -> list:
+    """Return each AI-generated 'after' image (and the 'before' if no after) as a PNG attachment."""
+    attachments = []
+    room = (submission.get("room_type") or "Room").title().replace(" ", "-")
+    for i, r in enumerate(submission.get("results", []), 1):
+        # Prefer the AI-generated organized version
+        after = (r or {}).get("after")
+        if after:
+            attachments.append({
+                "filename": f"FlowSpace-{room}-Organized-Photo-{i}.png",
+                "content": after,
+            })
+        elif r and r.get("before"):
+            attachments.append({
+                "filename": f"FlowSpace-{room}-Photo-{i}.png",
+                "content": r["before"],
+            })
+    return attachments
+
+
 def send_admin_email_sync(submission: Dict[str, Any]) -> None:
     plan = PLANS.get(submission["plan_id"], {})
     rows = ""
@@ -144,12 +165,12 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
         )
 
     pdf_note = ""
-    attachments = []
+    attachments = _photo_attachments(submission)
     if submission.get("pdf_base64"):
         room = submission.get("room_type") or "Room"
         room_pretty = room.title().replace(" ", "-")
         filename = f"FlowSpace-{room_pretty}-Design-Plan.pdf"
-        attachments = [{"filename": filename, "content": submission["pdf_base64"]}]
+        attachments.insert(0, {"filename": filename, "content": submission["pdf_base64"]})
         pdf_note = (
             f"<p style='margin:14px 0 0;color:#047857;font-weight:600'>"
             f"PDF Design Plan attached: {filename}</p>"
@@ -164,6 +185,7 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
         <tr><td><strong>Customer email:</strong> {submission.get('email')}</td></tr>
         <tr><td><strong>Plan:</strong> {plan.get('name', submission.get('plan_id'))}</td></tr>
         <tr><td><strong>Room type:</strong> {submission.get('room_type') or '—'}</td></tr>
+        <tr><td><strong>Budget:</strong> {submission.get('budget') or '—'}</td></tr>
         <tr><td><strong>Photos:</strong> {len(submission.get('results', []))}</td></tr>
         <tr><td><strong>Notes:</strong> {submission.get('notes') or '—'}</td></tr>
         <tr><td><strong>Submitted:</strong> {submission.get('created_at')}</td></tr>
@@ -197,22 +219,29 @@ def send_customer_email_sync(submission: Dict[str, Any], result_url: str) -> Non
     if not customer_email:
         return
 
-    attachments = []
+    attachments = _photo_attachments(submission)
     pdf_block = ""
     if submission.get("pdf_base64"):
         room = submission.get("room_type") or "Room"
         room_pretty = room.title().replace(" ", "-")
         filename = f"FlowSpace-{room_pretty}-Design-Plan.pdf"
-        attachments = [{"filename": filename, "content": submission["pdf_base64"]}]
+        attachments.insert(0, {"filename": filename, "content": submission["pdf_base64"]})
         pdf_block = (
             "<p style='margin:16px 0 8px;font-weight:600;color:#047857'>"
-            f"Your custom PDF Design Plan ({filename}) is attached to this email."
+            f"Your custom PDF Design Plan ({filename}) and {len(submission.get('results', []))} organized "
+            "photo(s) are attached to this email."
             "</p>"
         )
     elif plan.get("pdf"):
         pdf_block = (
             "<p style='margin:16px 0 8px;color:#92400e'>"
             "Your PDF Design Plan will be ready shortly — check back on the link below."
+            "</p>"
+        )
+    elif attachments:
+        pdf_block = (
+            "<p style='margin:16px 0 8px;color:#475569'>"
+            f"Your {len(submission.get('results', []))} AI-organized photo(s) are attached."
             "</p>"
         )
 
@@ -398,6 +427,7 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
                 room_type=payload.room_type,
                 after_image_b64=primary_after or None,
                 user_notes=payload.notes,
+                budget=payload.budget,
                 api_key=EMERGENT_LLM_KEY,
             )
             main_img = primary_after or (results[0]["before"] if results else "")
@@ -420,6 +450,7 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
         "email": payload.email,
         "room_type": payload.room_type,
         "notes": payload.notes,
+        "budget": payload.budget,
         "session_id": payload.session_id,
         "results": results,
         "design_plan": design_plan,

@@ -401,6 +401,7 @@ async def generate_design_plan(
     room_type: Optional[str],
     after_image_b64: Optional[str] = None,
     user_notes: Optional[str] = None,
+    budget: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Generate (and return) the structured design-plan dict for the PDF.
@@ -415,9 +416,24 @@ async def generate_design_plan(
         "title": f"{ROOM_LABEL[rt]} {ROOM_TITLE_SUFFIX[rt]}",
         **base,
     }
+    if budget:
+        plan["budget_range"] = budget
 
     if not api_key:
         return plan
+
+    # Approximate target spend for the shopping list (midpoint of the budget range)
+    target_total: Optional[int] = None
+    if budget:
+        nums = re.findall(r"\d[\d,]*", budget.replace(",", ""))
+        try:
+            nums_i = [int(n) for n in nums]
+            if len(nums_i) >= 2:
+                target_total = (nums_i[0] + nums_i[1]) // 2
+            elif nums_i:
+                target_total = nums_i[0]
+        except Exception:
+            target_total = None
 
     schema_hint = {
         "keywords": ["WORD1", "WORD2", "WORD3"],
@@ -438,11 +454,17 @@ async def generate_design_plan(
         "design plans. Reply with ONLY a JSON object matching the schema. "
         "Keep language warm, simple, premium. No emojis. No markdown fences."
     )
+    budget_line = (
+        f"Customer budget: {budget}. Build a 5-item shopping list whose subtotal "
+        f"is around ${target_total} (must NOT exceed the top of the range). "
+        if budget and target_total
+        else "Use practical, mid-range USD pricing for the 5-item shopping list. "
+    )
     user_text = (
         f"Room type: {plan['room_label']} ({rt}).\n"
         f"User notes: {user_notes or 'none'}.\n"
-        "Generate plan content fitting this room with practical USD prices for the "
-        "shopping list (5 items total). Use the same JSON shape as this example "
+        f"{budget_line}"
+        "Use the same JSON shape as this example "
         f"(values shown are placeholders, replace with your own): {json.dumps(schema_hint)}"
     )
 
@@ -501,6 +523,21 @@ def _merge_plan(plan: Dict[str, Any], data: Dict[str, Any]) -> None:
                 continue
         if cleaned:
             plan["shopping"] = cleaned
+
+    # Hard-clamp the total to the budget top so the PDF never overshoots
+    budget_str = plan.get("budget_range", "") or ""
+    nums = re.findall(r"\d[\d,]*", budget_str.replace(",", ""))
+    if nums:
+        try:
+            cap = int(nums[-1]) if len(nums) >= 2 else int(nums[0])
+            total = sum(int(it.get("qty", 1) or 1) * float(it.get("price", 0) or 0)
+                        for it in plan["shopping"])
+            if total > cap and total > 0:
+                factor = cap / total
+                for it in plan["shopping"]:
+                    it["price"] = max(5, round(float(it["price"]) * factor))
+        except Exception:
+            pass
 
     for key in ("strategy", "action_plan", "benefits"):
         val = data.get(key)

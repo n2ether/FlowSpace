@@ -5,6 +5,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import BudgetModal from "@/components/BudgetModal";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -30,6 +31,7 @@ export default function UploadFlow() {
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState([]); // { dataUrl, file }
   const [submitting, setSubmitting] = useState(false);
+  const [showBudget, setShowBudget] = useState(false);
 
   useEffect(() => {
     axios.get(`${API}/plans`).then((r) => {
@@ -73,9 +75,13 @@ export default function UploadFlow() {
     setPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!email) return toast.error("Please enter your email");
     if (photos.length === 0) return toast.error("Upload at least one photo");
+    setShowBudget(true);
+  };
+
+  const handleConfirmBudget = async (budget) => {
     try {
       setSubmitting(true);
       toast.info("Generating your AI transformation… this can take 20–60s.");
@@ -85,6 +91,7 @@ export default function UploadFlow() {
         plan_id: planId,
         room_type: roomType || null,
         notes: notes || null,
+        budget: budget || null,
         photos_base64: photos.map((p) => p.dataUrl),
         session_id: sessionId || null,
       });
@@ -94,6 +101,7 @@ export default function UploadFlow() {
       const msg = e?.response?.data?.detail || "Could not submit. Please try again.";
       toast.error(msg);
       setSubmitting(false);
+      setShowBudget(false);
     }
   };
 
@@ -308,6 +316,12 @@ export default function UploadFlow() {
         </div>
       </main>
       <Footer />
+      <BudgetModal
+        open={showBudget}
+        submitting={submitting}
+        onClose={() => !submitting && setShowBudget(false)}
+        onConfirm={handleConfirmBudget}
+      />
     </div>
   );
 }
