@@ -174,7 +174,7 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
     </div>
     """
     params = {
-        "from": SENDER_EMAIL,
+        "from": f"FlowSpace <{SENDER_EMAIL}>",
         "to": [ADMIN_EMAIL],
         "subject": f"New {plan.get('name', 'FlowSpace')} submission from {submission.get('email')}",
         "html": html,
@@ -189,11 +189,13 @@ def send_admin_email_sync(submission: Dict[str, Any]) -> None:
 
 def send_customer_email_sync(submission: Dict[str, Any], result_url: str) -> None:
     """Sends the customer their AI transformation summary (+ PDF for paid plans).
-    In Resend test mode this still goes to the verified ADMIN_EMAIL — the
-    intended recipient is shown in the subject + body so it's clearly visible."""
+    Customer is the primary recipient; ADMIN_EMAIL is BCC'd for record-keeping."""
     plan = PLANS.get(submission["plan_id"], {})
     customer_email = submission.get("email", "")
     name = submission.get("name") or "there"
+
+    if not customer_email:
+        return
 
     attachments = []
     pdf_block = ""
@@ -245,11 +247,11 @@ def send_customer_email_sync(submission: Dict[str, Any], result_url: str) -> Non
       </p>
     </div>
     """
-    subject_target = f" (for {customer_email})" if customer_email else ""
     params = {
-        "from": SENDER_EMAIL,
-        "to": [ADMIN_EMAIL],  # test mode — Resend only allows verified address
-        "subject": f"Your FlowSpace {plan.get('name','')} transformation{subject_target}",
+        "from": f"FlowSpace <{SENDER_EMAIL}>",
+        "to": [customer_email],
+        "bcc": [ADMIN_EMAIL] if ADMIN_EMAIL and ADMIN_EMAIL.lower() != customer_email.lower() else [],
+        "subject": f"Your FlowSpace {plan.get('name','')} transformation is ready",
         "html": html,
     }
     if attachments:
