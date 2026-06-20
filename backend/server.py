@@ -92,9 +92,12 @@ class SubmissionPhotoOut(BaseModel):
 class SubmissionOut(BaseModel):
     id: str
     plan_id: str
-    status: str
+    status: str  # "pending" | "processing" | "completed" | "failed"
     room_type: Optional[str] = None
     pdf_available: bool = False
+    photos_total: int = 0
+    photos_done: int = 0
+    error: Optional[str] = None
     results: List[SubmissionPhotoOut]
 
 # ----- Helpers -----
@@ -423,8 +426,95 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Webhook handling failed")
     return {"received": True}
 
+async def _process_submission(sub_id: str, payload: SubmissionCreate, origin: str) -> None:
+    """Background worker — runs after POST /api/submissions has already returned.
+    Fills in AI 'after' images, PDF (Plus/Premium), then sends notification emails."""
+    try:
+        await db.submissions.update_one(
+            {"id": sub_id},
+            {"$set": {"status": "processing"}},
+        )
+
+        plan = PLANS[payload.plan_id]
+        befores = [strip_data_url(p) for p in payload.photos_base64]
+
+        # Generate each AI 'after' sequentially so we can update progress between photos
+        results: List[Dict[str, str]] = []
+        for idx, before in enumerate(befores):
+            after = await generate_after_image(before)
+            results.append({"before": before, "after": after or ""})
+            await db.submissions.update_one(
+                {"id": sub_id},
+                {"$set": {"results": results, "photos_done": idx + 1}},
+            )
+
+        # PDF for paid plans
+        pdf_b64 = ""
+        design_plan: Optional[Dict[str, Any]] = None
+        if plan["pdf"]:
+            try:
+                primary_after = next((r["after"] for r in results if r["after"]), "")
+                design_plan = await generate_design_plan(
+                    room_type=payload.room_type,
+                    after_image_b64=primary_after or None,
+                    user_notes=payload.notes,
+                    budget=payload.budget,
+                    api_key=EMERGENT_LLM_KEY,
+                )
+                main_img = primary_after or (results[0]["before"] if results else "")
+                additional = [r["after"] or r["before"] for r in results[1:]]
+                pdf_bytes = await asyncio.to_thread(
+                    render_design_plan_pdf,
+                    plan=design_plan,
+                    main_image_b64=main_img,
+                    additional_images=additional,
+                    user_name=payload.name,
+                )
+                pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+            except Exception as e:
+                logger.error(f"PDF generation failed: {e}", exc_info=True)
+
+        # Final write — mark completed
+        final_set = {
+            "status": "completed",
+            "design_plan": design_plan,
+            "pdf_base64": pdf_b64,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.submissions.update_one({"id": sub_id}, {"$set": final_set})
+
+        # Mark payment transaction as used (kept for future paid-flow re-enable)
+        if payload.session_id:
+            await db.payment_transactions.update_one(
+                {"session_id": payload.session_id},
+                {"$set": {"submission_id": sub_id,
+                          "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+
+        # Send emails (sync resend calls — already non-blocking from caller's perspective)
+        doc = await db.submissions.find_one({"id": sub_id}, {"_id": 0})
+        if doc:
+            try:
+                send_admin_email_sync(doc)
+            except Exception as e:
+                logger.error(f"admin email failed: {e}")
+            try:
+                send_customer_email_sync(doc, f"{origin.rstrip('/')}/result/{sub_id}")
+            except Exception as e:
+                logger.error(f"customer email failed: {e}")
+
+    except Exception as e:
+        logger.error(f"Submission processing crashed: {e}", exc_info=True)
+        await db.submissions.update_one(
+            {"id": sub_id},
+            {"$set": {"status": "failed", "error": str(e)[:300]}},
+        )
+
+
 @api_router.post("/submissions", response_model=SubmissionOut)
-async def create_submission(payload: SubmissionCreate, background: BackgroundTasks, request: Request):
+async def create_submission(payload: SubmissionCreate, request: Request):
+    """Creates a pending submission and kicks off AI processing in the background.
+    Returns IMMEDIATELY — frontend polls /api/submissions/{id} for progress."""
     if payload.plan_id not in PLANS:
         raise HTTPException(status_code=400, detail="Invalid plan")
     plan = PLANS[payload.plan_id]
@@ -435,42 +525,10 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
 
     # If paid plan, payment verification is currently bypassed —
     # all plans (Free, Plus, Premium) can submit without a paid session.
-    # (Stripe checkout flow remains in place but is unused from the UI.)
 
     sub_id = str(uuid.uuid4())
-    results: List[Dict[str, str]] = []
-
-    # Generate AI transformation for each photo (in parallel)
     befores = [strip_data_url(p) for p in payload.photos_base64]
-    afters = await asyncio.gather(*(generate_after_image(b) for b in befores))
-    for b, a in zip(befores, afters):
-        results.append({"before": b, "after": a or ""})
-
-    # For Plus/Premium plans — generate the PDF design plan
-    pdf_b64 = ""
-    design_plan: Optional[Dict[str, Any]] = None
-    if plan["pdf"]:
-        try:
-            primary_after = next((r["after"] for r in results if r["after"]), "")
-            design_plan = await generate_design_plan(
-                room_type=payload.room_type,
-                after_image_b64=primary_after or None,
-                user_notes=payload.notes,
-                budget=payload.budget,
-                api_key=EMERGENT_LLM_KEY,
-            )
-            main_img = primary_after or (results[0]["before"] if results else "")
-            additional = [r["after"] or r["before"] for r in results[1:]]
-            pdf_bytes = await asyncio.to_thread(
-                render_design_plan_pdf,
-                plan=design_plan,
-                main_image_b64=main_img,
-                additional_images=additional,
-                user_name=payload.name,
-            )
-            pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
-        except Exception as e:
-            logger.error(f"PDF generation failed: {e}", exc_info=True)
+    initial_results = [{"before": b, "after": ""} for b in befores]
 
     doc = {
         "id": sub_id,
@@ -481,34 +539,30 @@ async def create_submission(payload: SubmissionCreate, background: BackgroundTas
         "notes": payload.notes,
         "budget": payload.budget,
         "session_id": payload.session_id,
-        "results": results,
-        "design_plan": design_plan,
-        "pdf_base64": pdf_b64,
-        "status": "completed",
+        "results": initial_results,
+        "design_plan": None,
+        "pdf_base64": "",
+        "status": "pending",
+        "photos_total": len(befores),
+        "photos_done": 0,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.submissions.insert_one(doc)
 
-    # Mark txn as used
-    if payload.session_id:
-        await db.payment_transactions.update_one(
-            {"session_id": payload.session_id},
-            {"$set": {"submission_id": sub_id, "updated_at": datetime.now(timezone.utc).isoformat()}},
-        )
-
-    # Email admin + customer (non-blocking)
+    # Fire-and-forget background task — POST returns immediately so the
+    # browser never waits >1s and the ingress timeout never trips.
     origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
-    result_url = f"{origin}/result/{sub_id}"
-    background.add_task(send_admin_email_sync, doc)
-    background.add_task(send_customer_email_sync, doc, result_url)
+    asyncio.create_task(_process_submission(sub_id, payload, origin))
 
     return SubmissionOut(
         id=sub_id,
         plan_id=payload.plan_id,
-        status="completed",
+        status="pending",
         room_type=payload.room_type,
-        pdf_available=bool(pdf_b64),
-        results=[SubmissionPhotoOut(**r) for r in results],
+        pdf_available=False,
+        photos_total=len(befores),
+        photos_done=0,
+        results=[SubmissionPhotoOut(**r) for r in initial_results],
     )
 
 @api_router.get("/submissions/{sub_id}", response_model=SubmissionOut)
@@ -522,6 +576,9 @@ async def get_submission(sub_id: str):
         status=doc.get("status", "completed"),
         room_type=doc.get("room_type"),
         pdf_available=bool(doc.get("pdf_base64")),
+        photos_total=int(doc.get("photos_total") or len(doc.get("results", []))),
+        photos_done=int(doc.get("photos_done") or 0),
+        error=doc.get("error"),
         results=[SubmissionPhotoOut(**r) for r in doc.get("results", [])],
     )
 

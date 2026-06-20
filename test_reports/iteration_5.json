@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 5 — async submission refactor verified end-to-end. Backend: 12/12 pytest cases pass in 60.7s (test_iter5_async_submissions.py). POST /api/submissions returns in well under 5s (measured ~0.4-1.0s) with status='pending', photos_total=N, photos_done=0, pdf_available=false. Polling GET shows pending→processing→completed; pdf_available flips to true only after the last photo and PDF generation completes. Final Plus submission has all results.after as non-empty base64 PNGs (>1KB) and GET /api/submissions/{id}/pdf returns application/pdf >5KB. Unknown id returns 404 on both /api/submissions/{id} and /api/submissions/{id}/pdf. Regression on /api/plans and /api/checkout/session (plus+premium accepted, free rejected) still passes. Frontend e2e on /upload/plus: filled email + 'bedroom' select + 1x1 PNG → Transform → budget modal → '$100 – $300' → 'Confirm & generate my plan' → navigated to /result/{id} in ~2s → progress card visible (data-testid='result-progress-card', pct '0%' → '85%') → completion observed at ~40s → before/after slider rendered, 'Download My Design Plan' button visible. /result/non-existent-id-test renders the exact copy 'We couldn\\'t find that submission. It may have expired.' inside [data-testid=result-error]. Landing-page regression: cluttered_garage/closet/laundry images all present, 5 FAQ items, 4 gallery filter buttons. All review_request criteria met.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/result/{non-existent-id}",
+        "issues": ["H1 heading reads 'Loading…' while the red error 'We couldn\\'t find that submission…' is shown below — heading should switch to e.g. 'We couldn\\'t find that.' when err is set so the page state is consistent. Minor UX nit."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter5_async_submissions.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Tweak Result.jsx h1 to render an error-specific heading when err is set instead of 'Loading…'.",
+    "(Optional, perf) generate_after_image is called sequentially inside _process_submission. Premium (4 photos) will take ~2-4 min wall-clock. Consider asyncio.gather with a semaphore=2 to cut latency while protecting GPT Image 1 rate limits.",
+    "(Optional, robustness) Add a watchdog/cleanup task: if a 'pending' submission stays untouched for >10 min (e.g., container restart), mark it 'failed' so the UI stops polling forever."
+  ],
+  "critical_code_review_comments": [
+    "server.py:555 uses asyncio.create_task(...) without keeping a strong reference. CPython may GC the task — see PEP 661 / asyncio docs. Recommend storing tasks in a module-level set and adding done-callback for removal, OR using FastAPI BackgroundTasks. In practice uvicorn keeps a strong reference internally for now but this is a known footgun.",
+    "server.py:_process_submission: if the backend process restarts mid-processing, the submission is stuck in 'processing' forever — no resume/timeout logic. Add a TTL or status reaper.",
+    "server.py:548 — initial doc stores full base64 before-images in Mongo immediately; for Premium with 4 photos that can exceed Mongo's 16MB doc limit once 'after' images are appended. Plan to move binaries to GridFS or object storage.",
+    "Result.jsx:33 — when MAX_WAIT_MS (8 min) elapses without completion, polling stops silently but UI stays on 'Working on your transformation…' indefinitely. Show a soft-timeout fallback message.",
+    "Result.jsx h1 condition cascade doesn't account for `err` state — when error is set, h1 still shows 'Loading…' (see design_issues above)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter5_async_submissions.py",
+    "/app/test_reports/iteration_5.json",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12)",
+    "frontend": "100% (e2e Plus flow, 404 copy, gallery+FAQ regression)"
+  },
+  "test_credentials": "n/a — no auth in this app.",
+  "seed_data_creation": "Created real submissions in Mongo with TEST_iter5_* prefixed emails (free, plus). Each consumed a real GPT Image 1 generation + Claude PDF design plan. Plus submission generated a >5KB PDF.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter5 verified the async submission refactor. POST returns in ~0.4-1.0s with status='pending'. Background asyncio.create_task runs _process_submission which sequentially generates per-photo AI 'after' images (updating photos_done after each) and finally renders the PDF for paid plans. Result.jsx polls every 3.5s. Hot reload picks up server.py edits automatically. Test fixture uses load_dotenv on /app/frontend/.env to fetch REACT_APP_BACKEND_URL. The full Plus 1-photo flow completes in ~30-45s wall-clock; use TIMEOUT >= 240s for tests. Notable code review items above (esp. asyncio.create_task strong-ref + missing watchdog for stuck 'processing' docs) are not blocking iter5 but should be queued.",
+  "rca of the issue": "n/a — no failures."
+}

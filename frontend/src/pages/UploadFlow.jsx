@@ -95,7 +95,7 @@ export default function UploadFlow() {
         photos_base64: photos.map((p) => p.dataUrl),
         session_id: sessionId || null,
       });
-      toast.success("Done! Here's your transformation.");
+      toast.success("Submission received — we're generating your transformation…");
       navigate(`/result/${res.data.id}`);
     } catch (e) {
       const msg = e?.response?.data?.detail || "Could not submit. Please try again.";
