@@ -112,7 +112,9 @@ export default function Result() {
               {completed ? "Your transformation" : inProgress ? "Generating…" : "Result"}
             </span>
             <h1 className="mt-3 font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-              {completed
+              {err
+                ? "We couldn\u2019t find that."
+                : completed
                 ? "Here\u2019s your space, reorganized."
                 : inProgress
                 ? "Working on your transformation…"

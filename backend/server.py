@@ -50,6 +50,10 @@ resend.api_key = RESEND_API_KEY
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
+# Keep strong references to in-flight background tasks so the event loop
+# doesn't garbage-collect them mid-run (CPython asyncio footgun).
+_BG_TASKS: set = set()
+
 # ----- Pricing (server-side only) -----
 PLANS: Dict[str, Dict[str, Any]] = {
     "free":    {"name": "Free",    "price": 0.0,  "max_photos": 2, "pdf": False},
@@ -552,7 +556,9 @@ async def create_submission(payload: SubmissionCreate, request: Request):
     # Fire-and-forget background task — POST returns immediately so the
     # browser never waits >1s and the ingress timeout never trips.
     origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
-    asyncio.create_task(_process_submission(sub_id, payload, origin))
+    task = asyncio.create_task(_process_submission(sub_id, payload, origin))
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
 
     return SubmissionOut(
         id=sub_id,
