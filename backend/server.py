@@ -21,6 +21,7 @@ from emergentintegrations.payments.stripe.checkout import (
     CheckoutSessionRequest,
 )
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from emergentintegrations.llm.openai.image_generation import OpenAIImageGeneration
 
 from design_plan import generate_design_plan
 from pdf_generator import render_design_plan_pdf
@@ -102,32 +103,60 @@ def strip_data_url(b64: str) -> str:
         return b64.split(",", 1)[1]
     return b64
 
-async def generate_after_image(before_b64: str) -> Optional[str]:
-    """Use Gemini Nano Banana image-to-image to produce an organized version."""
+async def _describe_room(before_b64: str) -> str:
+    """Use Claude vision to produce a short description of the user's room
+    that we can hand to a text-to-image model. Falls back to a generic prompt."""
     try:
-        prompt = (
-            "Reimagine this exact same room from the same camera angle, but completely "
-            "decluttered, clean, and professionally organized. Add tasteful labeled "
-            "storage bins, neat shelving, clear floor space, neatly folded items, and "
-            "good lighting. Keep the room's architecture and furniture footprint the "
-            "same. Photorealistic, magazine-quality, bright and airy."
-        )
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
-            session_id=f"floorspace-{uuid.uuid4()}",
-            system_message="You are an interior organization designer that transforms cluttered rooms.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(
-            modalities=["image", "text"]
-        )
+            session_id=f"describe-{uuid.uuid4()}",
+            system_message=(
+                "You describe rooms for an interior-design image generator. "
+                "Reply with 2 short sentences ONLY: (1) room type + layout + "
+                "key architectural features (walls, windows, flooring, lighting), "
+                "(2) the most prominent furniture and built-ins visible. "
+                "No clutter descriptions. No people. No brand names."
+            ),
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
         msg = UserMessage(
-            text=prompt,
+            text="Describe this room briefly so an image generator can recreate it organized.",
             file_contents=[ImageContent(strip_data_url(before_b64))],
         )
-        _text, images = await chat.send_message_multimodal_response(msg)
-        if images:
-            return images[0]["data"]  # base64
+        response = await chat.send_message(msg)
+        text = response if isinstance(response, str) else str(response)
+        return text.strip()[:700]
     except Exception as e:
-        logger.error(f"Gemini generation failed: {e}")
+        logger.warning(f"Room description failed, using generic prompt: {e}")
+        return "A residential room with neutral walls and standard fixtures."
+
+
+async def generate_after_image(before_b64: str) -> Optional[str]:
+    """Generate a photorealistic 'organized' version of the user's room using
+    GPT Image 1. Pipeline: Claude vision describes the room → GPT Image 1
+    renders the organized version from that description."""
+    try:
+        description = await _describe_room(before_b64)
+        prompt = (
+            f"{description} "
+            "Photorealistic interior photograph of THIS SAME room, completely "
+            "decluttered, professionally organized, and beautifully styled. "
+            "Add tasteful matching storage bins with labels, neat shelving, clear "
+            "floor space, neatly folded or hung items, and warm natural lighting. "
+            "Preserve the room's architecture (walls, windows, doors, flooring) and "
+            "general furniture footprint. Magazine-quality, bright, airy, calm, "
+            "inviting. No people. No text overlays."
+        )
+        img_gen = OpenAIImageGeneration(api_key=EMERGENT_LLM_KEY)
+        images = await img_gen.generate_images(
+            prompt=prompt,
+            model="gpt-image-1",
+            number_of_images=1,
+            quality="medium",
+        )
+        if images:
+            return base64.b64encode(images[0]).decode("ascii")
+    except Exception as e:
+        logger.error(f"GPT Image 1 generation failed: {e}", exc_info=True)
     return None
 
 def _photo_attachments(submission: Dict[str, Any]) -> list:

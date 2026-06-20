@@ -16,7 +16,7 @@ const GALLERY = [
     category: "Garage",
     title: "From chaos garage to flow",
     before:
-      "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1400&q=80",
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/iynilrc8_cluttered_garage.png",
     after:
       "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/9sy0qc1i_organized_garage.png",
   },
@@ -25,7 +25,7 @@ const GALLERY = [
     category: "Closet",
     title: "Closet, calmed",
     before:
-      "https://images.unsplash.com/photo-1582738411706-bfc8e691d1c2?auto=format&fit=crop&w=1400&q=80",
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/9qy6to10_cluttered_closet.png",
     after:
       "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/l8r8pdii_tidy_closet.png",
   },
@@ -34,7 +34,7 @@ const GALLERY = [
     category: "Laundry",
     title: "A laundry room that breathes",
     before:
-      "https://images.unsplash.com/photo-1626806787461-102c1bfaaea1?auto=format&fit=crop&w=1400&q=80",
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/z2z93f26_cluttered_laundry_room.png",
     after:
       "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/dlxnx33a_tidy_laundry_room.png",
   },
