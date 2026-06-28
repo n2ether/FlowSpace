@@ -414,6 +414,11 @@ async def root():
 async def get_plans():
     return PLANS
 
+@api_router.get("/config")
+async def get_config():
+    """Public, non-secret runtime config (used by frontend to toggle dev-only UI)."""
+    return {"dev_login_enabled": bool(DEV_LOGIN_PASSWORD)}
+
 # ===== AUTH =====
 @api_router.post("/auth/session")
 async def auth_session(request: Request, response: Response,

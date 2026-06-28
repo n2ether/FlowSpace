@@ -1,4 +1,27 @@
+import { useEffect, useState } from "react";
+import axios from "axios";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
+
 export default function Footer() {
+  const [devLoginEnabled, setDevLoginEnabled] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios
+      .get(`${API}/config`)
+      .then((r) => {
+        if (!cancelled) setDevLoginEnabled(!!r.data?.dev_login_enabled);
+      })
+      .catch(() => {
+        /* ignore — link just stays hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <footer
       className="border-t border-slate-200 bg-slate-50"
@@ -82,13 +105,15 @@ export default function Footer() {
             into clean.
           </p>
           <div className="flex items-center gap-4">
-            <a
-              href="/dev/login"
-              className="text-slate-400 hover:text-emerald-600"
-              data-testid="footer-dev-login-link"
-            >
-              Sign in for testing
-            </a>
+            {devLoginEnabled && (
+              <a
+                href="/dev/login"
+                className="text-slate-400 hover:text-emerald-600"
+                data-testid="footer-dev-login-link"
+              >
+                Sign in for testing
+              </a>
+            )}
             <p>Made with care for real homes.</p>
           </div>
         </div>
