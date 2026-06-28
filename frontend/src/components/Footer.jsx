@@ -81,7 +81,16 @@ export default function Footer() {
             © {new Date().getFullYear()} FlowSpace.Solutions — Turn cluttered
             into clean.
           </p>
-          <p>Made with care for real homes.</p>
+          <div className="flex items-center gap-4">
+            <a
+              href="/dev/login"
+              className="text-slate-400 hover:text-emerald-600"
+              data-testid="footer-dev-login-link"
+            >
+              Sign in for testing
+            </a>
+            <p>Made with care for real homes.</p>
+          </div>
         </div>
       </div>
     </footer>
