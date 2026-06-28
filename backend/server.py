@@ -46,6 +46,7 @@ EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 SENDER_EMAIL = os.environ["SENDER_EMAIL"]
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
+DEV_LOGIN_PASSWORD = os.environ.get("DEV_LOGIN_PASSWORD", "")
 
 resend.api_key = RESEND_API_KEY
 
@@ -496,6 +497,61 @@ async def auth_logout(request: Request, response: Response):
         await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="none", secure=True)
     return {"ok": True}
+
+
+class DevLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+@api_router.post("/auth/dev-login")
+async def auth_dev_login(payload: DevLoginRequest, response: Response):
+    """Dev-only username/password login for workflow testing.
+    Disabled unless DEV_LOGIN_PASSWORD env var is set (i.e. preview only)."""
+    if not DEV_LOGIN_PASSWORD:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not secrets.compare_digest(payload.password, DEV_LOGIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Invalid dev credentials")
+
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": email,
+            "name": email.split("@")[0].replace(".", " ").title(),
+            "picture": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login_at": datetime.now(timezone.utc).isoformat(),
+        })
+        user = await db.users.find_one({"email": email}, {"_id": 0})
+    else:
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+    session_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    await db.user_sessions.insert_one({
+        "session_token": session_token,
+        "user_id": user["user_id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": expires_at.isoformat(),
+    })
+
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_token,
+        max_age=SESSION_TTL_DAYS * 24 * 60 * 60,
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="none",
+    )
+
+    free_used = await _free_count_for_user(user["user_id"])
+    return {"user": _user_out(user, free_used).model_dump()}
 
 # ===== STRIPE =====
 @api_router.post("/checkout/session", response_model=CheckoutCreateResponse)

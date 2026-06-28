@@ -8,6 +8,7 @@ import Success from "@/pages/Success";
 import Result from "@/pages/Result";
 import Projects from "@/pages/Projects";
 import AuthCallback from "@/pages/AuthCallback";
+import DevLogin from "@/pages/DevLogin";
 import "@/App.css";
 
 function AppRouter() {
@@ -24,6 +25,7 @@ function AppRouter() {
       <Route path="/success" element={<Success />} />
       <Route path="/result/:submissionId" element={<Result />} />
       <Route path="/projects" element={<Projects />} />
+      <Route path="/dev/login" element={<DevLogin />} />
     </Routes>
   );
 }
