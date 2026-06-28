@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import BudgetModal from "@/components/BudgetModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -23,6 +24,7 @@ export default function UploadFlow() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id");
   const navigate = useNavigate();
+  const { user, loading: authLoading, signIn } = useAuth();
 
   const [plan, setPlan] = useState(null);
   const [name, setName] = useState("");
@@ -32,6 +34,12 @@ export default function UploadFlow() {
   const [photos, setPhotos] = useState([]); // { dataUrl, file }
   const [submitting, setSubmitting] = useState(false);
   const [showBudget, setShowBudget] = useState(false);
+
+  // Pre-fill email when user is signed in
+  useEffect(() => {
+    if (user?.email && !email) setEmail(user.email);
+    if (user?.name && !name) setName(user.name);
+  }, [user, email, name]);
 
   useEffect(() => {
     axios.get(`${API}/plans`).then((r) => {
@@ -44,6 +52,8 @@ export default function UploadFlow() {
       setPlan({ id: planId, ...p });
     });
   }, [planId, navigate]);
+
+  const freeCapped = !!user && planId === "free" && (user.free_remaining ?? 0) <= 0;
 
   const maxPhotos = plan?.max_photos || 0;
 
@@ -84,7 +94,7 @@ export default function UploadFlow() {
   const handleConfirmBudget = async (budget) => {
     try {
       setSubmitting(true);
-      toast.info("Generating your AI transformation… this can take 20–60s.");
+      toast.info("Submitting your project…");
       const res = await axios.post(`${API}/submissions`, {
         name: name || null,
         email,
@@ -95,11 +105,25 @@ export default function UploadFlow() {
         photos_base64: photos.map((p) => p.dataUrl),
         session_id: sessionId || null,
       });
-      toast.success("Submission received — we're generating your transformation…");
+      // Paid plan → Stripe checkout. Free plan → straight to result page.
+      if (res.data.checkout_url) {
+        window.location.href = res.data.checkout_url;
+        return;
+      }
+      toast.success("Submission received — generating your transformation…");
       navigate(`/result/${res.data.id}`);
     } catch (e) {
+      const status = e?.response?.status;
       const msg = e?.response?.data?.detail || "Could not submit. Please try again.";
-      toast.error(msg);
+      if (status === 401) {
+        toast.error("Please sign in to submit.");
+        signIn(`/upload/${planId}`);
+      } else if (status === 402) {
+        toast.error(msg);
+        navigate("/#packages");
+      } else {
+        toast.error(msg);
+      }
       setSubmitting(false);
       setShowBudget(false);
     }
@@ -109,6 +133,80 @@ export default function UploadFlow() {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center text-slate-500">
         Loading…
+      </div>
+    );
+  }
+
+  // Gate 1: must be signed in
+  if (!authLoading && !user) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <Header />
+        <main className="container-app py-20" data-testid="upload-signin-gate">
+          <div className="mx-auto max-w-md text-center">
+            <span className="eyebrow !justify-center">Sign in to continue</span>
+            <h1 className="mt-4 font-display text-3xl font-light tracking-tight text-slate-900 sm:text-4xl">
+              One quick step before you upload
+            </h1>
+            <p className="mt-3 text-slate-600">
+              Sign in with Google so your transformations save to your account
+              — and you can revisit them anytime.
+            </p>
+            <button
+              onClick={() => signIn(`/upload/${planId}`)}
+              className="btn-primary mt-6"
+              data-testid="upload-signin-btn"
+            >
+              Sign in with Google
+            </button>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Gate 2: free plan and cap reached
+  if (freeCapped) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <Header />
+        <main className="container-app py-20" data-testid="upload-capped-gate">
+          <div className="mx-auto max-w-lg text-center rounded-2xl border border-slate-200 bg-white p-10 shadow-sm">
+            <span className="eyebrow !justify-center">Free limit reached</span>
+            <h1 className="mt-4 font-display text-3xl font-light tracking-tight text-slate-900 sm:text-4xl">
+              You&rsquo;ve used your {user?.free_cap || 2} free projects
+            </h1>
+            <p className="mt-3 text-slate-600">
+              Upgrade to <strong>Plus</strong> or <strong>Premium</strong> to keep transforming rooms — both
+              include a custom PDF design plan tailored to your space.
+            </p>
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link
+                to="/upload/plus"
+                className="btn-primary"
+                data-testid="upload-capped-plus"
+              >
+                Plus — $10
+              </Link>
+              <Link
+                to="/upload/premium"
+                className="btn-ghost"
+                data-testid="upload-capped-premium"
+              >
+                Premium — $20
+              </Link>
+            </div>
+            <Link
+              to="/projects"
+              className="mt-6 inline-block text-sm text-slate-500 hover:text-emerald-600"
+              data-testid="upload-capped-projects-link"
+            >
+              ← Back to my projects
+            </Link>
+          </div>
+        </main>
+        <Footer />
       </div>
     );
   }

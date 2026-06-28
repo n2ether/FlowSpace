@@ -1,4 +1,6 @@
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Check = ({ tone = "emerald" }) => (
   <svg
@@ -18,15 +20,23 @@ const Check = ({ tone = "emerald" }) => (
   </svg>
 );
 
-export default function PricingCard({
-  plan,
-  highlighted = false,
-  testId,
-}) {
+export default function PricingCard({ plan, highlighted = false, testId }) {
   const navigate = useNavigate();
+  const { user, signIn } = useAuth();
 
-  const handleStart = async () => {
-    // Payment is currently disabled — all plans go straight to upload.
+  const freeCapped = !!user && plan.id === "free" && (user.free_remaining ?? 0) <= 0;
+
+  const handleStart = () => {
+    if (!user) {
+      // Save plan choice and prompt sign-in
+      try { sessionStorage.setItem("flowspace_pending_plan", plan.id); } catch { /* ignore */ }
+      signIn(`/upload/${plan.id}`);
+      return;
+    }
+    if (freeCapped) {
+      toast.error("You've used your 2 free projects. Upgrade to Plus or Premium to continue.");
+      return;
+    }
     navigate(`/upload/${plan.id}`);
   };
 
@@ -34,7 +44,7 @@ export default function PricingCard({
     <div
       className={`relative flex flex-col rounded-2xl border bg-white p-8 transition-all card-hover ${
         highlighted ? "border-emerald-500 shadow-lg ring-4 ring-emerald-50" : "border-slate-200"
-      }`}
+      } ${freeCapped ? "opacity-60" : ""}`}
       data-testid={testId}
     >
       {highlighted && (
@@ -42,9 +52,15 @@ export default function PricingCard({
           ★ Most popular
         </span>
       )}
-      <h3 className="font-display text-2xl font-medium text-slate-900">
-        {plan.name}
-      </h3>
+      {freeCapped && (
+        <span
+          className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-white shadow-sm"
+          data-testid={`${testId}-capped-badge`}
+        >
+          Free limit reached
+        </span>
+      )}
+      <h3 className="font-display text-2xl font-medium text-slate-900">{plan.name}</h3>
       <p className="mt-1 text-sm text-slate-500">{plan.tagline}</p>
       <div className="mt-6 flex items-baseline gap-2">
         <span className="font-display text-5xl font-light text-slate-900">
@@ -68,14 +84,21 @@ export default function PricingCard({
       </ul>
       <button
         onClick={handleStart}
+        disabled={freeCapped}
         className={`mt-8 w-full rounded-full py-3.5 text-base font-medium shadow transition-all ${
           highlighted
             ? "bg-emerald-500 text-white hover:bg-emerald-600"
             : "bg-slate-900 text-white hover:bg-slate-700"
-        }`}
+        } disabled:cursor-not-allowed disabled:opacity-70`}
         data-testid={`${testId}-cta`}
       >
-        {plan.price === 0 ? "Try it free" : "Choose this plan"}
+        {freeCapped
+          ? "Free limit reached"
+          : !user
+          ? "Sign in to start"
+          : plan.price === 0
+          ? "Try it free"
+          : "Choose this plan"}
       </button>
       {plan.pdf && (
         <p

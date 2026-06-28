@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 6 — Auth + 2-project free cap + Stripe-after-data fully verified. Backend: 16/16 pytest cases pass in 3.7s (test_iter6_auth_paywall.py) covering /auth/me 401-vs-authed (free_used/free_cap=2/free_remaining), /submissions list (401 unauth, items shape sans binaries), free-cap third submission → 402 with exact prefix 'You\\'ve used your 2 free projects', POST /submissions plan_id='plus' → status='awaiting_payment' with non-null checkout_url starting 'https://checkout.stripe.com/' and matching session_id, payment_transactions row created (submission_id+user_id+session_id, payment_status=pending), photos_done stays 0 (no AI work started), /submissions/{id}/confirm-payment unauth=401, unknown id=404, foreign owner=403, owner with unpaid Stripe=402, ownership on GET /submissions/{id} returns 403 for other authed user and 200 for unauthed (unguessable UUID is public-by-id by design). Frontend: 11/11 UI checks pass. Unauth header shows header-signin-btn; /upload/free shows upload-signin-gate with 'Sign in with Google' btn; /projects shows projects-signin-card; pricing-free-cta reads 'Sign in to start'. Authed fresh user (0/2): user-menu-trigger replaces sign-in btn, menu panel shows 'Free remaining: 2/2' + 'My projects' link + 'Sign out' button; pricing-free-cta reads 'Try it free' with no capped badge. Authed capped user (2/2): pricing-free-capped-badge 'Free limit reached' visible, free CTA disabled (disabled attr=true, opacity-60 wrapper); /upload/free renders upload-capped-gate with copy 'You\\'ve used your 2 free projects' and links upload-capped-plus/premium/projects-link; /projects renders projects-grid with projects-item-{id} cards linking to /result/{id}. Plus e2e (fresh user): /upload/plus → fill email+select bedroom+upload 1px PNG → click 'Transform my room' → BudgetModal opens → pick option → click budget-modal-confirm → window.location redirects to https://checkout.stripe.com/c/pay/cs_test_... (Stripe sandbox $10 page renders). Free e2e (fresh user): same flow on /upload/free → confirm budget → navigates to /result/{uuid} successfully (progress card briefly shown before result resolved). All review_request criteria met.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_auth_paywall.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:786,863 — asyncio.create_task(...) now keeps strong references via _BG_TASKS set with done-callback discard. Good. Still missing watchdog for submissions stuck in 'pending'/'processing' across container restarts (carried over from iter5).",
+    "server.py:716 — initial_status branches on plan price (0 → 'pending', else 'awaiting_payment'). Clean, but the same Stripe checkout creation block is duplicated conceptually with /api/checkout/session route. Consider consolidating into a single helper to avoid drift.",
+    "server.py:879 (GET /submissions list) intentionally excludes 'results' and 'pdf_base64'. Confirmed in test_list_authed_returns_items — items have no binaries. Good practice.",
+    "server.py:899 GET /submissions/{id} — current rule: 'if doc has user_id AND request is authed AND user differs → 403; else allow.' This means unauthenticated GET of any submission UUID returns full payload (including base64 photos). Intentional per review_request ('public-by-id is OK since URL is unguessable UUID'), but worth documenting publicly — anyone with the UUID can fetch before/after binaries. If that's not desired, add an explicit public/private flag.",
+    "UploadFlow.jsx — pre-fills email/name from useAuth user object. Works correctly. Minor: if user signs in with a Google account whose email differs from the one they want delivery to, they can edit it; no validation gap."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter6_auth_paywall.py",
+    "/app/test_reports/iteration_6.json",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest)",
+    "frontend": "100% (11/11 UI scenarios: unauth gates, authed menu, capped UI, plus→Stripe redirect, free→/result navigation)"
+  },
+  "test_credentials": "Pre-existing user_d742bd346f6c / test_session_5837f1f2dc434ec78b25e7a0a5adef67 (2/2 free used — used here for cap-reached UI/API tests). Fresh users created+cleaned via pytest fixtures and a manual browser-user-iter6 (cleaned at end). /app/memory/test_credentials.md is still just placeholder comments — main agent may want to write the existing user there for future iterations.",
+  "seed_data_creation": "Created fresh pytest users (test-user-iter6-*, test-user-other-*) and a browser-user-iter6-* for UI tests. All created users/sessions/submissions/payment_transactions deleted at end. Pre-existing rb358k user's submissions left intact.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter6 verified the full auth+paywall+checkout-before-AI integration. Pre-existing pytest user (rb358k@gmail.com / user_d742bd346f6c, token test_session_5837f1f2dc434ec78b25e7a0a5adef67) is at 2/2 free cap with 1 leftover 'awaiting_payment' Plus submission — use this user when you need a capped account. For free-flow tests, mint a new user with the snippet in /app/auth_testing.md. The backend Stripe checkout flow returns real test-mode session URLs (checkout.stripe.com/c/pay/cs_test_...); confirm-payment endpoint returns 402 unless Stripe reports paid — to e2e the paid path in CI you'd need to flip the payment_transactions doc to payment_status='paid' AND also mock/intercept stripe_checkout.get_checkout_status, or post via webhook signature. The Result page polls /api/submissions/{id} every 3.5s; 1x1 placeholder PNGs cause GPT-Image-1 to fail per-photo (results.after stays empty, UI shows 'AI transformation failed for this photo'), but the navigation + page state work correctly. Backend test file is pytest-style with class-grouped tests and mongo fixtures with proper cleanup.",
+  "rca of the issue": "n/a — no failures."
+}

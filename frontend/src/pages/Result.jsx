@@ -55,6 +55,7 @@ export default function Result() {
 
   const isPaid = data && (data.plan_id === "plus" || data.plan_id === "premium");
   const pdfReady = data && data.pdf_available;
+  const awaitingPayment = data && data.status === "awaiting_payment";
   const inProgress = data && (data.status === "pending" || data.status === "processing");
   const failed = data && data.status === "failed";
   const completed = data && data.status === "completed";
@@ -114,6 +115,8 @@ export default function Result() {
             <h1 className="mt-3 font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
               {err
                 ? "We couldn\u2019t find that."
+                : awaitingPayment
+                ? "Payment pending"
                 : completed
                 ? "Here\u2019s your space, reorganized."
                 : inProgress
