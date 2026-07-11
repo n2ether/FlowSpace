@@ -1,10 +1,11 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends, UploadFile, File, BackgroundTasks
 from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 from gridfs.errors import NoFile
+import asyncio
 import os
 import logging
 from pathlib import Path
@@ -22,9 +23,10 @@ from emergentintegrations.payments.stripe.checkout import (
 import stripe as stripe_sdk
 import httpx
 
-from pdf_generator import build_pdf
-from ai_drafter import draft_deliverable
-from ai_image_generator import generate_front_view
+from pdf_generator import build_pdf, build_room_transformation_pdf
+from ai_drafter import draft_deliverable, draft_room_plan
+from ai_image_generator import generate_front_view, generate_room_transformation
+from video_generator import generate_walkthrough_video
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -36,8 +38,22 @@ fs_bucket = AsyncIOMotorGridFSBucket(db, bucket_name="uploads")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB per photo
 
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_SECRET_KEY") or os.environ.get("STRIPE_API_KEY", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
+REQUIRE_PAYMENT_FOR_ROOM_JOBS = os.environ.get("REQUIRE_PAYMENT_FOR_ROOM_JOBS", "true").lower() != "false"
+ROOM_JOB_ACTIVE: set[str] = set()
+
+ROOM_JOB_STATUSES = {
+    "pending",
+    "uploaded",
+    "image_processing",
+    "image_complete",
+    "plan_generating",
+    "pdf_generating",
+    "video_generating",
+    "complete",
+    "failed",
+}
 
 # Server-side package definitions
 PACKAGES: Dict[str, Dict[str, Any]] = {
@@ -163,7 +179,7 @@ class PaymentTransaction(BaseModel):
     email: Optional[str] = None
     payment_status: str = "initiated"
     status: str = "open"
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -212,6 +228,56 @@ class Deliverable(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class RoomJobCreate(BaseModel):
+    customer_name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    room_type: str
+    pain_point: str
+    budget: str
+    preferred_stores: List[str] = Field(default_factory=list)
+    style_preference: str
+    rent_or_own: str
+    mounting_allowed: bool = False
+    photos: List[str]
+    package_id: Optional[str] = "standard"
+    payment_session_id: Optional[str] = None
+
+
+class JobActionRequest(BaseModel):
+    job_id: str
+
+
+class RoomJob(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    room_type: str
+    pain_point: str
+    budget: str
+    preferred_stores: List[str] = Field(default_factory=list)
+    style_preference: str
+    rent_or_own: str
+    mounting_allowed: bool = False
+    photos: List[str]
+    package_id: Optional[str] = "standard"
+    payment_session_id: Optional[str] = None
+    payment_amount: Optional[float] = None
+    payment_currency: Optional[str] = None
+    status: str = "pending"
+    modified_images: List[Dict[str, Any]] = Field(default_factory=list)
+    plan: Optional[Dict[str, Any]] = None
+    pdf_url: Optional[str] = None
+    video_url: Optional[str] = None
+    video_status: Optional[str] = None
+    email_status: Optional[str] = None
+    stage_errors: List[Dict[str, Any]] = Field(default_factory=list)
+    cost_estimate: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 # ------------------------- Helpers -------------------------
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
@@ -234,6 +300,312 @@ def _hydrate(doc: dict, dt_fields: List[str]) -> dict:
             except Exception:
                 pass
     return doc
+
+
+def _hydrate_room_job(doc: dict) -> dict:
+    return _hydrate(doc, ["created_at", "updated_at"])
+
+
+async def _save_artifact(
+    *,
+    contents: bytes,
+    filename: str,
+    content_type: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    file_id = await fs_bucket.upload_from_stream(
+        filename,
+        contents,
+        metadata={
+            "content_type": content_type,
+            "uploaded_at": _iso(datetime.now(timezone.utc)),
+            **(metadata or {}),
+        },
+    )
+    return f"/api/uploads/photo/{file_id}"
+
+
+async def _resolve_artifact(url: Optional[str]) -> tuple[Optional[bytes], Optional[str]]:
+    if not url:
+        return None, None
+    try:
+        if url.startswith("/api/uploads/photo/"):
+            photo_id = url.rsplit("/", 1)[-1]
+            oid = ObjectId(photo_id)
+            stream = await fs_bucket.open_download_stream(oid)
+            data = await stream.read()
+            content_type = "image/jpeg"
+            if stream.metadata and stream.metadata.get("content_type"):
+                content_type = stream.metadata["content_type"]
+            return data, content_type
+        if url.startswith("http://") or url.startswith("https://"):
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as ac:
+                resp = await ac.get(url)
+                resp.raise_for_status()
+                return resp.content, resp.headers.get("content-type", "application/octet-stream")
+    except Exception as e:
+        logging.warning("Artifact resolve failed for %s: %s", url, e)
+    return None, None
+
+
+async def _update_room_job(job_id: str, *, status: Optional[str] = None, **fields: Any) -> None:
+    update = {**fields, "updated_at": _iso(datetime.now(timezone.utc))}
+    if status:
+        if status not in ROOM_JOB_STATUSES:
+            raise ValueError(f"Invalid room job status: {status}")
+        update["status"] = status
+    await db.room_jobs.update_one({"id": job_id}, {"$set": update})
+
+
+async def _add_room_job_error(job_id: str, stage: str, message: str, **extra: Any) -> None:
+    error = {
+        "stage": stage,
+        "message": message,
+        "at": _iso(datetime.now(timezone.utc)),
+        **extra,
+    }
+    await db.room_jobs.update_one(
+        {"id": job_id},
+        {
+            "$push": {"stage_errors": error},
+            "$set": {"updated_at": _iso(datetime.now(timezone.utc))},
+        },
+    )
+
+
+async def _load_room_job(job_id: str) -> dict:
+    job = await db.room_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _hydrate_room_job(job)
+
+
+async def _verify_paid_room_session(payload: RoomJobCreate) -> Optional[Dict[str, Any]]:
+    """Require a paid Stripe checkout session before starting expensive AI work."""
+    if not REQUIRE_PAYMENT_FOR_ROOM_JOBS:
+        return None
+
+    session_id = (payload.payment_session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=402,
+            detail="Payment is required before room processing. Please complete checkout first.",
+        )
+
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=402, detail="Payment session was not found. Please restart checkout.")
+    if tx.get("payment_status") != "paid":
+        raise HTTPException(status_code=402, detail="Payment is not complete yet.")
+
+    claimed_job_id = tx.get("room_job_id")
+    if claimed_job_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This payment session has already been used for a room transformation job.",
+        )
+
+    tx_package = tx.get("package_id")
+    if payload.package_id and tx_package and payload.package_id != tx_package:
+        raise HTTPException(status_code=400, detail="Selected package does not match the paid checkout session.")
+
+    tx_email = (tx.get("email") or tx.get("metadata", {}).get("email") or "").lower()
+    if tx_email and tx_email != str(payload.email).lower():
+        raise HTTPException(status_code=400, detail="Email must match the paid checkout session.")
+
+    return tx
+
+
+async def _generate_plan_for_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    plan = await draft_room_plan({**job, "job_id": job["id"]})
+    await _update_room_job(job["id"], plan=plan)
+    return plan
+
+
+async def _generate_pdf_for_job(job: Dict[str, Any]) -> str:
+    plan = job.get("plan") or await _generate_plan_for_job(job)
+    original_images: List[Optional[bytes]] = []
+    for photo_url in job.get("photos") or []:
+        data, _ = await _resolve_artifact(photo_url)
+        original_images.append(data)
+
+    modified_images: List[Optional[bytes]] = []
+    for image in job.get("modified_images") or []:
+        if image.get("status") != "complete":
+            continue
+        data, _ = await _resolve_artifact(image.get("modified_url"))
+        if data:
+            modified_images.append(data)
+
+    pdf_bytes = build_room_transformation_pdf(
+        job=job,
+        plan=plan,
+        original_images=original_images,
+        modified_images=modified_images,
+    )
+    safe_room = (job.get("room_type") or "room").replace(" ", "_")
+    pdf_url = await _save_artifact(
+        contents=pdf_bytes,
+        filename=f"flowspace_{safe_room}_{job['id']}.pdf",
+        content_type="application/pdf",
+        metadata={"source": "room_job_pdf", "job_id": job["id"]},
+    )
+    await _update_room_job(job["id"], pdf_url=pdf_url, cost_estimate=float(job.get("cost_estimate") or 0) + 0.01)
+    return pdf_url
+
+
+async def _generate_video_for_job(job: Dict[str, Any]) -> Optional[str]:
+    source_frames: List[bytes] = []
+    for image in job.get("modified_images") or []:
+        if image.get("status") != "complete":
+            continue
+        data, _ = await _resolve_artifact(image.get("modified_url"))
+        if data:
+            source_frames.append(data)
+    video_bytes, mime, provider = await generate_walkthrough_video(source_frames[:4])
+    ext = "mov" if "quicktime" in mime else "mp4"
+    video_url = await _save_artifact(
+        contents=video_bytes,
+        filename=f"flowspace_walkthrough_{job['id']}.{ext}",
+        content_type=mime or "video/mp4",
+        metadata={"source": "room_job_video", "job_id": job["id"], "provider": provider},
+    )
+    await _update_room_job(
+        job["id"],
+        video_url=video_url,
+        video_status="complete",
+        cost_estimate=float(job.get("cost_estimate") or 0) + 0.30,
+    )
+    return video_url
+
+
+async def _send_completion_email(job: Dict[str, Any]) -> None:
+    """Send completion email when SMTP is configured; otherwise record a skipped status."""
+    smtp_host = os.environ.get("SMTP_HOST")
+    if not smtp_host:
+        await _update_room_job(job["id"], email_status="skipped_no_smtp")
+        logging.info("SMTP_HOST not configured; skipped completion email for job %s", job["id"])
+        return
+
+    import smtplib
+    from email.message import EmailMessage
+
+    site_url = os.environ.get("PUBLIC_APP_URL") or os.environ.get("FRONTEND_URL") or ""
+    result_url = f"{site_url.rstrip('/')}/results/{job['id']}" if site_url else f"/results/{job['id']}"
+    msg = EmailMessage()
+    msg["Subject"] = "Your FlowSpace room transformation is ready"
+    msg["From"] = os.environ.get("SMTP_FROM", "Ryan at FlowSpace <hello@flowspace.solutions>")
+    msg["To"] = job["email"]
+    msg.set_content(
+        f"Hi {job.get('customer_name') or 'there'},\n\n"
+        "Your FlowSpace room organization deliverable is ready.\n\n"
+        f"View your results: {result_url}\n"
+        f"PDF: {job.get('pdf_url') or 'available on your results page'}\n"
+        f"Video: {job.get('video_url') or 'video was not generated for this job'}\n\n"
+        "Warmly,\nRyan at FlowSpace"
+    )
+    try:
+        port = int(os.environ.get("SMTP_PORT", "587"))
+        with smtplib.SMTP(smtp_host, port, timeout=20) as smtp:
+            if os.environ.get("SMTP_STARTTLS", "true").lower() == "true":
+                smtp.starttls()
+            if os.environ.get("SMTP_USER"):
+                smtp.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASSWORD", ""))
+            smtp.send_message(msg)
+        await _update_room_job(job["id"], email_status="sent")
+    except Exception as e:
+        logging.exception("Completion email failed")
+        await _update_room_job(job["id"], email_status="failed")
+        await _add_room_job_error(job["id"], "email", str(e))
+
+
+async def process_room_job(job_id: str) -> None:
+    if job_id in ROOM_JOB_ACTIVE:
+        return
+    ROOM_JOB_ACTIVE.add(job_id)
+    try:
+        job = await _load_room_job(job_id)
+        await _update_room_job(job_id, status="uploaded")
+        job = await _load_room_job(job_id)
+
+        await _update_room_job(job_id, status="image_processing")
+        modified_images: List[Dict[str, Any]] = []
+        for idx, photo_url in enumerate(job.get("photos") or [], 1):
+            try:
+                data, mime = await _resolve_artifact(photo_url)
+                if not data:
+                    raise RuntimeError("Original upload could not be loaded")
+                out_bytes, out_mime, provider, prompt = await generate_room_transformation(
+                    image_bytes=data,
+                    mime_type=mime or "image/jpeg",
+                    intake=job,
+                )
+                modified_url = await _save_artifact(
+                    contents=out_bytes,
+                    filename=f"flowspace_organized_{job_id}_{idx}.png",
+                    content_type=out_mime or "image/png",
+                    metadata={
+                        "source": "room_job_image",
+                        "job_id": job_id,
+                        "original_url": photo_url,
+                        "provider": provider,
+                        "prompt": prompt,
+                    },
+                )
+                modified_images.append(
+                    {
+                        "index": idx,
+                        "original_url": photo_url,
+                        "modified_url": modified_url,
+                        "provider": provider,
+                        "status": "complete",
+                    }
+                )
+            except Exception as e:
+                logging.exception("Image %s failed for job %s", idx, job_id)
+                modified_images.append(
+                    {
+                        "index": idx,
+                        "original_url": photo_url,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
+                await _add_room_job_error(job_id, "image_processing", str(e), photo_url=photo_url, index=idx)
+            await _update_room_job(job_id, modified_images=modified_images)
+
+        image_cost = sum(1 for img in modified_images if img.get("status") == "complete") * 0.08
+        await _update_room_job(job_id, status="image_complete", cost_estimate=image_cost)
+
+        await _update_room_job(job_id, status="plan_generating")
+        job = await _load_room_job(job_id)
+        await _generate_plan_for_job(job)
+        await _update_room_job(job_id, cost_estimate=image_cost + 0.02)
+
+        await _update_room_job(job_id, status="pdf_generating")
+        job = await _load_room_job(job_id)
+        await _generate_pdf_for_job(job)
+
+        await _update_room_job(job_id, status="video_generating", video_status="processing")
+        job = await _load_room_job(job_id)
+        try:
+            await _generate_video_for_job(job)
+        except Exception as e:
+            logging.warning("Video generation failed for job %s: %s", job_id, e)
+            await _update_room_job(job_id, video_status="failed")
+            await _add_room_job_error(job_id, "video_generating", str(e))
+
+        await _update_room_job(job_id, status="complete")
+        job = await _load_room_job(job_id)
+        await _send_completion_email(job)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Room job failed")
+        await _update_room_job(job_id, status="failed")
+        await _add_room_job_error(job_id, "job", str(e))
+    finally:
+        ROOM_JOB_ACTIVE.discard(job_id)
 
 
 async def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> bool:
@@ -315,6 +687,112 @@ async def get_photo(photo_id: str):
         media_type=media,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+# ------------------------- Room Automation Jobs -------------------------
+@api_router.post("/process-room")
+async def create_room_job(payload: RoomJobCreate, background_tasks: BackgroundTasks):
+    if len(payload.photos) < 2 or len(payload.photos) > 4:
+        raise HTTPException(status_code=400, detail="Upload 2 to 4 room photos")
+    if payload.package_id and payload.package_id not in PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid package_id")
+    tx = await _verify_paid_room_session(payload)
+    job_data = payload.model_dump()
+    if tx:
+        job_data["package_id"] = tx.get("package_id") or job_data.get("package_id")
+        job_data["payment_amount"] = float(tx.get("amount") or 0)
+        job_data["payment_currency"] = tx.get("currency") or "usd"
+    job = RoomJob(**job_data)
+    await db.room_jobs.insert_one(_doc(job))
+    if tx:
+        await db.payment_transactions.update_one(
+            {"session_id": tx["session_id"]},
+            {
+                "$set": {
+                    "room_job_id": job.id,
+                    "updated_at": _iso(datetime.now(timezone.utc)),
+                }
+            },
+        )
+    background_tasks.add_task(process_room_job, job.id)
+    return _hydrate_room_job(_doc(job))
+
+
+@api_router.get("/jobs/{job_id}")
+async def get_room_job(job_id: str):
+    return await _load_room_job(job_id)
+
+
+@api_router.post("/generate-images")
+async def generate_images(payload: JobActionRequest, background_tasks: BackgroundTasks, _: bool = Depends(require_admin)):
+    await _load_room_job(payload.job_id)
+    background_tasks.add_task(process_room_job, payload.job_id)
+    return {"job_id": payload.job_id, "queued": True, "stage": "image_processing"}
+
+
+@api_router.post("/generate-plan")
+async def generate_plan(payload: JobActionRequest, _: bool = Depends(require_admin)):
+    job = await _load_room_job(payload.job_id)
+    await _update_room_job(payload.job_id, status="plan_generating")
+    plan = await _generate_plan_for_job(job)
+    await _update_room_job(payload.job_id, status="image_complete")
+    return {"job_id": payload.job_id, "plan": plan}
+
+
+@api_router.post("/generate-pdf")
+async def generate_pdf(payload: JobActionRequest, _: bool = Depends(require_admin)):
+    job = await _load_room_job(payload.job_id)
+    await _update_room_job(payload.job_id, status="pdf_generating")
+    pdf_url = await _generate_pdf_for_job(job)
+    await _update_room_job(payload.job_id, status="complete")
+    return {"job_id": payload.job_id, "pdf_url": pdf_url}
+
+
+@api_router.post("/generate-video")
+async def generate_video(payload: JobActionRequest, _: bool = Depends(require_admin)):
+    job = await _load_room_job(payload.job_id)
+    await _update_room_job(payload.job_id, status="video_generating", video_status="processing")
+    try:
+        video_url = await _generate_video_for_job(job)
+    except Exception as e:
+        await _update_room_job(payload.job_id, video_status="failed")
+        await _add_room_job_error(payload.job_id, "video_generating", str(e))
+        raise HTTPException(status_code=502, detail=f"Video generation failed: {e}")
+    await _update_room_job(payload.job_id, status="complete")
+    return {"job_id": payload.job_id, "video_url": video_url}
+
+
+@api_router.get("/admin/jobs")
+async def admin_room_jobs(_: bool = Depends(require_admin)):
+    items = await db.room_jobs.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return [_hydrate_room_job(it) for it in items]
+
+
+@api_router.get("/admin/provider-status")
+async def admin_provider_status(_: bool = Depends(require_admin)):
+    def configured(name: str) -> bool:
+        return bool((os.environ.get(name) or "").strip())
+
+    image_provider = (
+        os.environ.get("IMAGE_PROVIDER")
+        or ("replicate" if configured("REPLICATE_API_TOKEN") else "local-preview")
+    ).strip().lower()
+    video_provider = (
+        os.environ.get("VIDEO_PROVIDER")
+        or ("runway" if configured("RUNWAY_API_KEY") else "")
+    ).strip().lower()
+
+    return {
+        "image_provider": image_provider,
+        "image_ready": image_provider == "replicate" and configured("REPLICATE_API_TOKEN"),
+        "video_provider": video_provider or None,
+        "video_ready": video_provider == "runway" and configured("RUNWAY_API_KEY"),
+        "stripe_ready": configured("STRIPE_SECRET_KEY") or configured("STRIPE_API_KEY"),
+        "payment_required": REQUIRE_PAYMENT_FOR_ROOM_JOBS,
+        "database_ready": configured("MONGO_URL") and configured("DB_NAME"),
+        "public_app_url_ready": configured("PUBLIC_APP_URL") or configured("FRONTEND_URL"),
+        "email_ready": configured("SMTP_HOST"),
+    }
 
 
 # ------------------------- Admin Routes -------------------------
@@ -693,6 +1171,24 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def _startup():
     await seed_gallery_if_empty()
+    resumable = await db.room_jobs.find(
+        {
+            "status": {
+                "$in": [
+                    "pending",
+                    "uploaded",
+                    "image_processing",
+                    "image_complete",
+                    "plan_generating",
+                    "pdf_generating",
+                    "video_generating",
+                ]
+            }
+        },
+        {"_id": 0, "id": 1},
+    ).to_list(50)
+    for job in resumable:
+        asyncio.create_task(process_room_job(job["id"]))
 
 
 @app.on_event("shutdown")

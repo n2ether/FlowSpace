@@ -563,3 +563,218 @@ def build_pdf(
 
     doc.build(story)
     return buf.getvalue()
+
+
+def _fit_image(src: Optional[bytes], max_w: float, max_h: float) -> Any:
+    if not src:
+        return _placeholder(max_w, max_h, "Image not available")
+    try:
+        bio = io.BytesIO(src)
+        ir = ImageReader(bio)
+        iw, ih = ir.getSize()
+        ratio = min(max_w / iw, max_h / ih)
+        bio.seek(0)
+        img = PlatypusImage(bio, width=iw * ratio, height=ih * ratio)
+        img.hAlign = "CENTER"
+        return img
+    except Exception:
+        return _placeholder(max_w, max_h, "Image unavailable")
+
+
+def _product_links_from_plan(plan: Dict[str, Any]) -> List[Dict[str, str]]:
+    links: List[Dict[str, str]] = []
+    recommendations = plan.get("product_recommendations") or {}
+    for store, items in recommendations.items():
+        for item in items or []:
+            term = item.get("term") or ""
+            url = item.get("url") or ""
+            if term and url:
+                links.append({"name": f"{store}: {term}", "url": url})
+    return links
+
+
+def build_room_transformation_pdf(
+    *,
+    job: Dict[str, Any],
+    plan: Dict[str, Any],
+    original_images: List[Optional[bytes]],
+    modified_images: List[Optional[bytes]],
+) -> bytes:
+    """Render the automated customer deliverable for a room transformation job."""
+    buf = io.BytesIO()
+    s = _styles()
+    room = (job.get("room_type") or "Room").capitalize()
+    customer_name = job.get("customer_name") or "there"
+
+    frame = Frame(
+        MARGIN,
+        MARGIN,
+        PAGE_W - 2 * MARGIN,
+        PAGE_H - 2 * MARGIN - HEADER_H + 0.1 * inch,
+        leftPadding=0,
+        rightPadding=0,
+        topPadding=0,
+        bottomPadding=0,
+        showBoundary=0,
+    )
+    doc = BaseDocTemplate(
+        buf,
+        pagesize=LETTER,
+        pageTemplates=[
+            PageTemplate(
+                id="main",
+                frames=[frame],
+                onPage=lambda c, d: _draw_header(c, d, customer_name),
+            )
+        ],
+        title=f"{room} Organization Plan - FlowSpace",
+        author="FlowSpace",
+    )
+
+    story: List[Any] = []
+
+    # Cover page
+    story.append(Spacer(1, 0.35 * inch))
+    story.append(Paragraph("FlowSpace Room Transformation", s["h1"]))
+    story.append(Paragraph(f"{room} organization plan for {customer_name}", s["h2"]))
+    story.append(Spacer(1, 8))
+    story.append(
+        Paragraph(
+            "A calm, practical plan for turning visual clutter into a room that feels easier to use, easier to reset, and more supportive of everyday wellbeing.",
+            s["body"],
+        )
+    )
+    story.append(Spacer(1, 16))
+    meta_rows = [
+        ["Room type", room],
+        ["Pain point", job.get("pain_point") or "Not specified"],
+        ["Budget", job.get("budget") or plan.get("estimated_budget") or "Not specified"],
+        ["Preferred stores", ", ".join(job.get("preferred_stores") or ["Walmart", "Target", "IKEA"])],
+        ["Rent/own", job.get("rent_or_own") or "Not specified"],
+        ["Mounting allowed", "Yes" if job.get("mounting_allowed") else "No / renter-friendly preferred"],
+    ]
+    meta = Table(meta_rows, colWidths=[1.7 * inch, PAGE_W - 2 * MARGIN - 1.7 * inch])
+    meta.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), SOFT_BG),
+                ("TEXTCOLOR", (0, 0), (0, -1), BRAND_DARK),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.3, LINE),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+    story.append(meta)
+    story.append(Spacer(1, 18))
+    cover_image = modified_images[0] if modified_images else (original_images[0] if original_images else None)
+    story.append(_fit_image(cover_image, PAGE_W - 2 * MARGIN, 3.4 * inch))
+
+    # Image pages: before/after pairs
+    pairs = max(len(original_images), len(modified_images))
+    for idx in range(pairs):
+        story.append(PageBreak())
+        story.append(Paragraph(f"Room Photo {idx + 1}: Original and Organized", s["h2"]))
+        story.append(Paragraph("The organized image should preserve the room structure, camera angle, walls, flooring, windows, doors, fixtures, and built-ins while changing only storage and organization elements.", s["muted"]))
+        story.append(Spacer(1, 8))
+        cw = (PAGE_W - 2 * MARGIN - 10) / 2
+        before = _fit_image(original_images[idx] if idx < len(original_images) else None, cw, 4.2 * inch)
+        after = _fit_image(modified_images[idx] if idx < len(modified_images) else None, cw, 4.2 * inch)
+        table = Table(
+            [
+                [before, after],
+                [Paragraph("Original upload", s["imgCaption"]), Paragraph("AI-organized concept", s["imgCaption"])],
+            ],
+            colWidths=[cw, cw],
+        )
+        table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+        story.append(table)
+
+    # Plan page
+    story.append(PageBreak())
+    story.append(Paragraph("Organization Strategy", s["h2"]))
+    story.append(Paragraph(plan.get("room_summary") or "", s["body"]))
+    story.append(Spacer(1, 8))
+
+    if plan.get("organization_strategy"):
+        story.append(Paragraph("Strategy", s["h3"]))
+        story.extend(_bullet_list(plan.get("organization_strategy") or [], s["bullet"]))
+        story.append(Spacer(1, 6))
+
+    if plan.get("mental_health_benefits"):
+        story.append(Paragraph("Mental-health benefits", s["h3"]))
+        story.extend(_bullet_list(plan.get("mental_health_benefits") or [], s["bullet"]))
+        story.append(Spacer(1, 6))
+
+    solutions = plan.get("storage_solutions") or []
+    if solutions:
+        rows = [["Storage solution", "Why it helps", "Estimate"]]
+        for solution in solutions:
+            rows.append(
+                [
+                    Paragraph(solution.get("name", ""), s["body"]),
+                    Paragraph(solution.get("why", ""), s["body"]),
+                    Paragraph(solution.get("estimated_cost", ""), s["body"]),
+                ]
+            )
+        t = Table(rows, colWidths=[1.8 * inch, 3.1 * inch, 1.0 * inch])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), BRAND_DARK),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, SOFT_BG]),
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.3, LINE),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        story.append(Paragraph("Storage solutions used", s["h3"]))
+        story.append(t)
+        story.append(Spacer(1, 8))
+
+    story.append(Paragraph("DIY Step-by-step Build Guide", s["h2"]))
+    for idx, step in enumerate(plan.get("diy_steps") or [], 1):
+        story.append(Paragraph(f"{idx}. {step}", s["bullet"]))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"<b>Estimated difficulty:</b> {plan.get('estimated_difficulty') or 'Not specified'}", s["body"]))
+    story.append(Paragraph(f"<b>Estimated time:</b> {plan.get('estimated_time') or 'Not specified'}", s["body"]))
+    story.append(Paragraph(f"<b>Estimated budget:</b> {plan.get('estimated_budget') or job.get('budget') or 'Not specified'}", s["body"]))
+
+    # Shopping page
+    story.append(PageBreak())
+    story.append(Paragraph("Shopping Links", s["h2"]))
+    story.append(Paragraph("These are starter search links, not exact affiliate placements. Confirm measurements, reviews, and availability before purchasing.", s["muted"]))
+    story.append(Spacer(1, 8))
+    links = _product_links_from_plan(plan)
+    if links:
+        story.append(_links_table(links))
+    else:
+        story.extend(_bullet_list(plan.get("product_search_terms") or [], s["bullet"]))
+
+    # Closing page
+    story.append(PageBreak())
+    story.append(Spacer(1, 1.2 * inch))
+    story.append(Paragraph("A calmer room starts with one repeatable system.", s["h1"]))
+    story.append(Spacer(1, 10))
+    story.append(
+        Paragraph(
+            "You do not need a perfect room to feel relief. Start with one category, give it a clear home, and let each small reset create more space for focus, rest, and daily ease.",
+            s["body"],
+        )
+    )
+    story.append(Spacer(1, 18))
+    story.append(_hr())
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Warmly,", s["body"]))
+    story.append(Paragraph("<b>Ryan at FlowSpace</b>", s["body"]))
+    story.append(Paragraph(TAGLINE, s["muted"]))
+
+    doc.build(story)
+    return buf.getvalue()

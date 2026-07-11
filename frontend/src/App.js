@@ -5,10 +5,14 @@ import { LanguageProvider } from "./context/LanguageContext";
 import { Toaster } from "./components/ui/sonner";
 import Landing from "./pages/Landing";
 import Intake from "./pages/Intake";
+import Upload from "./pages/Upload";
+import Checkout from "./pages/Checkout";
 import Success from "./pages/Success";
+import Results from "./pages/Results";
 import AdminLogin from "./pages/AdminLogin";
 import Admin from "./pages/Admin";
 import AdminDeliverable from "./pages/AdminDeliverable";
+import AdminJobs from "./pages/AdminJobs";
 
 function App() {
     return (
@@ -17,9 +21,13 @@ function App() {
                 <Routes>
                     <Route path="/" element={<Landing />} />
                     <Route path="/intake" element={<Intake />} />
+                    <Route path="/upload" element={<Upload />} />
+                    <Route path="/checkout" element={<Checkout />} />
                     <Route path="/success" element={<Success />} />
+                    <Route path="/results/:jobId" element={<Results />} />
                     <Route path="/admin/login" element={<AdminLogin />} />
                     <Route path="/admin" element={<Admin />} />
+                    <Route path="/admin/jobs" element={<AdminJobs />} />
                     <Route path="/admin/leads/:leadId/design" element={<AdminDeliverable />} />
                 </Routes>
                 <Toaster position="top-right" richColors />

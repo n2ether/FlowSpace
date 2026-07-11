@@ -106,7 +106,7 @@ const Header = () => {
                     </DropdownMenu>
 
                     <Button
-                        onClick={() => window.dispatchEvent(new CustomEvent("flowspace:open-questionnaire", { detail: { pkg: "" } }))}
+                        onClick={() => navigate("/checkout")}
                         className="hidden rounded-full bg-emerald-500 px-5 text-white shadow-sm hover:bg-emerald-600 md:inline-flex"
                         data-testid="header-cta-start"
                     >
@@ -153,7 +153,7 @@ const Header = () => {
                             ))}
                         </div>
                         <Button
-                            onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent("flowspace:open-questionnaire", { detail: { pkg: "" } })); }}
+                            onClick={() => { setOpen(false); navigate("/checkout"); }}
                             className="mt-3 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
                             data-testid="mobile-cta-start"
                         >
