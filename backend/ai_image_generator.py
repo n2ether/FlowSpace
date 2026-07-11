@@ -397,7 +397,11 @@ async def generate_room_transformation(
     the rest of the customer PDF workflow can still be exercised end-to-end.
     """
     prompt = build_room_transformation_prompt(intake)
-    provider = (os.environ.get("IMAGE_PROVIDER") or "local-preview").strip().lower()
+    configured_provider = os.environ.get("IMAGE_PROVIDER")
+    provider = (
+        configured_provider
+        or ("replicate" if os.environ.get("REPLICATE_API_TOKEN") else "local-preview")
+    ).strip().lower()
     if provider == "replicate":
         out_bytes, out_mime, provider_name = await _replicate_generate(
             image_bytes=image_bytes, mime_type=mime_type, prompt=prompt

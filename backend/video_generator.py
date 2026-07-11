@@ -132,7 +132,11 @@ async def generate_walkthrough_video(source_frames: List[bytes]) -> Tuple[bytes,
         "Use gentle movement, natural light, and a peaceful premium home "
         "organization feel."
     )
-    provider = (os.environ.get("VIDEO_PROVIDER") or "").strip().lower()
+    configured_provider = os.environ.get("VIDEO_PROVIDER")
+    provider = (
+        configured_provider
+        or ("runway" if os.environ.get("RUNWAY_API_KEY") else "")
+    ).strip().lower()
     if provider == "runway":
         return await _runway_generate(source_frames, prompt)
     if provider == "luma":
