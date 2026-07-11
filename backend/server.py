@@ -38,7 +38,7 @@ fs_bucket = AsyncIOMotorGridFSBucket(db, bucket_name="uploads")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB per photo
 
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_SECRET_KEY") or os.environ.get("STRIPE_API_KEY", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
 ROOM_JOB_ACTIVE: set[str] = set()
 
@@ -450,7 +450,7 @@ async def _send_completion_email(job: Dict[str, Any]) -> None:
     from email.message import EmailMessage
 
     site_url = os.environ.get("PUBLIC_APP_URL") or os.environ.get("FRONTEND_URL") or ""
-    result_url = f"{site_url.rstrip()}/results/{job['id']}" if site_url else f"/results/{job['id']}"
+    result_url = f"{site_url.rstrip('/')}/results/{job['id']}" if site_url else f"/results/{job['id']}"
     msg = EmailMessage()
     msg["Subject"] = "Your FlowSpace room transformation is ready"
     msg["From"] = os.environ.get("SMTP_FROM", "Ryan at FlowSpace <hello@flowspace.solutions>")
