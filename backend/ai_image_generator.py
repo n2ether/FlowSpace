@@ -207,3 +207,214 @@ async def generate_front_view(
     if not data_b64:
         raise RuntimeError("Image generation returned no image data")
     return base64.b64decode(data_b64), mime
+
+
+ROOM_TRANSFORMATION_PROMPT_TEMPLATE = (
+    "Transform this uploaded room photo into a clean, organized, peaceful "
+    "version of the exact same room. Preserve the original architecture, room "
+    "dimensions, camera angle, perspective, wall color, floor color, window "
+    "placement, door placement, trim, ceiling fixtures, lighting positions, "
+    "outlets, vents, and built-in features. Do not change the layout of the "
+    "room. Do not add new windows or doors. Do not remove existing windows or "
+    "doors. Do not change the floor material or wall color unless specifically "
+    "requested. Only organize clutter and add realistic storage solutions such "
+    "as shelves, bins, baskets, cabinets, hooks, labels, closet organizers, "
+    "pantry organizers, garage shelving, laundry storage, or under-bed storage. "
+    "Make the room feel calm, functional, bright, and mentally peaceful. "
+    "Photorealistic result."
+)
+
+
+def build_room_transformation_prompt(intake: Dict[str, Any]) -> str:
+    """Build the strict image-editing prompt required for room preservation."""
+    details = [
+        ROOM_TRANSFORMATION_PROMPT_TEMPLATE,
+        f"Room type: {intake.get('room_type') or intake.get('space_type') or 'room'}.",
+        f"Pain point: {intake.get('pain_point') or 'clutter and disorganization'}.",
+        f"Budget: {intake.get('budget') or 'customer selected budget'}."
+        f" Style preference: {intake.get('style_preference') or 'calm, practical, organized'}.",
+        f"Preferred stores: {', '.join(intake.get('preferred_stores') or []) or 'Walmart, Target, IKEA'}.",
+        f"Rent/own: {intake.get('rent_or_own') or 'not specified'}.",
+        (
+            "Drilling or wall mounting is allowed."
+            if intake.get("mounting_allowed")
+            else "Avoid drilling and permanent mounting; use renter-friendly storage where possible."
+        ),
+        "Critical constraints: preserve architecture, preserve walls, preserve floors, "
+        "preserve windows, preserve doors, preserve ceiling fixtures, preserve camera "
+        "perspective, do not change room dimensions, do not change wall color unless "
+        "requested, do not change flooring, do not hallucinate windows or doors, and "
+        "only modify organization/storage elements.",
+    ]
+    return "\n".join(details)
+
+
+def _data_url(image_bytes: bytes, mime_type: str) -> str:
+    return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+
+
+async def _download_image(url: str) -> tuple[bytes, str]:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("content-type", "image/png")
+
+
+def _first_output_url(output: Any) -> Optional[str]:
+    if isinstance(output, str) and output.startswith("http"):
+        return output
+    if isinstance(output, list):
+        for item in output:
+            found = _first_output_url(item)
+            if found:
+                return found
+    if isinstance(output, dict):
+        for key in ("url", "image", "output", "generated_image"):
+            found = _first_output_url(output.get(key))
+            if found:
+                return found
+    return None
+
+
+async def _replicate_generate(
+    *, image_bytes: bytes, mime_type: str, prompt: str
+) -> tuple[bytes, str, str]:
+    import httpx
+
+    token = os.environ.get("REPLICATE_API_TOKEN")
+    if not token:
+        raise RuntimeError("REPLICATE_API_TOKEN is not configured")
+    model = os.environ.get("REPLICATE_IMAGE_MODEL", "black-forest-labs/flux-kontext-pro")
+    if "/" not in model:
+        raise RuntimeError("REPLICATE_IMAGE_MODEL must use owner/model format")
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {
+        "input": {
+            "prompt": prompt,
+            "input_image": _data_url(image_bytes, mime_type),
+            "output_format": "png",
+        }
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        create = await client.post(
+            f"https://api.replicate.com/v1/models/{model}/predictions",
+            headers=headers,
+            json=body,
+        )
+        create.raise_for_status()
+        prediction = create.json()
+        get_url = prediction.get("urls", {}).get("get")
+        if not get_url:
+            raise RuntimeError("Replicate did not return a polling URL")
+        for _ in range(90):
+            poll = await client.get(get_url, headers=headers)
+            poll.raise_for_status()
+            prediction = poll.json()
+            status = prediction.get("status")
+            if status == "succeeded":
+                output_url = _first_output_url(prediction.get("output"))
+                if not output_url:
+                    raise RuntimeError("Replicate succeeded without an image URL")
+                out_bytes, out_mime = await _download_image(output_url)
+                return out_bytes, out_mime, "replicate"
+            if status in {"failed", "canceled"}:
+                raise RuntimeError(prediction.get("error") or f"Replicate {status}")
+            import asyncio
+
+            await asyncio.sleep(2)
+    raise RuntimeError("Replicate image generation timed out")
+
+
+async def _stability_generate(
+    *, image_bytes: bytes, mime_type: str, prompt: str
+) -> tuple[bytes, str, str]:
+    import httpx
+
+    api_key = os.environ.get("STABILITY_API_KEY")
+    if not api_key:
+        raise RuntimeError("STABILITY_API_KEY is not configured")
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "image/*"}
+    files = {"image": ("room.png", image_bytes, mime_type)}
+    data = {"prompt": prompt, "output_format": "png"}
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(
+            "https://api.stability.ai/v2beta/stable-image/edit/ultra",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("content-type", "image/png"), "stability"
+
+
+async def _runware_generate(
+    *, image_bytes: bytes, mime_type: str, prompt: str
+) -> tuple[bytes, str, str]:
+    import httpx
+
+    api_key = os.environ.get("RUNWARE_API_KEY")
+    if not api_key:
+        raise RuntimeError("RUNWARE_API_KEY is not configured")
+    payload = [
+        {
+            "taskType": "imageInference",
+            "taskUUID": str(uuid.uuid4()),
+            "positivePrompt": prompt,
+            "referenceImages": [_data_url(image_bytes, mime_type)],
+            "model": os.environ.get("RUNWARE_IMAGE_MODEL", "runware:100@1"),
+            "numberResults": 1,
+            "outputFormat": "PNG",
+        }
+    ]
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(
+            "https://api.runware.ai/v1",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        output_url = _first_output_url(data)
+        if not output_url:
+            raise RuntimeError("Runware returned no generated image URL")
+        out_bytes, out_mime = await _download_image(output_url)
+        return out_bytes, out_mime, "runware"
+
+
+async def generate_room_transformation(
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    intake: Dict[str, Any],
+) -> tuple[bytes, str, str, str]:
+    """Generate an organized version of one customer photo via selected provider.
+
+    Returns (image_bytes, mime_type, provider_name, prompt). If no image provider
+    is configured, a local preview fallback returns the original photo bytes so
+    the rest of the customer PDF workflow can still be exercised end-to-end.
+    """
+    prompt = build_room_transformation_prompt(intake)
+    provider = (os.environ.get("IMAGE_PROVIDER") or "local-preview").strip().lower()
+    if provider == "replicate":
+        out_bytes, out_mime, provider_name = await _replicate_generate(
+            image_bytes=image_bytes, mime_type=mime_type, prompt=prompt
+        )
+    elif provider in {"stability", "stability_ai", "stability-ai"}:
+        out_bytes, out_mime, provider_name = await _stability_generate(
+            image_bytes=image_bytes, mime_type=mime_type, prompt=prompt
+        )
+    elif provider == "runware":
+        out_bytes, out_mime, provider_name = await _runware_generate(
+            image_bytes=image_bytes, mime_type=mime_type, prompt=prompt
+        )
+    elif provider in {"local", "local-preview", "mock"}:
+        logger.warning("IMAGE_PROVIDER is not configured; returning source image as local preview")
+        out_bytes, out_mime, provider_name = image_bytes, mime_type, "local-preview"
+    else:
+        raise RuntimeError(
+            "Unsupported IMAGE_PROVIDER. Use replicate, stability, runware, or local-preview."
+        )
+    return out_bytes, out_mime or "image/png", provider_name, prompt

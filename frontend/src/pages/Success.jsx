@@ -86,7 +86,7 @@ const Success = () => {
                                 </p>
                             )}
                             <Button
-                                onClick={() => navigate("/intake")}
+                                onClick={() => navigate("/upload")}
                                 className="mt-6 rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600"
                                 data-testid="success-continue"
                             >
