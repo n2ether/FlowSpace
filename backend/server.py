@@ -768,6 +768,33 @@ async def admin_room_jobs(_: bool = Depends(require_admin)):
     return [_hydrate_room_job(it) for it in items]
 
 
+@api_router.get("/admin/provider-status")
+async def admin_provider_status(_: bool = Depends(require_admin)):
+    def configured(name: str) -> bool:
+        return bool((os.environ.get(name) or "").strip())
+
+    image_provider = (
+        os.environ.get("IMAGE_PROVIDER")
+        or ("replicate" if configured("REPLICATE_API_TOKEN") else "local-preview")
+    ).strip().lower()
+    video_provider = (
+        os.environ.get("VIDEO_PROVIDER")
+        or ("runway" if configured("RUNWAY_API_KEY") else "")
+    ).strip().lower()
+
+    return {
+        "image_provider": image_provider,
+        "image_ready": image_provider == "replicate" and configured("REPLICATE_API_TOKEN"),
+        "video_provider": video_provider or None,
+        "video_ready": video_provider == "runway" and configured("RUNWAY_API_KEY"),
+        "stripe_ready": configured("STRIPE_SECRET_KEY") or configured("STRIPE_API_KEY"),
+        "payment_required": REQUIRE_PAYMENT_FOR_ROOM_JOBS,
+        "database_ready": configured("MONGO_URL") and configured("DB_NAME"),
+        "public_app_url_ready": configured("PUBLIC_APP_URL") or configured("FRONTEND_URL"),
+        "email_ready": configured("SMTP_HOST"),
+    }
+
+
 # ------------------------- Admin Routes -------------------------
 @api_router.post("/admin/login")
 async def admin_login(payload: AdminLoginRequest):

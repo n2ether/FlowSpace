@@ -82,6 +82,7 @@ Backend API:
 - `/api/generate-video`
 - `/api/jobs/{jobId}`
 - `/api/admin/jobs`
+- `/api/admin/provider-status`
 
 ## Processing stages
 
@@ -102,6 +103,15 @@ Failures are recorded on the job. If one image fails, other images continue. If
 video generation fails, the PDF is still delivered and the job can complete.
 
 ## Local verification
+
+Provider/env readiness check:
+
+```bash
+python3 scripts/check_flowspace_env.py
+```
+
+The check reports whether required settings are present without printing secret
+values. The admin dashboard also shows provider readiness at `/admin/jobs`.
 
 Backend syntax check:
 

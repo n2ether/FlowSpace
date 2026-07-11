@@ -18,10 +18,20 @@ const statusClass = {
     image_processing: "bg-blue-500",
 };
 
+const providerLabels = [
+    ["image_ready", "Replicate images"],
+    ["video_ready", "Runway video"],
+    ["stripe_ready", "Stripe checkout"],
+    ["database_ready", "Database"],
+    ["public_app_url_ready", "Public URL"],
+    ["email_ready", "Email"],
+];
+
 const AdminJobs = () => {
     const navigate = useNavigate();
     const token = localStorage.getItem("cs_admin_token");
     const [jobs, setJobs] = useState([]);
+    const [providerStatus, setProviderStatus] = useState(null);
     const [loading, setLoading] = useState(true);
     const client = adminClient(token);
 
@@ -34,8 +44,12 @@ const AdminJobs = () => {
         }
         setLoading(true);
         try {
-            const res = await client.get("/admin/jobs");
-            setJobs(res.data || []);
+            const [jobsRes, providerRes] = await Promise.all([
+                client.get("/admin/jobs"),
+                client.get("/admin/provider-status"),
+            ]);
+            setJobs(jobsRes.data || []);
+            setProviderStatus(providerRes.data || null);
         } catch (error) {
             if (error?.response?.status === 401) {
                 localStorage.removeItem("cs_admin_token");
@@ -91,6 +105,43 @@ const AdminJobs = () => {
                         </Button>
                     </div>
                 </div>
+
+                {providerStatus && (
+                    <div className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                            <div>
+                                <h2 className="font-heading text-xl font-medium text-slate-900">
+                                    Provider readiness
+                                </h2>
+                                <p className="text-sm text-slate-500">
+                                    Current setup: {providerStatus.image_provider || "none"} images,
+                                    {" "}{providerStatus.video_provider || "none"} video,
+                                    payment {providerStatus.payment_required ? "required" : "not required"}.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+                            {providerLabels.map(([key, label]) => {
+                                const ready = Boolean(providerStatus[key]);
+                                return (
+                                    <div
+                                        key={key}
+                                        className={`rounded-2xl border p-3 ${
+                                            ready
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                                : "border-amber-200 bg-amber-50 text-amber-800"
+                                        }`}
+                                    >
+                                        <div className="text-xs font-semibold uppercase tracking-widest">
+                                            {ready ? "Ready" : "Needs setup"}
+                                        </div>
+                                        <div className="mt-1 text-sm font-medium">{label}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
                     <Table>
