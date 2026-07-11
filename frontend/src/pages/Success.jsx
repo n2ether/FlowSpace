@@ -15,6 +15,7 @@ const Success = () => {
     const [status, setStatus] = useState("checking");
     const [amount, setAmount] = useState(null);
     const [currency, setCurrency] = useState("usd");
+    const [metadata, setMetadata] = useState({});
     const attempts = useRef(0);
 
     useEffect(() => {
@@ -30,6 +31,7 @@ const Success = () => {
                     setStatus("paid");
                     setAmount(res.data.amount_total);
                     setCurrency(res.data.currency);
+                    setMetadata(res.data.metadata || {});
                     return;
                 }
                 if (res.data.status === "expired") {
@@ -86,7 +88,13 @@ const Success = () => {
                                 </p>
                             )}
                             <Button
-                                onClick={() => navigate("/upload")}
+                                onClick={() => {
+                                    const query = new URLSearchParams({
+                                        session_id: sessionId,
+                                        package: metadata.package_id || "standard",
+                                    });
+                                    navigate(`/upload?${query.toString()}`);
+                                }}
                                 className="mt-6 rounded-full bg-emerald-500 px-6 text-white hover:bg-emerald-600"
                                 data-testid="success-continue"
                             >

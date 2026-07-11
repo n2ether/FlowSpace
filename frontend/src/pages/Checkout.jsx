@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { ArrowRight, Check, CreditCard, Loader2 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -27,7 +27,6 @@ const packageCopy = {
 
 const Checkout = () => {
     const [params] = useSearchParams();
-    const navigate = useNavigate();
     const [packages, setPackages] = useState(packageCopy);
     const [selected, setSelected] = useState(params.get("package") || "standard");
     const [loading, setLoading] = useState(false);
@@ -54,12 +53,11 @@ const Checkout = () => {
             if (res.data?.url) {
                 window.location.href = res.data.url;
             } else {
-                navigate(`/upload?package=${selected}`);
+                toast.error("Checkout did not return a payment link. Please try again.");
             }
         } catch (error) {
             console.error(error);
-            toast.error("Checkout is not available yet. You can still upload your room.");
-            navigate(`/upload?package=${selected}`);
+            toast.error("Checkout is not available yet. Please try again shortly.");
         } finally {
             setLoading(false);
         }

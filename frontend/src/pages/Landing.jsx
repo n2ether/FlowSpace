@@ -73,7 +73,7 @@ const Hero = () => {
 
                     <div className="flex flex-wrap items-center gap-3 pt-2">
                         <Button
-                            onClick={() => navigate("/upload")}
+                            onClick={() => navigate("/checkout")}
                             className="group rounded-full bg-emerald-500 px-6 py-6 text-base font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-600 hover:shadow-md"
                             data-testid="hero-cta-start"
                         >
@@ -525,7 +525,7 @@ const FinalCTA = () => {
                         </div>
                         <div className="flex md:justify-end">
                             <Button
-                                onClick={() => navigate("/upload")}
+                                onClick={() => navigate("/checkout")}
                                 className="group rounded-full bg-white px-7 py-7 text-base font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
                                 data-testid="final-cta-start"
                             >

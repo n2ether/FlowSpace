@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, Loader2, Upload as UploadIcon, X } from "lucide-react";
+import { ArrowRight, CreditCard, Loader2, Upload as UploadIcon, X } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { Button } from "../components/ui/button";
@@ -37,6 +37,7 @@ const Upload = () => {
 
     const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
     const packageId = params.get("package") || "standard";
+    const paymentSessionId = params.get("session_id") || "";
 
     const assetUrl = (url) => (url?.startsWith("http") ? url : `${API.replace("/api", "")}${url}`);
 
@@ -95,11 +96,17 @@ const Upload = () => {
             toast.error("Please upload 2 to 4 photos of the room.");
             return;
         }
+        if (!paymentSessionId) {
+            toast.error("Please complete checkout before starting room processing.");
+            navigate(`/checkout?package=${packageId}`);
+            return;
+        }
         setSubmitting(true);
         try {
             const res = await api.post("/process-room", {
                 ...form,
                 package_id: packageId,
+                payment_session_id: paymentSessionId,
                 photos: photos.map((photo) => photo.url),
             });
             navigate(`/results/${res.data.id}`);
@@ -128,6 +135,30 @@ const Upload = () => {
                             doors, windows, fixtures, camera angle, and architectural features intact.
                         </p>
                     </div>
+
+                    {!paymentSessionId && (
+                        <div className="mb-6 rounded-3xl border border-amber-200 bg-amber-50 p-6 text-amber-900 shadow-sm">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                                <div className="flex gap-3">
+                                    <CreditCard className="mt-1 h-5 w-5 shrink-0" />
+                                    <div>
+                                        <h2 className="font-heading text-xl font-medium">Checkout required</h2>
+                                        <p className="mt-1 text-sm">
+                                            Room processing uses paid AI providers, so a completed Stripe checkout session is required before this upload can be processed.
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    type="button"
+                                    onClick={() => navigate(`/checkout?package=${packageId}`)}
+                                    className="rounded-full bg-amber-600 text-white hover:bg-amber-700"
+                                    data-testid="upload-checkout-required"
+                                >
+                                    Go to checkout
+                                </Button>
+                            </div>
+                        </div>
+                    )}
 
                     <form onSubmit={submit} className="space-y-6">
                         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
@@ -267,7 +298,7 @@ const Upload = () => {
                             </p>
                             <Button
                                 type="submit"
-                                disabled={submitting || uploading}
+                                disabled={submitting || uploading || !paymentSessionId}
                                 className="rounded-full bg-emerald-500 px-7 py-6 text-white hover:bg-emerald-600"
                                 data-testid="upload-submit"
                             >

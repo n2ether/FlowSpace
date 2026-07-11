@@ -33,6 +33,7 @@ VIDEO_PROVIDER=runway
 RUNWAY_API_KEY=key_...
 
 STRIPE_SECRET_KEY=sk_live_...
+REQUIRE_PAYMENT_FOR_ROOM_JOBS=true
 
 MONGO_URL=mongodb+srv://...
 DB_NAME=flowspace
@@ -62,7 +63,8 @@ Customer:
 
 - `/` - landing page
 - `/checkout` - package selection and Stripe checkout
-- `/upload` - photo upload and room intake form
+- `/success` - verifies the Stripe session before upload
+- `/upload` - photo upload and room intake form for paid sessions
 - `/results/:jobId` - generated images, plan, PDF, and video download
 
 Admin:
@@ -82,6 +84,12 @@ Backend API:
 - `/api/admin/jobs`
 
 ## Processing stages
+
+By default, `/api/process-room` requires a paid Stripe checkout session. The
+success page passes the verified `session_id` to `/upload`, and the backend
+marks that session as used when it creates the room job. This prevents direct
+upload processing without payment and prevents one paid session from creating
+multiple jobs.
 
 Room jobs move through:
 

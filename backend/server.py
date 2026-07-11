@@ -40,6 +40,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB per photo
 
 STRIPE_API_KEY = os.environ.get("STRIPE_SECRET_KEY") or os.environ.get("STRIPE_API_KEY", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
+REQUIRE_PAYMENT_FOR_ROOM_JOBS = os.environ.get("REQUIRE_PAYMENT_FOR_ROOM_JOBS", "true").lower() != "false"
 ROOM_JOB_ACTIVE: set[str] = set()
 
 ROOM_JOB_STATUSES = {
@@ -178,7 +179,7 @@ class PaymentTransaction(BaseModel):
     email: Optional[str] = None
     payment_status: str = "initiated"
     status: str = "open"
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -240,6 +241,7 @@ class RoomJobCreate(BaseModel):
     mounting_allowed: bool = False
     photos: List[str]
     package_id: Optional[str] = "standard"
+    payment_session_id: Optional[str] = None
 
 
 class JobActionRequest(BaseModel):
@@ -260,6 +262,9 @@ class RoomJob(BaseModel):
     mounting_allowed: bool = False
     photos: List[str]
     package_id: Optional[str] = "standard"
+    payment_session_id: Optional[str] = None
+    payment_amount: Optional[float] = None
+    payment_currency: Optional[str] = None
     status: str = "pending"
     modified_images: List[Dict[str, Any]] = Field(default_factory=list)
     plan: Optional[Dict[str, Any]] = None
@@ -373,6 +378,42 @@ async def _load_room_job(job_id: str) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _hydrate_room_job(job)
+
+
+async def _verify_paid_room_session(payload: RoomJobCreate) -> Optional[Dict[str, Any]]:
+    """Require a paid Stripe checkout session before starting expensive AI work."""
+    if not REQUIRE_PAYMENT_FOR_ROOM_JOBS:
+        return None
+
+    session_id = (payload.payment_session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=402,
+            detail="Payment is required before room processing. Please complete checkout first.",
+        )
+
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=402, detail="Payment session was not found. Please restart checkout.")
+    if tx.get("payment_status") != "paid":
+        raise HTTPException(status_code=402, detail="Payment is not complete yet.")
+
+    claimed_job_id = tx.get("room_job_id")
+    if claimed_job_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This payment session has already been used for a room transformation job.",
+        )
+
+    tx_package = tx.get("package_id")
+    if payload.package_id and tx_package and payload.package_id != tx_package:
+        raise HTTPException(status_code=400, detail="Selected package does not match the paid checkout session.")
+
+    tx_email = (tx.get("email") or tx.get("metadata", {}).get("email") or "").lower()
+    if tx_email and tx_email != str(payload.email).lower():
+        raise HTTPException(status_code=400, detail="Email must match the paid checkout session.")
+
+    return tx
 
 
 async def _generate_plan_for_job(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -655,8 +696,24 @@ async def create_room_job(payload: RoomJobCreate, background_tasks: BackgroundTa
         raise HTTPException(status_code=400, detail="Upload 2 to 4 room photos")
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
-    job = RoomJob(**payload.model_dump())
+    tx = await _verify_paid_room_session(payload)
+    job_data = payload.model_dump()
+    if tx:
+        job_data["package_id"] = tx.get("package_id") or job_data.get("package_id")
+        job_data["payment_amount"] = float(tx.get("amount") or 0)
+        job_data["payment_currency"] = tx.get("currency") or "usd"
+    job = RoomJob(**job_data)
     await db.room_jobs.insert_one(_doc(job))
+    if tx:
+        await db.payment_transactions.update_one(
+            {"session_id": tx["session_id"]},
+            {
+                "$set": {
+                    "room_job_id": job.id,
+                    "updated_at": _iso(datetime.now(timezone.utc)),
+                }
+            },
+        )
     background_tasks.add_task(process_room_job, job.id)
     return _hydrate_room_job(_doc(job))
 
