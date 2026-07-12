@@ -1,5 +1,5 @@
 """
-AI-assisted deliverable drafting via Emergent LLM (Claude Sonnet 4.5).
+AI-assisted deliverable drafting via Anthropic Claude.
 
 Takes a lead's questionnaire answers and returns a structured JSON design plan
 that maps directly to the Deliverable model.
@@ -10,62 +10,51 @@ import json
 import logging
 import os
 import re
-import uuid
 from typing import Any, Dict, List
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import anthropic
 
 logger = logging.getLogger(__name__)
 
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+MODEL_NAME = "claude-sonnet-4-5"
 
 SYSTEM_PROMPT = """You are a senior home-organization designer for FlowSpace.
+We focus on storage solutions for mental health — our philosophy is that a calm,
+organized space directly reduces anxiety, overwhelm, and decision fatigue.
+
 Given a customer's questionnaire answers, produce a thoughtful, calm,
-practical design plan tailored to their space and preferences.
+practical design plan tailored to their space and mental-health needs.
 
 Return ONLY valid JSON matching exactly this schema (no prose, no markdown,
 no code fences) — keep every list short and concrete (max ~5 items each):
 
 {
-  "intro": string,            // 1–2 warm sentences welcoming them
-  "needs": [string],          // 3–6 functional needs for the space
-  "zones": [{"title": string, "desc": string}],  // 3–4 functional zones
-  "wall_color_name": string,  // designer-friendly paint name
-  "wall_color_code": string,  // a real-sounding code (e.g. "SW 6204") — invent if needed
-  "wall_color_hex": string,   // valid 7-char hex like "#cfd7d3" matching color_prefs
-  "wall_color_note": string,  // 1 short sentence on why this color works
-  "shopping_list": [{"name": string, "qty": number, "price": number}],  // 5–8 items, USD
-  "budget_note": string,      // 1 short line on how the total fits their budget
-  "strategy": [string],       // 3–5 design principles tied to desired_feeling
-  "action_plan": [string],    // 4–6 ordered steps the customer can follow
-  "benefits": [string],       // 3–5 outcomes
-  "notes": string,            // 1 line caveat about measurements
-  "summary": string,          // 2–3 sentences recapping the design intent
-  "attachment_note": string   // 1 short line; can be empty string
+  "intro": string,
+  "needs": [string],
+  "zones": [{"title": string, "desc": string}],
+  "wall_color_name": string,
+  "wall_color_code": string,
+  "wall_color_hex": string,
+  "wall_color_note": string,
+  "shopping_list": [{"name": string, "qty": number, "price": number}],
+  "budget_note": string,
+  "strategy": [string],
+  "action_plan": [string],
+  "benefits": [string],
+  "notes": string,
+  "summary": string,
+  "attachment_note": string
 }
 
-Style guidance:
-- Calm, friendly, second-person voice. Avoid jargon.
-- Prices are reasonable USD estimates (Target/IKEA/Wayfair-ish ranges).
-- shopping_list.price is a per-unit number (e.g. 49.99), not a string.
-- wall_color_hex must be a valid hex code. If the customer chose 'sage', pick a sage hex.
-- The plan must reflect: space_type, bothers_about, desired_feeling, must_stay,
-  storage_needs, style_prefs, color_prefs, budget, diy_level, and daily_improvement.
-- If diy_level indicates low DIY, prefer simple-assembly items and small steps.
-- If budget is low (under_100 / 100_300), keep totals within that band."""
+Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
+wall_color_hex must be valid 7-char hex. shopping_list.price is per-unit number.
+Always weave in the mental-health angle: clutter causes stress, organization creates calm."""
 
-
-# Friendly label maps so the LLM sees human-readable answers instead of opaque keys.
 BOTHERS = {
-    "clutter": "Too much clutter",
-    "no_storage": "Not enough storage",
-    "hard_clean": "Hard to clean",
-    "stressful": "Feels stressful/overwhelming",
-    "not_cozy": "Doesn't feel cozy",
-    "no_function": "Doesn't function well",
-    "bad_layout": "Poor furniture layout",
-    "too_dark": "Too dark",
+    "clutter": "Too much clutter", "no_storage": "Not enough storage",
+    "hard_clean": "Hard to clean", "stressful": "Feels stressful/overwhelming",
+    "not_cozy": "Doesn't feel cozy", "no_function": "Doesn't function well",
+    "bad_layout": "Poor furniture layout", "too_dark": "Too dark",
     "no_hobby": "No space for hobbies/work",
 }
 FEELING = {
@@ -100,54 +89,41 @@ DIY = {
 
 
 def _humanize(values: List[str], mapping: Dict[str, str]) -> List[str]:
-    out: List[str] = []
-    for v in values or []:
-        out.append(mapping.get(v, v.replace("_", " ")))
-    return out
+    return [mapping.get(v, v.replace("_", " ")) for v in (values or [])]
 
 
 def _summarize_lead(lead: Dict[str, Any]) -> str:
-    """Build a clean prompt body from raw lead fields."""
     parts: List[str] = []
     space = (lead.get("space_type") or "space").capitalize()
     parts.append(f"Space: {space}")
     if lead.get("name"):
         parts.append(f"Customer name: {lead['name']}")
-
     if lead.get("bothers_about"):
         parts.append("What bothers them: " + ", ".join(_humanize(lead["bothers_about"], BOTHERS)))
     if lead.get("bothers_other"):
         parts.append(f"Other concern: {lead['bothers_other']}")
-
     if lead.get("desired_feeling"):
         parts.append("Wants the space to feel: " + ", ".join(_humanize(lead["desired_feeling"], FEELING)))
     if lead.get("feeling_other"):
-        parts.append(f"Also feels like: {lead['feeling_other']}")
-
+        parts.append(f"Also: {lead['feeling_other']}")
     if lead.get("must_stay"):
-        parts.append(f"Must keep in the room: {lead['must_stay']}")
-
+        parts.append(f"Must keep: {lead['must_stay']}")
     if lead.get("storage_needs"):
-        parts.append("Needs more storage for: " + ", ".join(_humanize(lead["storage_needs"], STORAGE)))
-
+        parts.append("Storage for: " + ", ".join(_humanize(lead["storage_needs"], STORAGE)))
     if lead.get("style_prefs"):
-        parts.append("Style preferences: " + ", ".join(_humanize(lead["style_prefs"], STYLE)))
+        parts.append("Style: " + ", ".join(_humanize(lead["style_prefs"], STYLE)))
     if lead.get("color_prefs"):
-        parts.append("Color preferences: " + ", ".join(_humanize(lead["color_prefs"], COLORS)))
-
+        parts.append("Colors: " + ", ".join(_humanize(lead["color_prefs"], COLORS)))
     if lead.get("budget"):
         parts.append("Budget: " + BUDGET.get(lead["budget"], lead["budget"]))
     if lead.get("diy_level"):
-        parts.append("DIY comfort: " + DIY.get(lead["diy_level"], lead["diy_level"]))
-
+        parts.append("DIY: " + DIY.get(lead["diy_level"], lead["diy_level"]))
     if lead.get("daily_improvement"):
-        parts.append(f"One way it should improve daily life: {lead['daily_improvement']}")
-
+        parts.append(f"Daily improvement goal: {lead['daily_improvement']}")
     return "\n".join(parts) or f"Space: {space}"
 
 
 def _extract_json(raw: str) -> Dict[str, Any]:
-    """Tolerantly parse the LLM response — strip code fences and grab the JSON object."""
     text = (raw or "").strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -161,13 +137,10 @@ def _extract_json(raw: str) -> Dict[str, Any]:
 
 
 def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize/validate the LLM output so it round-trips into the Deliverable model."""
-    def as_str(v: Any) -> str:
-        if v is None:
-            return ""
-        return str(v).strip()
+    def as_str(v):
+        return "" if v is None else str(v).strip()
 
-    def as_str_list(v: Any) -> List[str]:
+    def as_str_list(v):
         if not v:
             return []
         if isinstance(v, str):
@@ -213,32 +186,33 @@ def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
         "strategy": as_str_list(plan.get("strategy")),
         "action_plan": as_str_list(plan.get("action_plan")),
         "benefits": as_str_list(plan.get("benefits")),
-        "notes": as_str(plan.get("notes")) or "Important: all measurements are approximate. Confirm with a tape measure before purchasing.",
+        "notes": as_str(plan.get("notes")) or "All measurements are approximate. Confirm before purchasing.",
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
     }
 
 
 async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
-    """Call Claude Sonnet 4.5 and return a normalized deliverable dict."""
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    """Call Claude and return a normalized deliverable dict."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        raise RuntimeError("EMERGENT_LLM_KEY is not configured")
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
 
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=f"deliverable-{lead.get('id', uuid.uuid4())}-{uuid.uuid4().hex[:8]}",
-        system_message=SYSTEM_PROMPT,
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
-
+    client = anthropic.Anthropic(api_key=api_key)
     user_text = (
         "Customer questionnaire answers:\n\n"
         + _summarize_lead(lead)
-        + "\n\nReturn ONLY the JSON object as specified — no markdown, no preamble."
+        + "\n\nReturn ONLY the JSON object — no markdown, no preamble."
     )
-    msg = UserMessage(text=user_text)
-    raw = await chat.send_message(msg)
-    logger.info("AI deliverable draft received (%d chars)", len(raw or ""))
 
+    message = client.messages.create(
+        model=MODEL_NAME,
+        max_tokens=2048,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_text}],
+    )
+
+    raw = message.content[0].text
+    logger.info("AI draft received (%d chars)", len(raw or ""))
     plan = _extract_json(raw)
     return _coerce(plan)

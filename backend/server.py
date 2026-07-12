@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Header, Depends, UploadFile, File, BackgroundTasks
 from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -13,18 +13,13 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone
 
-from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
-    CheckoutSessionResponse,
-    CheckoutStatusResponse,
-    CheckoutSessionRequest,
-)
 import stripe as stripe_sdk
 import httpx
 
 from pdf_generator import build_pdf
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
+from automation import run_automation
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -34,39 +29,39 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 fs_bucket = AsyncIOMotorGridFSBucket(db, bucket_name="uploads")
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB per photo
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "garage2025")
+STRIPE_API_KEY      = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+ADMIN_PASSWORD      = os.environ.get("ADMIN_PASSWORD", "flowspace2025")
 
-# Server-side package definitions
 PACKAGES: Dict[str, Dict[str, Any]] = {
-    "basic": {"id": "basic", "name": "Basic", "price": 79.0, "currency": "usd"},
+    "basic":    {"id": "basic",    "name": "Basic",    "price": 79.0,  "currency": "usd"},
     "standard": {"id": "standard", "name": "Standard", "price": 149.0, "currency": "usd"},
-    "premium": {"id": "premium", "name": "Premium", "price": 299.0, "currency": "usd"},
+    "premium":  {"id": "premium",  "name": "Premium",  "price": 299.0, "currency": "usd"},
 }
 
 STARTER_GALLERY = [
     {
         "id": str(uuid.uuid4()),
-        "title": "Garage — Workshop reset",
-        "category": "garage",
-        "before_url": "https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1400&q=80",
+        "title": "Bedroom — Calming retreat",
+        "category": "closet",
+        "before_url": "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
+        "after_url":  "https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=1400&q=80",
     },
     {
         "id": str(uuid.uuid4()),
-        "title": "Walk-in closet — Daily clarity",
-        "category": "closet",
-        "before_url": "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=1400&q=80",
+        "title": "Garage — Workshop reset",
+        "category": "garage",
+        "before_url": "https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1400&q=80",
+        "after_url":  "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1400&q=80",
     },
     {
         "id": str(uuid.uuid4()),
         "title": "Pantry — Categorized storage",
         "category": "storage",
         "before_url": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?auto=format&fit=crop&w=1400&q=80",
-        "after_url": "https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=1400&q=80",
+        "after_url":  "https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=1400&q=80",
     },
 ]
 
@@ -74,7 +69,7 @@ app = FastAPI(title="FlowSpace API")
 api_router = APIRouter(prefix="/api")
 
 
-# ------------------------- Models -------------------------
+# ──────────────────────────── Models ─────────────────────────────
 class Lead(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -85,8 +80,7 @@ class Lead(BaseModel):
     biggest_challenge: Optional[str] = None
     goals: Optional[str] = None
     timeline: Optional[str] = None
-    photos: List[str] = []
-    # Questionnaire fields
+    photos: List[Any] = []
     bothers_about: List[str] = []
     bothers_other: Optional[str] = None
     desired_feeling: List[str] = []
@@ -112,7 +106,7 @@ class LeadCreate(BaseModel):
     biggest_challenge: Optional[str] = None
     goals: Optional[str] = None
     timeline: Optional[str] = None
-    photos: List[str] = []
+    photos: List[Any] = []
     bothers_about: List[str] = []
     bothers_other: Optional[str] = None
     desired_feeling: List[str] = []
@@ -161,6 +155,7 @@ class PaymentTransaction(BaseModel):
     amount: float
     currency: str
     email: Optional[str] = None
+    lead_id: Optional[str] = None
     payment_status: str = "initiated"
     status: str = "open"
     metadata: Dict[str, str] = {}
@@ -202,7 +197,6 @@ class Deliverable(BaseModel):
     summary: Optional[str] = None
     attachment_note: Optional[str] = None
     shopping_links: List[ShoppingLink] = []
-    # Image refs (any URL — relative /api/uploads/photo/{id} or absolute http)
     front_view_url: Optional[str] = None
     floor_plan_url: Optional[str] = None
     view_1_url: Optional[str] = None
@@ -212,7 +206,7 @@ class Deliverable(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-# ------------------------- Helpers -------------------------
+# ──────────────────────────── Helpers ─────────────────────────────
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
@@ -250,7 +244,32 @@ async def seed_gallery_if_empty():
             await db.gallery.insert_one(doc)
 
 
-# ------------------------- Public Routes -------------------------
+async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
+    if not url:
+        return None
+    try:
+        if url.startswith("/api/uploads/photo/"):
+            photo_id = url.rsplit("/", 1)[-1]
+            try:
+                oid = ObjectId(photo_id)
+            except Exception:
+                return None
+            try:
+                stream = await fs_bucket.open_download_stream(oid)
+            except NoFile:
+                return None
+            return await stream.read()
+        if url.startswith("http://") or url.startswith("https://"):
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as ac:
+                r = await ac.get(url)
+                r.raise_for_status()
+                return r.content
+    except Exception as e:
+        logging.warning(f"image fetch failed for {url}: {e}")
+    return None
+
+
+# ──────────────────────────── Public Routes ─────────────────────────────
 @api_router.get("/")
 async def root():
     return {"message": "FlowSpace API", "status": "ok"}
@@ -262,11 +281,19 @@ async def get_packages():
 
 
 @api_router.post("/leads", response_model=Lead)
-async def create_lead(payload: LeadCreate):
+async def create_lead(payload: LeadCreate, background_tasks: BackgroundTasks):
+    """Create a lead. If no Stripe payment is needed (free tier / direct), trigger automation immediately."""
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
     lead = Lead(**payload.model_dump())
     await db.leads.insert_one(_doc(lead))
+
+    # If no package selected (e.g. free demo), or you want to allow
+    # questionnaire-only flow → trigger automation immediately
+    if not payload.package_id:
+        lead_doc = _doc(lead)
+        background_tasks.add_task(run_automation, lead=lead_doc, db=db, fs_bucket=fs_bucket)
+
     return lead
 
 
@@ -277,7 +304,7 @@ async def list_gallery():
     return [_hydrate(it, ["created_at"]) for it in items]
 
 
-# ------------------------- Uploads (GridFS) -------------------------
+# ──────────────────────────── Uploads (GridFS) ─────────────────────────────
 @api_router.post("/uploads/photo")
 async def upload_photo(file: UploadFile = File(...)):
     ct = (file.content_type or "").lower()
@@ -307,9 +334,7 @@ async def get_photo(photo_id: str):
     except NoFile:
         raise HTTPException(status_code=404, detail="Not found")
     data = await stream.read()
-    media = "image/jpeg"
-    if stream.metadata and stream.metadata.get("content_type"):
-        media = stream.metadata["content_type"]
+    media = stream.metadata.get("content_type", "image/jpeg") if stream.metadata else "image/jpeg"
     return Response(
         content=data,
         media_type=media,
@@ -317,7 +342,7 @@ async def get_photo(photo_id: str):
     )
 
 
-# ------------------------- Admin Routes -------------------------
+# ──────────────────────────── Admin Routes ─────────────────────────────
 @api_router.post("/admin/login")
 async def admin_login(payload: AdminLoginRequest):
     if payload.password != ADMIN_PASSWORD:
@@ -329,6 +354,16 @@ async def admin_login(payload: AdminLoginRequest):
 async def admin_leads(_: bool = Depends(require_admin)):
     items = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
     return [_hydrate(it, ["created_at"]) for it in items]
+
+
+@api_router.post("/admin/leads/{lead_id}/retry-automation")
+async def retry_automation(lead_id: str, background_tasks: BackgroundTasks, _: bool = Depends(require_admin)):
+    """Manually trigger the full automation pipeline for a lead (retry or re-send)."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+    return {"message": "Automation started", "lead_id": lead_id}
 
 
 @api_router.post("/admin/gallery", response_model=GalleryItem)
@@ -354,34 +389,7 @@ async def admin_transactions(_: bool = Depends(require_admin)):
     return [_hydrate(it, ["created_at", "updated_at"]) for it in items]
 
 
-# ------------------------- Deliverable / PDF -------------------------
-async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
-    """Fetch image bytes from a URL (relative /api/uploads/... or absolute http)."""
-    if not url:
-        return None
-    try:
-        if url.startswith("/api/uploads/photo/"):
-            photo_id = url.rsplit("/", 1)[-1]
-            try:
-                oid = ObjectId(photo_id)
-            except Exception:
-                return None
-            try:
-                stream = await fs_bucket.open_download_stream(oid)
-            except NoFile:
-                return None
-            return await stream.read()
-        if url.startswith("http://") or url.startswith("https://"):
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as ac:
-                r = await ac.get(url)
-                r.raise_for_status()
-                return r.content
-    except Exception as e:
-        logging.warning(f"image fetch failed for {url}: {e}")
-        return None
-    return None
-
-
+# ──────────────────────────── Deliverable / PDF ─────────────────────────────
 @api_router.get("/admin/leads/{lead_id}/deliverable")
 async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
@@ -394,24 +402,19 @@ async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
 
 
 @api_router.put("/admin/leads/{lead_id}/deliverable", response_model=Deliverable)
-async def upsert_deliverable(
-    lead_id: str, payload: Deliverable, _: bool = Depends(require_admin)
-):
+async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depends(require_admin)):
     lead = await db.leads.find_one({"id": lead_id})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     payload.lead_id = lead_id
     payload.updated_at = datetime.now(timezone.utc)
     doc = _doc(payload)
-    await db.deliverables.update_one(
-        {"lead_id": lead_id}, {"$set": doc}, upsert=True
-    )
+    await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
     return payload
 
 
 @api_router.post("/admin/leads/{lead_id}/deliverable/draft")
 async def ai_draft_deliverable(lead_id: str, _: bool = Depends(require_admin)):
-    """Use the LLM to draft a deliverable from the lead's questionnaire."""
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -424,120 +427,76 @@ async def ai_draft_deliverable(lead_id: str, _: bool = Depends(require_admin)):
 
 
 @api_router.post("/admin/leads/{lead_id}/deliverable/generate-image")
-async def ai_generate_image(
-    lead_id: str,
-    slot: str = "front_view",
-    _: bool = Depends(require_admin),
-):
-    """Generate an AI rendering for a deliverable image slot using Nano Banana.
-
-    Currently supports slot='front_view' — a 3D front-view rendering based
-    on the customer's questionnaire answers and (when available) their
-    uploaded reference photos. The generated PNG is persisted to GridFS
-    and the deliverable doc is updated so the URL survives reloads.
-    """
+async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = Depends(require_admin)):
     valid_slots = {"front_view", "view_1", "view_2", "view_3", "floor_plan"}
     if slot not in valid_slots:
-        raise HTTPException(status_code=400, detail=f"Invalid slot. Use one of {sorted(valid_slots)}")
-
+        raise HTTPException(status_code=400, detail=f"Invalid slot. Use: {sorted(valid_slots)}")
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     deliverable = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
-
     try:
-        png_bytes, mime = await generate_front_view(
-            lead=lead, deliverable=deliverable, fs_bucket=fs_bucket
-        )
+        png_bytes, mime = await generate_front_view(lead=lead, deliverable=deliverable, fs_bucket=fs_bucket)
     except Exception as e:
         logging.exception("AI image generation failed")
         raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
-
     ext = "jpg" if "jpeg" in (mime or "") else "png"
     file_id = await fs_bucket.upload_from_stream(
         f"ai_{slot}_{lead_id}.{ext}",
         png_bytes,
-        metadata={
-            "content_type": mime or "image/png",
-            "uploaded_at": _iso(datetime.now(timezone.utc)),
-            "source": "ai_generated",
-            "lead_id": lead_id,
-            "slot": slot,
-        },
+        metadata={"content_type": mime or "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "ai", "lead_id": lead_id, "slot": slot},
     )
     url = f"/api/uploads/photo/{file_id}"
-
-    slot_field = f"{slot}_url"
     await db.deliverables.update_one(
         {"lead_id": lead_id},
-        {
-            "$set": {
-                slot_field: url,
-                "lead_id": lead_id,
-                "updated_at": _iso(datetime.now(timezone.utc)),
-            }
-        },
+        {"$set": {f"{slot}_url": url, "lead_id": lead_id, "updated_at": _iso(datetime.now(timezone.utc))}},
         upsert=True,
     )
-
     return {"slot": slot, "url": url}
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
-async def render_deliverable_pdf(
-    lead_id: str, request: Request, _: bool = Depends(require_admin)
-):
+async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depends(require_admin)):
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {
-        "lead_id": lead_id
-    }
-
-    # Resolve image bytes in parallel-ish (sequentially via async for clarity)
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {"lead_id": lead_id}
     images: Dict[str, Any] = {
-        "front_view": await _resolve_image_bytes(d.get("front_view_url"), request),
-        "floor_plan": await _resolve_image_bytes(d.get("floor_plan_url"), request),
-        "view_1": await _resolve_image_bytes(d.get("view_1_url"), request),
-        "view_2": await _resolve_image_bytes(d.get("view_2_url"), request),
-        "view_3": await _resolve_image_bytes(d.get("view_3_url"), request),
+        "front_view":  await _resolve_image_bytes(d.get("front_view_url"), request),
+        "floor_plan":  await _resolve_image_bytes(d.get("floor_plan_url"), request),
+        "view_1":      await _resolve_image_bytes(d.get("view_1_url"), request),
+        "view_2":      await _resolve_image_bytes(d.get("view_2_url"), request),
+        "view_3":      await _resolve_image_bytes(d.get("view_3_url"), request),
     }
-    customer_photos: List[Optional[bytes]] = []
+    customer_photos = []
     if d.get("include_customer_photos", True):
         for p in (lead.get("photos") or [])[:8]:
-            b = await _resolve_image_bytes(p, request)
+            url = p if isinstance(p, str) else (p.get("url") if isinstance(p, dict) else None)
+            b = await _resolve_image_bytes(url, request)
             if b:
                 customer_photos.append(b)
     images["customer_photos"] = customer_photos
-
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
-
     safe_name = (lead.get("name") or "client").replace(" ", "_")
     space = (lead.get("space_type") or "space").capitalize()
-    filename = f"FlowSpace_{space}_Plan_{safe_name}.pdf"
-
+    filename = f"FlowSpace_{space}_Blueprint_{safe_name}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
-            "Cache-Control": "no-store",
-        },
+        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
     )
 
 
-# ------------------------- Stripe -------------------------
-def _get_stripe(request: Request) -> StripeCheckout:
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    return StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-
-
+# ──────────────────────────── Stripe ─────────────────────────────
 @api_router.post("/checkout/session")
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package")
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+
     pkg = PACKAGES[req.package_id]
+    stripe_sdk.api_key = STRIPE_API_KEY
     origin = req.origin_url.rstrip("/")
     success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/?canceled=1#packages"
@@ -550,25 +509,31 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     if req.email:
         metadata["email"] = str(req.email)
     if req.metadata:
-        for k, v in req.metadata.items():
-            metadata[str(k)] = str(v)
+        metadata.update({str(k): str(v) for k, v in req.metadata.items()})
 
-    stripe = _get_stripe(request)
-    checkout_req = CheckoutSessionRequest(
-        amount=float(pkg["price"]),
-        currency=pkg["currency"],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata=metadata,
-    )
     try:
-        session: CheckoutSessionResponse = await stripe.create_checkout_session(checkout_req)
+        session = stripe_sdk.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": pkg["currency"],
+                    "product_data": {"name": f"FlowSpace {pkg['name']} Blueprint"},
+                    "unit_amount": int(pkg["price"] * 100),
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            customer_email=str(req.email) if req.email else None,
+            metadata=metadata,
+        )
     except Exception as e:
         logging.exception("Stripe checkout creation failed")
         raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
 
     tx = PaymentTransaction(
-        session_id=session.session_id,
+        session_id=session.id,
         package_id=pkg["id"],
         amount=float(pkg["price"]),
         currency=pkg["currency"],
@@ -578,18 +543,14 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         metadata=metadata,
     )
     await db.payment_transactions.insert_one(_doc(tx))
-
-    return {"url": session.url, "session_id": session.session_id}
+    return {"url": session.url, "session_id": session.id}
 
 
 @api_router.get("/checkout/status/{session_id}")
-async def checkout_status(session_id: str, request: Request):
-    existing = await db.payment_transactions.find_one(
-        {"session_id": session_id}, {"_id": 0}
-    )
+async def checkout_status(session_id: str):
+    existing = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Session not found")
-
     if existing.get("payment_status") == "paid":
         return {
             "payment_status": "paid",
@@ -599,46 +560,21 @@ async def checkout_status(session_id: str, request: Request):
             "metadata": existing.get("metadata", {}),
         }
 
-    stripe = _get_stripe(request)
-    status_resp = None
+    stripe_sdk.api_key = STRIPE_API_KEY
     try:
-        status_resp = await stripe.get_checkout_status(session_id)
-        new_payment_status = status_resp.payment_status
-        new_status = status_resp.status
-        amount_total = status_resp.amount_total
-        currency = status_resp.currency
-        metadata = status_resp.metadata
+        sess = stripe_sdk.checkout.Session.retrieve(session_id)
+        new_payment_status = getattr(sess, "payment_status", "unknown")
+        new_status = getattr(sess, "status", "unknown")
+        amount_total = getattr(sess, "amount_total", None) or 0
+        currency = getattr(sess, "currency", existing.get("currency", "usd"))
+        metadata = dict(getattr(sess, "metadata", {}) or {})
     except Exception as e:
-        # Fallback: emergentintegrations currently has a pydantic validation bug
-        # with StripeObject metadata. Query Stripe directly.
-        logging.warning(f"emergentintegrations status failed, falling back: {e}")
-        try:
-            stripe_sdk.api_key = STRIPE_API_KEY
-            sess = await stripe_sdk.checkout.Session.retrieve_async(session_id)
-            new_payment_status = getattr(sess, "payment_status", "unknown")
-            new_status = getattr(sess, "status", "unknown")
-            amount_total = getattr(sess, "amount_total", None) or 0
-            currency = getattr(sess, "currency", existing.get("currency", "usd"))
-            raw_meta = getattr(sess, "metadata", {}) or {}
-            try:
-                metadata = dict(raw_meta)
-            except Exception:
-                metadata = {}
-        except Exception as inner:
-            logging.exception("Stripe direct fallback also failed")
-            raise HTTPException(status_code=502, detail=f"Stripe error: {inner}")
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
 
     await db.payment_transactions.update_one(
         {"session_id": session_id},
-        {
-            "$set": {
-                "payment_status": new_payment_status,
-                "status": new_status,
-                "updated_at": _iso(datetime.now(timezone.utc)),
-            }
-        },
+        {"$set": {"payment_status": new_payment_status, "status": new_status, "updated_at": _iso(datetime.now(timezone.utc))}},
     )
-
     return {
         "payment_status": new_payment_status,
         "status": new_status,
@@ -649,30 +585,72 @@ async def checkout_status(session_id: str, request: Request):
 
 
 @api_router.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
+async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Handle Stripe webhooks.
+    On checkout.session.completed with payment_status=paid:
+      1. Mark transaction as paid
+      2. Link or create the lead
+      3. Fire automation pipeline in background
+    """
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
-    stripe = _get_stripe(request)
+
     try:
-        event = await stripe.handle_webhook(body, sig)
+        if STRIPE_WEBHOOK_SECRET:
+            event = stripe_sdk.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
+        else:
+            # Dev mode — trust all events
+            import json
+            event = stripe_sdk.Event.construct_from(json.loads(body), stripe_sdk.api_key)
     except Exception as e:
-        logging.exception("Webhook failure")
+        logging.exception("Webhook verification failed")
         raise HTTPException(status_code=400, detail=str(e))
 
-    if getattr(event, "session_id", None):
+    if event.type == "checkout.session.completed":
+        sess = event.data.object
+        session_id = sess.id
+        payment_status = getattr(sess, "payment_status", "unknown")
+        metadata = dict(getattr(sess, "metadata", {}) or {})
+        customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
+
         await db.payment_transactions.update_one(
-            {"session_id": event.session_id},
-            {
-                "$set": {
-                    "payment_status": event.payment_status,
-                    "updated_at": _iso(datetime.now(timezone.utc)),
-                }
-            },
+            {"session_id": session_id},
+            {"$set": {"payment_status": payment_status, "status": sess.status, "updated_at": _iso(datetime.now(timezone.utc))}},
         )
+
+        if payment_status == "paid" and customer_email:
+            # Find the most recent lead for this email that has no session linked
+            lead = await db.leads.find_one(
+                {"email": customer_email, "status": "new"},
+                {"_id": 0},
+                sort=[("created_at", -1)],
+            )
+            if lead:
+                # Link session to lead
+                await db.leads.update_one(
+                    {"id": lead["id"]},
+                    {"$set": {
+                        "stripe_session_id": session_id,
+                        "package_id": metadata.get("package_id", lead.get("package_id", "")),
+                        "status": "paid",
+                    }},
+                )
+                # Update transaction with lead_id
+                await db.payment_transactions.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"lead_id": lead["id"]}},
+                )
+                # Fire automation pipeline
+                background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+                logging.info("Automation triggered for lead %s after payment", lead["id"])
+            else:
+                logging.warning("No matching lead found for email %s after payment", customer_email)
+
     return {"received": True}
 
 
-# ------------------------- App wiring -------------------------
+# ──────────────────────────── App wiring ─────────────────────────────
 app.include_router(api_router)
 
 app.add_middleware(
