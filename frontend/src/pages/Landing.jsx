@@ -383,7 +383,7 @@ const Gallery = () => {
 
     useEffect(() => {
         api.get("/gallery")
-            .then((r) => setItems(r.data || []))
+            .then((r) => setItems(Array.isArray(r.data) ? r.data : []))
             .catch(() => setItems([]));
     }, []);
 
