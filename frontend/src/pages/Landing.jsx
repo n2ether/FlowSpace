@@ -1,612 +1,579 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
-import {
-    ArrowRight,
-    Check,
-    Sparkles,
-    ShoppingBag,
-    LayoutGrid,
-    Heart,
-    Clock,
-    Upload,
-    Pencil,
-    Target,
-    Star,
-    Users,
-    Home,
-    Compass,
-    ArrowUpRight,
-} from "lucide-react";
-import Header from "../components/Header";
-import Footer from "../components/Footer";
-import BeforeAfterSlider from "../components/BeforeAfterSlider";
-import QuestionnaireModal from "../components/QuestionnaireModal";
-import { Button } from "../components/ui/button";
-import {
-    Accordion,
-    AccordionContent,
-    AccordionItem,
-    AccordionTrigger,
-} from "../components/ui/accordion";
-import { api } from "../lib/api";
-import { useLang } from "../context/LanguageContext";
-import { toast } from "sonner";
+import { useState } from "react";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import BeforeAfterSlider from "@/components/BeforeAfterSlider";
+import PricingCard from "@/components/PricingCard";
 
-// Lightweight pub/sub so any CTA can open the questionnaire modal
-const openQuestionnaire = (pkg = "") => {
-    window.dispatchEvent(new CustomEvent("flowspace:open-questionnaire", { detail: { pkg } }));
-};
+// Existing assets preserved from the prior FlowSpace project
+const HERO_BEFORE =
+  "https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1600&q=80";
+const HERO_AFTER =
+  "https://images.unsplash.com/photo-1727823065187-7b11ee08c1d8?auto=format&fit=crop&w=1600&q=80";
 
-const fadeUp = {
-    initial: { opacity: 0, y: 16 },
-    whileInView: { opacity: 1, y: 0 },
-    viewport: { once: true, margin: "-80px" },
-    transition: { duration: 0.6, ease: "easeOut" },
-};
+const GALLERY = [
+  {
+    id: "garage",
+    category: "Garage",
+    title: "From chaos garage to flow",
+    before:
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/iynilrc8_cluttered_garage.png",
+    after:
+      "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/9sy0qc1i_organized_garage.png",
+  },
+  {
+    id: "closet",
+    category: "Closet",
+    title: "Closet, calmed",
+    before:
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/9qy6to10_cluttered_closet.png",
+    after:
+      "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/l8r8pdii_tidy_closet.png",
+  },
+  {
+    id: "laundry",
+    category: "Laundry",
+    title: "A laundry room that breathes",
+    before:
+      "https://customer-assets.emergentagent.com/job_organize-design/artifacts/z2z93f26_cluttered_laundry_room.png",
+    after:
+      "https://customer-assets.emergentagent.com/job_space-transformed/artifacts/dlxnx33a_tidy_laundry_room.png",
+  },
+];
 
-const Eyebrow = ({ children, testId }) => (
-    <span
-        className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.22em] text-emerald-700"
-        data-testid={testId}
-    >
-        <span className="h-px w-6 bg-emerald-400" />
-        {children}
-    </span>
-);
+const PLANS = [
+  {
+    id: "free",
+    name: "Free",
+    tagline: "Try the FlowSpace experience",
+    price: 0,
+    features: [
+      "Upload up to 2 photos",
+      "AI-generated organized rooms",
+      "Quick, no signup",
+    ],
+    pdf: false,
+  },
+  {
+    id: "plus",
+    name: "Plus",
+    tagline: "For one space at a time",
+    price: 10,
+    features: [
+      "Upload up to 3 photos",
+      "AI-generated organized rooms",
+      "Custom PDF organization plan",
+      "Email delivery",
+    ],
+    pdf: true,
+  },
+  {
+    id: "premium",
+    name: "Premium",
+    tagline: "For full-room transformations",
+    price: 20,
+    features: [
+      "Upload up to 4 photos",
+      "AI-generated organized rooms",
+      "Custom PDF organization plan",
+      "Shopping & labeling guide",
+      "Priority delivery",
+    ],
+    pdf: true,
+  },
+];
 
-const Hero = () => {
-    const { t } = useLang();
-    const navigate = useNavigate();
-    const scroll = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+const VALUES = [
+  {
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5"
+      >
+        <rect width="7" height="7" x="3" y="3" rx="1" />
+        <rect width="7" height="7" x="14" y="3" rx="1" />
+        <rect width="7" height="7" x="14" y="14" rx="1" />
+        <rect width="7" height="7" x="3" y="14" rx="1" />
+      </svg>
+    ),
+    title: "Personalized layout",
+    body: "Designed for your real space — not a generic template.",
+  },
+  {
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5"
+      >
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" x2="12" y1="3" y2="15" />
+      </svg>
+    ),
+    title: "Upload & go",
+    body: "Snap a few photos. Skip the questionnaires and consults.",
+  },
+  {
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5"
+      >
+        <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" />
+        <circle cx="12" cy="12" r="10" />
+      </svg>
+    ),
+    title: "See it first",
+    body: "Visualize the after before lifting a single box.",
+  },
+  {
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-5 w-5"
+      >
+        <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+      </svg>
+    ),
+    title: "For real life",
+    body: "Pretty, practical, and built for how you actually live.",
+  },
+];
 
-    return (
-        <section className="relative overflow-hidden bg-white pt-14 md:pt-20">
-            <div className="pointer-events-none absolute inset-0 -z-10">
-                <div className="absolute left-1/2 top-[-10%] h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-emerald-100/60 blur-3xl" />
-                <div className="absolute right-[-10%] top-[30%] h-[420px] w-[420px] rounded-full bg-blue-100/50 blur-3xl" />
-            </div>
+const FAQS = [
+  {
+    q: "What does FlowSpace actually do?",
+    a: "You upload photos of a cluttered room. Our AI generates a clean, organized version of the same room — same angle, same dimensions — with storage bins, shelving and a calmer layout, so you can see exactly how it could look.",
+  },
+  {
+    q: "Do I need an account to get started?",
+    a: "Nope. Pick a plan, upload your photos, and we get to work. You'll receive your transformation right in your browser, with a copy delivered to your email.",
+  },
+  {
+    q: "How is the PDF plan different from the AI image?",
+    a: "The AI image shows the visual transformation. The PDF (Plus & Premium) walks you through categories, a shopping list, and step-by-step setup — coming soon to your inbox after submission.",
+  },
+  {
+    q: "Which rooms work best?",
+    a: "Garages, closets, laundry rooms, mudrooms, pantries, kid rooms, and storage areas all work great. Anything with visible clutter and clear sightlines.",
+  },
+  {
+    q: "What photo formats do you accept?",
+    a: "JPG, PNG, and WebP — straight from your phone is perfect. Shoot in landscape with the whole space in frame for best results.",
+  },
+];
 
-            <div className="container-app grid grid-cols-1 items-center gap-12 pb-16 md:gap-16 md:pb-24 lg:grid-cols-[1.05fr_1fr]">
-                <motion.div {...fadeUp} className="flex flex-col gap-7">
-                    <Eyebrow testId="hero-eyebrow">{t.hero.eyebrow}</Eyebrow>
-                    <h1 className="font-heading text-[40px] font-light leading-[1.05] tracking-tight text-slate-900 sm:text-[56px] lg:text-[68px]">
-                        {t.hero.h1_a}
-                        <span className="block text-emerald-600">{t.hero.h1_b}</span>
-                    </h1>
-                    <p className="max-w-xl text-lg leading-relaxed text-slate-600">
-                        {t.hero.sub}
-                    </p>
+export default function Landing() {
+  const [filter, setFilter] = useState("all");
+  const filtered =
+    filter === "all" ? GALLERY : GALLERY.filter((g) => g.id === filter);
 
-                    <div className="flex flex-wrap items-center gap-3 pt-2">
-                        <Button
-                            onClick={() => openQuestionnaire("")}
-                            className="group rounded-full bg-emerald-500 px-6 py-6 text-base font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-600 hover:shadow-md"
-                            data-testid="hero-cta-start"
-                        >
-                            {t.hero.cta_primary}
-                            <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                        </Button>
-                        <Button
-                            variant="outline"
-                            onClick={() => scroll("gallery")}
-                            className="rounded-full border-slate-200 bg-white px-6 py-6 text-base font-medium text-slate-700 hover:border-emerald-300 hover:text-emerald-700"
-                            data-testid="hero-cta-examples"
-                        >
-                            {t.hero.cta_secondary}
-                        </Button>
-                    </div>
+  return (
+    <div className="min-h-screen bg-white">
+      <Header />
 
-                    <div className="flex flex-wrap items-center gap-5 pt-2 text-sm text-slate-500">
-                        <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-emerald-600" />
-                            <span>{t.hero.delivery}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                            <span className="ml-1">4.9 / 500+</span>
-                        </div>
-                    </div>
-                </motion.div>
-
-                <motion.div {...fadeUp} transition={{ duration: 0.7, delay: 0.1 }}>
-                    <div className="relative">
-                        <div className="absolute -top-6 -left-6 hidden h-28 w-28 rounded-2xl bg-blue-50 md:block" />
-                        <div className="absolute -bottom-6 -right-6 hidden h-28 w-28 rounded-2xl bg-emerald-50 md:block" />
-                        <BeforeAfterSlider
-                            beforeUrl="https://images.unsplash.com/photo-1570129476815-ba368ac77013?auto=format&fit=crop&w=1600&q=80"
-                            afterUrl="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80"
-                            beforeLabel={t.hero.beforeLabel}
-                            afterLabel={t.hero.afterLabel}
-                            className="relative aspect-[4/5] w-full shadow-xl"
-                            testIdPrefix="hero-slider"
-                        />
-                    </div>
-                </motion.div>
-            </div>
-        </section>
-    );
-};
-
-const ValueProp = () => {
-    const { t } = useLang();
-    const icons = [LayoutGrid, ShoppingBag, Compass, Heart];
-    return (
-        <section id="value" className="relative bg-slate-50 section-pad">
-            <div className="container-app">
-                <motion.div {...fadeUp} className="max-w-2xl">
-                    <Eyebrow>{t.value.eyebrow}</Eyebrow>
-                    <h2 className="mt-4 font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.value.title}
-                    </h2>
-                </motion.div>
-                <div className="mt-14 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-                    {t.value.bullets.map((b, i) => {
-                        const Icon = icons[i] || Sparkles;
-                        return (
-                            <motion.div
-                                key={i}
-                                {...fadeUp}
-                                transition={{ duration: 0.5, delay: i * 0.05 }}
-                                className="group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-7 transition-all hover:-translate-y-1 hover:border-emerald-200 hover:shadow-md"
-                                data-testid={`value-card-${i}`}
-                            >
-                                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 transition-colors group-hover:bg-emerald-100">
-                                    <Icon className="h-5 w-5" strokeWidth={1.6} />
-                                </span>
-                                <h3 className="font-heading text-xl font-medium text-slate-900">
-                                    {b.t}
-                                </h3>
-                                <p className="text-slate-600">{b.d}</p>
-                            </motion.div>
-                        );
-                    })}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const HowItWorks = () => {
-    const { t } = useLang();
-    const icons = [Upload, Pencil, Target];
-    return (
-        <section id="how" className="relative bg-white section-pad">
-            <div className="container-app">
-                <motion.div {...fadeUp} className="flex flex-col items-start gap-4">
-                    <Eyebrow>{t.how.eyebrow}</Eyebrow>
-                    <h2 className="font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.how.title}
-                    </h2>
-                </motion.div>
-
-                <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
-                    {t.how.steps.map((step, i) => {
-                        const Icon = icons[i];
-                        return (
-                            <motion.div
-                                key={i}
-                                {...fadeUp}
-                                transition={{ duration: 0.6, delay: i * 0.08 }}
-                                className="relative rounded-2xl border border-slate-200 bg-white p-8"
-                                data-testid={`how-step-${i + 1}`}
-                            >
-                                <div className="absolute -top-5 left-8 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 font-heading text-sm font-semibold text-white shadow-md">
-                                    {i + 1}
-                                </div>
-                                <Icon className="h-8 w-8 text-emerald-600" strokeWidth={1.5} />
-                                <h3 className="mt-5 font-heading text-xl font-medium text-slate-900">
-                                    {step.t}
-                                </h3>
-                                <p className="mt-2 text-slate-600">{step.d}</p>
-                            </motion.div>
-                        );
-                    })}
-                </div>
-
-                <div className="mt-10 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-                    <Clock className="h-4 w-4" /> {t.how.delivery}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const WhatYouGet = () => {
-    const { t } = useLang();
-    return (
-        <section className="relative bg-slate-50 section-pad">
-            <div className="container-app grid grid-cols-1 gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-20">
-                <motion.div {...fadeUp} className="flex flex-col gap-6">
-                    <Eyebrow>{t.what.eyebrow}</Eyebrow>
-                    <h2 className="font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.what.title}
-                    </h2>
-                    <ul className="mt-2 flex flex-col gap-4">
-                        {t.what.items.map((item, i) => (
-                            <li
-                                key={i}
-                                className="flex items-start gap-3 text-lg text-slate-700"
-                                data-testid={`what-item-${i}`}
-                            >
-                                <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-                                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                                </span>
-                                {item}
-                            </li>
-                        ))}
-                    </ul>
-                </motion.div>
-
-                <motion.div {...fadeUp} transition={{ duration: 0.7, delay: 0.1 }}>
-                    <div className="grid grid-cols-2 grid-rows-2 gap-4">
-                        <img
-                            src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80"
-                            alt="Layout"
-                            className="col-span-2 aspect-[16/9] w-full rounded-2xl object-cover"
-                        />
-                        <img
-                            src="https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=700&q=80"
-                            alt="Categories"
-                            className="aspect-square w-full rounded-2xl object-cover"
-                        />
-                        <img
-                            src="https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=700&q=80"
-                            alt="Shopping list"
-                            className="aspect-square w-full rounded-2xl object-cover"
-                        />
-                    </div>
-                </motion.div>
-            </div>
-        </section>
-    );
-};
-
-const Packages = () => {
-    const { t } = useLang();
-    const navigate = useNavigate();
-    const [loadingId, setLoadingId] = useState(null);
-
-    const PACKAGE_PRICES = { basic: 79, standard: 149, premium: 299 };
-
-    const startPlan = async (pkgId) => {
-        setLoadingId(pkgId);
-        try {
-            const origin = window.location.origin;
-            const res = await api.post("/checkout/session", {
-                package_id: pkgId,
-                origin_url: origin,
-            });
-            if (res.data?.url) {
-                window.location.href = res.data.url;
-            } else {
-                openQuestionnaire(pkgId);
-            }
-        } catch (e) {
-            console.error(e);
-            toast.error("Could not start checkout. Opening questionnaire instead.");
-            openQuestionnaire(pkgId);
-        } finally {
-            setLoadingId(null);
-        }
-    };
-
-    const plans = [
-        { id: "basic", data: t.packages.basic, featured: false },
-        { id: "standard", data: t.packages.standard, featured: true },
-        { id: "premium", data: t.packages.premium, featured: false },
-    ];
-
-    return (
-        <section id="packages" className="relative bg-white section-pad">
-            <div className="container-app">
-                <motion.div {...fadeUp} className="mx-auto max-w-2xl text-center">
-                    <Eyebrow>{t.packages.eyebrow}</Eyebrow>
-                    <h2 className="mt-4 font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.packages.title}
-                    </h2>
-                    <p className="mt-4 text-slate-600">{t.packages.sub}</p>
-                </motion.div>
-
-                <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">
-                    {plans.map((p, i) => (
-                        <motion.div
-                            key={p.id}
-                            {...fadeUp}
-                            transition={{ duration: 0.5, delay: i * 0.07 }}
-                            className={`relative flex flex-col rounded-2xl border bg-white p-8 transition-all hover:-translate-y-1 hover:shadow-lg ${
-                                p.featured
-                                    ? "border-emerald-500 shadow-lg ring-4 ring-emerald-50"
-                                    : "border-slate-200"
-                            }`}
-                            data-testid={`package-${p.id}`}
-                        >
-                            {p.featured && (
-                                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium uppercase tracking-widest text-white shadow-sm">
-                                    ★ {t.packages.recommended}
-                                </span>
-                            )}
-                            <h3 className="font-heading text-2xl font-medium text-slate-900">
-                                {p.data.name}
-                            </h3>
-                            <p className="mt-1 text-sm text-slate-500">{p.data.tagline}</p>
-                            <div className="mt-6 flex items-baseline gap-2">
-                                <span className="font-heading text-5xl font-light text-slate-900">
-                                    ${PACKAGE_PRICES[p.id]}
-                                </span>
-                                <span className="text-sm text-slate-500">USD</span>
-                            </div>
-
-                            <ul className="mt-6 flex flex-col gap-3">
-                                {p.data.features.map((f, j) => (
-                                    <li key={j} className="flex items-start gap-2 text-slate-700">
-                                        <Check
-                                            className={`mt-0.5 h-5 w-5 shrink-0 ${
-                                                p.featured ? "text-emerald-500" : "text-blue-600"
-                                            }`}
-                                            strokeWidth={2.2}
-                                        />
-                                        {f}
-                                    </li>
-                                ))}
-                            </ul>
-
-                            <Button
-                                onClick={() => startPlan(p.id)}
-                                disabled={loadingId === p.id}
-                                className={`mt-8 w-full rounded-full py-6 text-base ${
-                                    p.featured
-                                        ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                                        : "bg-slate-900 text-white hover:bg-slate-700"
-                                }`}
-                                data-testid={`package-cta-${p.id}`}
-                            >
-                                {loadingId === p.id ? "..." : t.packages.cta}
-                                <ArrowUpRight className="ml-2 h-4 w-4" />
-                            </Button>
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const Gallery = () => {
-    const { t } = useLang();
-    const [items, setItems] = useState([]);
-    const [filter, setFilter] = useState("all");
-
-    useEffect(() => {
-        api.get("/gallery")
-            .then((r) => setItems(Array.isArray(r.data) ? r.data : []))
-            .catch(() => setItems([]));
-    }, []);
-
-    const filtered = filter === "all" ? items : items.filter((i) => i.category === filter);
-    const cats = ["all", "garage", "closet", "storage"];
-
-    return (
-        <section id="gallery" className="relative bg-slate-50 section-pad">
-            <div className="container-app">
-                <motion.div {...fadeUp} className="flex flex-col items-start gap-4">
-                    <Eyebrow>{t.gallery.eyebrow}</Eyebrow>
-                    <h2 className="font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.gallery.title}
-                    </h2>
-                    <p className="max-w-2xl text-slate-600">{t.gallery.sub}</p>
-                </motion.div>
-
-                <div className="mt-8 flex flex-wrap gap-2">
-                    {cats.map((c) => (
-                        <button
-                            key={c}
-                            onClick={() => setFilter(c)}
-                            className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                                filter === c
-                                    ? "border-emerald-500 bg-emerald-500 text-white"
-                                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
-                            }`}
-                            data-testid={`gallery-filter-${c}`}
-                        >
-                            {t.gallery.filters[c]}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
-                    {filtered.map((it, i) => (
-                        <motion.div
-                            key={it.id}
-                            {...fadeUp}
-                            transition={{ duration: 0.5, delay: i * 0.06 }}
-                            className="group overflow-hidden rounded-2xl border border-slate-200 bg-white"
-                            data-testid={`gallery-item-${it.id}`}
-                        >
-                            <BeforeAfterSlider
-                                beforeUrl={it.before_url}
-                                afterUrl={it.after_url}
-                                beforeLabel={t.hero.beforeLabel}
-                                afterLabel={t.hero.afterLabel}
-                                className="aspect-[4/3] w-full"
-                                testIdPrefix={`ba-${it.id}`}
-                            />
-                            <div className="flex items-center justify-between p-5">
-                                <div>
-                                    <div className="font-heading text-lg font-medium text-slate-900">
-                                        {it.title}
-                                    </div>
-                                    <div className="mt-1 text-xs uppercase tracking-widest text-slate-400">
-                                        {it.category}
-                                    </div>
-                                </div>
-                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                                    <ArrowUpRight className="h-4 w-4" />
-                                </span>
-                            </div>
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const WhoItsFor = () => {
-    const { t } = useLang();
-    const icons = [Users, Home, Compass, Heart];
-    return (
-        <section className="relative bg-white section-pad">
-            <div className="container-app">
-                <motion.div {...fadeUp} className="max-w-2xl">
-                    <Eyebrow>{t.who.eyebrow}</Eyebrow>
-                    <h2 className="mt-4 font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.who.title}
-                    </h2>
-                </motion.div>
-                <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {t.who.items.map((item, i) => {
-                        const Icon = icons[i] || Users;
-                        return (
-                            <motion.div
-                                key={i}
-                                {...fadeUp}
-                                transition={{ duration: 0.5, delay: i * 0.05 }}
-                                className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-6 hover:border-blue-200"
-                                data-testid={`who-item-${i}`}
-                            >
-                                <Icon className="h-6 w-6 shrink-0 text-blue-600" strokeWidth={1.6} />
-                                <p className="font-medium text-slate-800">{item}</p>
-                            </motion.div>
-                        );
-                    })}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const FAQ = () => {
-    const { t } = useLang();
-    return (
-        <section id="faq" className="relative bg-slate-50 section-pad">
-            <div className="container-app grid grid-cols-1 gap-12 lg:grid-cols-[1fr_1.2fr]">
-                <motion.div {...fadeUp} className="flex flex-col gap-4">
-                    <Eyebrow>{t.faq.eyebrow}</Eyebrow>
-                    <h2 className="font-heading text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-                        {t.faq.title}
-                    </h2>
-                </motion.div>
-                <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
-                    <Accordion type="single" collapsible className="w-full">
-                        {t.faq.items.map((item, i) => (
-                            <AccordionItem
-                                key={i}
-                                value={`q${i}`}
-                                className="border-b border-slate-200"
-                                data-testid={`faq-item-${i}`}
-                            >
-                                <AccordionTrigger className="text-left text-lg font-medium text-slate-900 hover:no-underline">
-                                    {item.q}
-                                </AccordionTrigger>
-                                <AccordionContent className="text-base leading-relaxed text-slate-600">
-                                    {item.a}
-                                </AccordionContent>
-                            </AccordionItem>
-                        ))}
-                    </Accordion>
-                </motion.div>
-            </div>
-        </section>
-    );
-};
-
-const FinalCTA = () => {
-    const { t } = useLang();
-    const navigate = useNavigate();
-    return (
-        <section className="relative bg-white section-pad">
-            <div className="container-app">
-                <motion.div
-                    {...fadeUp}
-                    className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-emerald-500 to-emerald-600 p-10 text-white shadow-lg md:p-16"
-                >
-                    <div className="absolute -right-16 -top-16 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
-                    <div className="absolute -bottom-20 -left-16 h-72 w-72 rounded-full bg-blue-400/30 blur-3xl" />
-                    <div className="relative grid grid-cols-1 items-center gap-10 md:grid-cols-[1.4fr_1fr]">
-                        <div>
-                            <h2 className="font-heading text-4xl font-light tracking-tight sm:text-5xl">
-                                {t.finalCta.title}
-                            </h2>
-                            <p className="mt-4 max-w-xl text-lg text-emerald-50">
-                                {t.finalCta.sub}
-                            </p>
-                        </div>
-                        <div className="flex md:justify-end">
-                            <Button
-                                onClick={() => openQuestionnaire("")}
-                                className="group rounded-full bg-white px-7 py-7 text-base font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
-                                data-testid="final-cta-start"
-                            >
-                                {t.finalCta.btn}
-                                <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                            </Button>
-                        </div>
-                    </div>
-                </motion.div>
-            </div>
-        </section>
-    );
-};
-
-const Landing = () => {
-    const [modalOpen, setModalOpen] = useState(false);
-    const [modalPkg, setModalPkg] = useState("");
-
-    useEffect(() => {
-        // Handle hash scroll on arrival
-        const hash = window.location.hash;
-        if (hash) {
-            setTimeout(() => {
-                const el = document.getElementById(hash.replace("#", ""));
-                if (el) el.scrollIntoView({ behavior: "smooth" });
-            }, 200);
-        }
-
-        const onOpen = (e) => {
-            setModalPkg(e.detail?.pkg || "");
-            setModalOpen(true);
-        };
-        window.addEventListener("flowspace:open-questionnaire", onOpen);
-        return () => window.removeEventListener("flowspace:open-questionnaire", onOpen);
-    }, []);
-
-    return (
-        <div className="App">
-            <Header />
-            <main data-testid="landing-main">
-                <Hero />
-                <ValueProp />
-                <HowItWorks />
-                <WhatYouGet />
-                <Packages />
-                <Gallery />
-                <WhoItsFor />
-                <FAQ />
-                <FinalCTA />
-            </main>
-            <Footer />
-            <QuestionnaireModal
-                open={modalOpen}
-                onOpenChange={setModalOpen}
-                presetPackage={modalPkg}
-            />
+      {/* HERO */}
+      <section
+        className="relative overflow-hidden bg-white pt-10 md:pt-16"
+        data-testid="landing-hero"
+      >
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute left-1/2 top-[-10%] h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-emerald-100/60 blur-3xl" />
+          <div className="absolute right-[-10%] top-[30%] h-[420px] w-[420px] rounded-full bg-sky-100/50 blur-3xl" />
         </div>
-    );
-};
+        <div className="container-app grid grid-cols-1 items-center gap-12 pb-16 md:gap-16 md:pb-24 lg:grid-cols-[1.05fr_1fr] fade-in">
+          <div className="flex flex-col gap-7">
+            <span className="eyebrow" data-testid="hero-eyebrow">
+              AI-powered room organization
+            </span>
+            <h1 className="font-display text-[40px] font-light leading-[1.05] tracking-tight text-slate-900 sm:text-[56px] lg:text-[64px]">
+              Turn cluttered rooms into
+              <span className="block text-emerald-600">calm, organized spaces.</span>
+            </h1>
+            <p className="max-w-xl text-lg leading-relaxed text-slate-600">
+              Upload photos of any messy room. Our AI generates a visual plan
+              for a cleaner, more functional space — with storage bins, labels,
+              and a layout that actually works. Perfect for garages, closets,
+              laundry rooms, and everyday home organization.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <a
+                href="#packages"
+                className="btn-primary"
+                data-testid="hero-cta-start"
+              >
+                Start my project
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
+              </a>
+              <a
+                href="#gallery"
+                className="btn-ghost"
+                data-testid="hero-cta-examples"
+              >
+                See examples
+              </a>
+            </div>
+            <div className="flex flex-wrap items-center gap-5 pt-2 text-sm text-slate-500">
+              <div className="flex items-center gap-1.5" data-testid="hero-rating">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <svg
+                    key={i}
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="#fbbf24"
+                    stroke="#fbbf24"
+                    strokeWidth="1.6"
+                    className="h-4 w-4"
+                    aria-hidden="true"
+                  >
+                    <path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />
+                  </svg>
+                ))}
+                <span className="ml-1">4.9 / 500+ homes organized</span>
+              </div>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="absolute -top-6 -left-6 hidden h-28 w-28 rounded-2xl bg-sky-50 md:block" />
+            <div className="absolute -bottom-6 -right-6 hidden h-28 w-28 rounded-2xl bg-emerald-50 md:block" />
+            <div className="relative">
+              <BeforeAfterSlider
+                beforeSrc={HERO_BEFORE}
+                afterSrc={HERO_AFTER}
+                aspect="4/5"
+                testId="hero-slider"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
-export default Landing;
+      {/* VALUE */}
+      <section id="value" className="relative bg-slate-50 section-pad">
+        <div className="container-app">
+          <div className="max-w-2xl fade-in">
+            <span className="eyebrow">Why FlowSpace</span>
+            <h2 className="mt-4 font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              A smarter way to organize your space
+            </h2>
+          </div>
+          <div className="mt-14 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {VALUES.map((v, i) => (
+              <div
+                key={i}
+                className="group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-7 card-hover hover:border-emerald-200"
+                data-testid={`value-card-${i}`}
+              >
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 transition-colors group-hover:bg-emerald-100">
+                  {v.icon}
+                </span>
+                <h3 className="font-display text-xl font-medium text-slate-900">
+                  {v.title}
+                </h3>
+                <p className="text-slate-600">{v.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section id="how" className="relative bg-white section-pad">
+        <div className="container-app">
+          <div className="flex flex-col items-start gap-4 fade-in">
+            <span className="eyebrow">Process</span>
+            <h2 className="font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              Simple. Fast. Done for you.
+            </h2>
+          </div>
+          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
+            {[
+              {
+                n: 1,
+                title: "Pick a plan",
+                body: "Choose Free, Plus, or Premium — based on how many photos you want transformed.",
+              },
+              {
+                n: 2,
+                title: "Upload your photos",
+                body: "Snap photos of your messy space, drop them in, and we get to work instantly.",
+              },
+              {
+                n: 3,
+                title: "Get your AI transformation",
+                body: "See a photorealistic ‘after’ for every room — with optional PDF organization plan.",
+              },
+            ].map((s) => (
+              <div
+                key={s.n}
+                className="relative rounded-2xl border border-slate-200 bg-white p-8 card-hover"
+                data-testid={`how-step-${s.n}`}
+              >
+                <div className="absolute -top-5 left-8 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 font-display text-sm font-semibold text-white shadow-md">
+                  {s.n}
+                </div>
+                <h3 className="mt-3 font-display text-xl font-medium text-slate-900">
+                  {s.title}
+                </h3>
+                <p className="mt-2 text-slate-600">{s.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* PRICING */}
+      <section id="packages" className="relative bg-slate-50 section-pad">
+        <div className="container-app">
+          <div className="mx-auto max-w-2xl text-center fade-in">
+            <span className="eyebrow !justify-center">Plans</span>
+            <h2 className="mt-4 font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              Pick a plan that fits your space
+            </h2>
+            <p className="mt-4 text-slate-600">
+              All plans include AI-generated organized room imagery. Upgrade
+              for more photos and a personalized PDF plan.
+            </p>
+          </div>
+          <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {PLANS.map((p) => (
+              <PricingCard
+                key={p.id}
+                plan={p}
+                highlighted={p.id === "plus"}
+                testId={`pricing-${p.id}`}
+              />
+            ))}
+          </div>
+          <p className="mt-8 text-center text-xs text-slate-500">
+            No payment required. Pick a plan and start uploading.
+          </p>
+        </div>
+      </section>
+
+      {/* GALLERY */}
+      <section id="gallery" className="relative bg-white section-pad">
+        <div className="container-app">
+          <div className="flex flex-col items-start gap-4 fade-in">
+            <span className="eyebrow">Real transformations</span>
+            <h2 className="font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              Slide to see the change
+            </h2>
+            <p className="max-w-2xl text-slate-600">
+              From chaos to clarity — real rooms reimagined. Drag the divider.
+            </p>
+          </div>
+          <div className="mt-8 flex flex-wrap gap-2">
+            {[
+              { id: "all", label: "All" },
+              { id: "garage", label: "Garage" },
+              { id: "closet", label: "Closet" },
+              { id: "laundry", label: "Laundry" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setFilter(t.id)}
+                className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                  filter === t.id
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
+                }`}
+                data-testid={`gallery-filter-${t.id}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+            {filtered.map((g) => (
+              <div key={g.id} data-testid={`gallery-item-${g.id}`}>
+                <BeforeAfterSlider
+                  beforeSrc={g.before}
+                  afterSrc={g.after}
+                  aspect="4/3"
+                  testId={`gallery-slider-${g.id}`}
+                />
+                <div className="mt-3 flex items-center justify-between">
+                  <p className="font-medium text-slate-800">{g.title}</p>
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                    {g.category}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* WHO IT'S FOR */}
+      <section className="relative bg-slate-50 section-pad">
+        <div className="container-app">
+          <div className="max-w-2xl fade-in">
+            <span className="eyebrow">Who it&rsquo;s for</span>
+            <h2 className="mt-4 font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              Built for real homes
+            </h2>
+          </div>
+          <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              "Busy families with overflowing garages",
+              "Renters with no patience for IKEA trips",
+              "First-time homeowners",
+              "Anyone tired of clutter",
+            ].map((label, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-6 hover:border-sky-200"
+                data-testid={`who-item-${i}`}
+              >
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 21V8l9-5 9 5v13" />
+                    <path d="M9 21v-7h6v7" />
+                  </svg>
+                </span>
+                <p className="font-medium text-slate-800">{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="relative bg-white section-pad">
+        <div className="container-app grid grid-cols-1 gap-12 lg:grid-cols-[1fr_1.2fr]">
+          <div className="flex flex-col gap-4 fade-in">
+            <span className="eyebrow">FAQ</span>
+            <h2 className="font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
+              Answers, fast
+            </h2>
+          </div>
+          <div className="space-y-3" data-testid="faq-list">
+            {FAQS.map((item, i) => (
+              <details
+                key={i}
+                className="group rounded-xl border border-slate-200 bg-slate-50 p-5 open:bg-white open:shadow-sm transition-all"
+                data-testid={`faq-item-${i}`}
+              >
+                <summary className="flex cursor-pointer items-center justify-between text-lg font-medium text-slate-900 list-none">
+                  {item.q}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5 text-slate-500 transition-transform group-open:rotate-180"
+                    aria-hidden="true"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </summary>
+                <p className="mt-3 text-slate-600 leading-relaxed">{item.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="relative bg-white pb-20">
+        <div className="container-app">
+          <div
+            className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-emerald-500 to-emerald-600 p-10 text-white shadow-lg md:p-16"
+            data-testid="final-cta"
+          >
+            <div className="absolute -right-16 -top-16 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+            <div className="absolute -bottom-20 -left-16 h-72 w-72 rounded-full bg-sky-400/30 blur-3xl" />
+            <div className="relative grid grid-cols-1 items-center gap-10 md:grid-cols-[1.4fr_1fr]">
+              <div>
+                <h2 className="font-display text-4xl font-light tracking-tight sm:text-5xl">
+                  Your space can feel different — fast.
+                </h2>
+                <p className="mt-4 max-w-xl text-lg text-emerald-50">
+                  Upload your room photos and get a visual plan for a cleaner,
+                  more functional home. Pick a plan and start in under a minute.
+                </p>
+              </div>
+              <div className="flex md:justify-end">
+                <a
+                  href="#packages"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-7 py-4 text-base font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
+                  data-testid="final-cta-start"
+                >
+                  Choose your plan
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 12h14" />
+                    <path d="m12 5 7 7-7 7" />
+                  </svg>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <Footer />
+    </div>
+  );
+}

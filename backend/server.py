@@ -36,9 +36,9 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 ADMIN_PASSWORD      = os.environ.get("ADMIN_PASSWORD", "flowspace2025")
 
 PACKAGES: Dict[str, Dict[str, Any]] = {
-    "basic":    {"id": "basic",    "name": "Basic",    "price": 79.0,  "currency": "usd"},
-    "standard": {"id": "standard", "name": "Standard", "price": 149.0, "currency": "usd"},
-    "premium":  {"id": "premium",  "name": "Premium",  "price": 299.0, "currency": "usd"},
+    "free":    {"id": "free",    "name": "Free",    "price": 0.0,   "currency": "usd", "max_photos": 2},
+    "plus":    {"id": "plus",    "name": "Plus",    "price": 10.0,  "currency": "usd", "max_photos": 3},
+    "premium": {"id": "premium", "name": "Premium", "price": 20.0,  "currency": "usd", "max_photos": 4},
 }
 
 STARTER_GALLERY = [
@@ -282,15 +282,20 @@ async def get_packages():
 
 @api_router.post("/leads", response_model=Lead)
 async def create_lead(payload: LeadCreate, background_tasks: BackgroundTasks):
-    """Create a lead. If no Stripe payment is needed (free tier / direct), trigger automation immediately."""
+    """
+    Create a lead.
+    - Free tier (or no package selected): fire the automation pipeline immediately
+    - Paid tier: return the lead, frontend then creates a Stripe checkout session
+    """
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
     lead = Lead(**payload.model_dump())
     await db.leads.insert_one(_doc(lead))
 
-    # If no package selected (e.g. free demo), or you want to allow
-    # questionnaire-only flow → trigger automation immediately
-    if not payload.package_id:
+    is_free = (not payload.package_id) or (
+        payload.package_id in PACKAGES and PACKAGES[payload.package_id]["price"] == 0.0
+    )
+    if is_free:
         lead_doc = _doc(lead)
         background_tasks.add_task(run_automation, lead=lead_doc, db=db, fs_bucket=fs_bucket)
 
@@ -492,10 +497,12 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package")
+    pkg = PACKAGES[req.package_id]
+    if pkg["price"] == 0.0:
+        raise HTTPException(status_code=400, detail="Free tier does not require checkout")
     if not STRIPE_API_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
 
-    pkg = PACKAGES[req.package_id]
     stripe_sdk.api_key = STRIPE_API_KEY
     origin = req.origin_url.rstrip("/")
     success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
