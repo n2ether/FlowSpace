@@ -81,14 +81,20 @@ export default function Intake() {
             for (const file of files) {
                 const fd = new FormData();
                 fd.append("file", file);
+                // Don't set Content-Type — let the browser add multipart/form-data
+                // with the correct boundary. Overriding it breaks the upload.
                 const { data } = await api.post("/uploads/photo", fd, {
-                    headers: { "Content-Type": "multipart/form-data" },
+                    headers: { "Content-Type": undefined },
                 });
                 uploaded.push({ id: data.id, url: data.url });
             }
             setPhotos((prev) => [...prev, ...uploaded]);
         } catch (err) {
-            toast.error("Photo upload failed. Try smaller files (under 10MB each).");
+            const detail =
+                err?.response?.data?.detail ||
+                err?.message ||
+                "Photo upload failed. Please try again.";
+            toast.error(String(detail));
         } finally {
             setUploading(false);
             e.target.value = "";
