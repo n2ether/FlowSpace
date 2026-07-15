@@ -78,14 +78,27 @@ export default function Intake() {
         setUploading(true);
         try {
             const uploaded = [];
+            const backend = process.env.REACT_APP_BACKEND_URL || "";
             for (const file of files) {
                 const fd = new FormData();
                 fd.append("file", file);
-                // Don't set Content-Type — let the browser add multipart/form-data
-                // with the correct boundary. Overriding it breaks the upload.
-                const { data } = await api.post("/uploads/photo", fd, {
-                    headers: { "Content-Type": undefined },
+                // Native fetch — the browser will set multipart/form-data with the
+                // correct boundary automatically. Do NOT set Content-Type manually.
+                const res = await fetch(`${backend}/api/uploads/photo`, {
+                    method: "POST",
+                    body: fd,
                 });
+                if (!res.ok) {
+                    let msg = `Upload failed (${res.status})`;
+                    try {
+                        const errJson = await res.json();
+                        if (errJson?.detail) msg = errJson.detail;
+                    } catch (_) {
+                        /* body wasn't JSON */
+                    }
+                    throw new Error(msg);
+                }
+                const data = await res.json();
                 uploaded.push({ id: data.id, url: data.url });
             }
             setPhotos((prev) => [...prev, ...uploaded]);
