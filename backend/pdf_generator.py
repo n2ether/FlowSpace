@@ -187,7 +187,7 @@ def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
 
 
 def _placeholder(w: float, h: float, label: str):
-    t = Table([[Paragraph(f"<font color='#9ca3af'>{label}</font>", _styles()["body"])]], colWidths=[w], rowHeights=[h])
+    t = Table([[Paragraph(f"<font color='#9ca3af'>{label}</font>", _styles()["body"])]], colWidths=[w], minRowHeights=[h])
     t.setStyle(
         TableStyle(
             [
@@ -220,6 +220,12 @@ def _shopping_table(items: List[Dict[str, Any]], currency: str = "$") -> Table:
     header = ["Item", "Qty", "Est. Price", "Subtotal"]
     rows = [header]
     total = 0.0
+    full_w = PAGE_W - 2 * MARGIN
+    name_w = full_w * 0.52
+    qty_w = full_w * 0.12
+    price_w = full_w * 0.18
+    sub_w = full_w * 0.18
+
     for it in items or []:
         name = str(it.get("name", ""))
         qty = float(it.get("qty", 1) or 1)
@@ -236,7 +242,7 @@ def _shopping_table(items: List[Dict[str, Any]], currency: str = "$") -> Table:
         )
     rows.append(["", "", "Total", f"{currency}{total:,.2f}"])
 
-    table = Table(rows, colWidths=[2.8 * inch, 0.55 * inch, 0.95 * inch, 1.0 * inch])
+    table = Table(rows, colWidths=[name_w, qty_w, price_w, sub_w])
     table.setStyle(
         TableStyle(
             [
@@ -403,7 +409,7 @@ def build_pdf(
 
     # Front view + floor plan side by side
     cw = (PAGE_W - 2 * MARGIN - 10) / 2
-    img_h = 2.5 * inch
+    img_h = 2.2 * inch
     fv = _safe_image(images.get("front_view"), cw, img_h)
     fp = _safe_image(images.get("floor_plan"), cw, img_h)
     top = Table(
@@ -422,7 +428,7 @@ def build_pdf(
 
     # Additional 3 views row
     cw3 = (PAGE_W - 2 * MARGIN - 16) / 3
-    h3 = 1.45 * inch
+    h3 = 1.3 * inch
     v1 = _safe_image(images.get("view_1"), cw3, h3)
     v2 = _safe_image(images.get("view_2"), cw3, h3)
     v3 = _safe_image(images.get("view_3"), cw3, h3)

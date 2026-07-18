@@ -72,10 +72,27 @@ async def run_automation(
         image_bytes: Optional[bytes] = None
         image_mime: str = "image/jpeg"
         try:
+            # Fetch the customer's own uploaded photo (if any) so the AI
+            # transforms their ACTUAL room instead of inventing one from scratch.
+            reference_photo_bytes: Optional[bytes] = None
+            first_photo = (lead.get("photos") or [None])[0]
+            if first_photo:
+                photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+                if photo_url and "/api/uploads/photo/" in photo_url:
+                    try:
+                        from bson import ObjectId
+                        photo_id = photo_url.rsplit("/", 1)[-1]
+                        stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
+                        reference_photo_bytes = await stream.read()
+                        logger.info("[automation] Using customer's uploaded photo as render reference")
+                    except Exception as fetch_err:
+                        logger.warning("[automation] Could not fetch customer photo: %s", fetch_err)
+
             image_bytes, image_mime = await generate_front_view(
                 lead=lead,
                 deliverable=plan,
                 fs_bucket=fs_bucket,
+                reference_photo_bytes=reference_photo_bytes,
             )
             ext = "jpg" if "jpeg" in image_mime else "png"
             file_id = await fs_bucket.upload_from_stream(

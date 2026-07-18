@@ -440,8 +440,26 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     deliverable = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+
+    reference_photo_bytes = None
+    first_photo = (lead.get("photos") or [None])[0]
+    if first_photo:
+        photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+        if photo_url and "/api/uploads/photo/" in photo_url:
+            try:
+                photo_id = photo_url.rsplit("/", 1)[-1]
+                stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
+                reference_photo_bytes = await stream.read()
+            except Exception:
+                reference_photo_bytes = None
+
     try:
-        png_bytes, mime = await generate_front_view(lead=lead, deliverable=deliverable, fs_bucket=fs_bucket)
+        png_bytes, mime = await generate_front_view(
+            lead=lead,
+            deliverable=deliverable,
+            fs_bucket=fs_bucket,
+            reference_photo_bytes=reference_photo_bytes,
+        )
     except Exception as e:
         logging.exception("AI image generation failed")
         raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
