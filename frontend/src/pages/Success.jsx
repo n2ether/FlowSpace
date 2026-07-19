@@ -27,6 +27,7 @@ const Success = () => {
                     setCurrency(res.data.currency);
                     return;
                 }
+                // Only a genuine Stripe-reported expired session counts as "expired".
                 if (res.data.status === "expired") {
                     setStatus("expired");
                     return;
@@ -35,8 +36,17 @@ const Success = () => {
                 if (attempts.current >= 10) { setStatus("pending"); return; }
                 setTimeout(poll, 2000);
             } catch (e) {
+                // eslint-disable-next-line no-console
+                console.error("[FlowSpace] checkout status check failed:", e?.response?.status, e?.response?.data || e.message);
                 attempts.current += 1;
-                if (attempts.current >= 6) { setStatus("expired"); return; }
+                if (attempts.current >= 6) {
+                    // We genuinely don't know the outcome — this is NOT the same as
+                    // an expired Stripe session. The payment likely succeeded (you're
+                    // on this page because Stripe redirected you here after checkout).
+                    // Never tell the customer to pay again in this state.
+                    setStatus("unknown");
+                    return;
+                }
                 setTimeout(poll, 2000);
             }
         };
@@ -112,6 +122,23 @@ const Success = () => {
                             <button onClick={() => navigate("/#packages")} className="btn-primary mt-8 w-full justify-center">
                                 Pick a plan
                             </button>
+                        </>
+                    )}
+
+                    {status === "unknown" && (
+                        <>
+                            <Mail className="mx-auto h-10 w-10 text-emerald-600" />
+                            <h1 className="mt-6 font-display text-3xl font-light text-slate-900">We're finishing up</h1>
+                            <p className="mt-3 text-slate-600">
+                                We couldn't confirm this page in time, but if you completed checkout with Stripe,
+                                your payment almost certainly went through — please check your email for your
+                                Blueprint before trying again.
+                            </p>
+                            <p className="mt-3 text-xs text-slate-500">
+                                Still nothing after a few minutes? Reply to any FlowSpace email and we'll sort it out —
+                                no need to pay twice.
+                            </p>
+                            <Link to="/" className="btn-ghost mt-8 inline-flex">Return home</Link>
                         </>
                     )}
                 </div>
