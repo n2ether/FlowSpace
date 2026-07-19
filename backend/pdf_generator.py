@@ -297,7 +297,7 @@ def _links_table(links: List[Dict[str, str]]) -> Table:
     return table
 
 
-def _zones_table(zones: List[Dict[str, str]]) -> Table:
+def _zones_table(zones: List[Dict[str, str]], available_width: float) -> Table:
     rows = []
     for z in zones or []:
         title = z.get("title", "") or ""
@@ -309,8 +309,12 @@ def _zones_table(zones: List[Dict[str, str]]) -> Table:
             ]
         )
     if not rows:
-        return _placeholder(PAGE_W - 2 * MARGIN, 36, "No zones provided")
-    t = Table(rows, colWidths=[1.2 * inch, PAGE_W - 2 * MARGIN - 1.2 * inch])
+        return _placeholder(available_width, 36, "No zones provided")
+    # Reserve a smaller, proportional label column and give the rest to
+    # the description column. Small safety margin subtracted for cell padding.
+    label_w = min(0.9 * inch, available_width * 0.32)
+    desc_w = max(available_width - label_w - 4, 0.8 * inch)
+    t = Table(rows, colWidths=[label_w, desc_w])
     t.setStyle(
         TableStyle(
             [
@@ -457,9 +461,12 @@ def build_pdf(
     else:
         needs_cell.append(Paragraph("—", s["muted"]))
 
-    zones_cell: List[Any] = [Paragraph("Room Layout & Zones", s["h3"]), _zones_table(zones)]
+    col_w = (PAGE_W - 2 * MARGIN - 12) / 2
+    # Subtract a small safety margin for the outer table's own cell padding
+    zones_available_w = col_w - 8
+    zones_cell: List[Any] = [Paragraph("Room Layout & Zones", s["h3"]), _zones_table(zones, zones_available_w)]
 
-    nz = Table([[needs_cell, zones_cell]], colWidths=[(PAGE_W - 2 * MARGIN - 12) / 2, (PAGE_W - 2 * MARGIN - 12) / 2])
+    nz = Table([[needs_cell, zones_cell]], colWidths=[col_w, col_w])
     nz.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(nz)
     story.append(Spacer(1, 10))
