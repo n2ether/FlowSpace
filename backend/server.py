@@ -212,6 +212,26 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def _safe_metadata(sess) -> Dict[str, str]:
+    """
+    Safely extract a plain dict from a Stripe object's .metadata field.
+
+    IMPORTANT: do not use the bare dict(...) constructor on a Stripe SDK
+    object here. Stripe's response objects can trigger Python's fallback
+    "sequence of pairs" protocol instead of being treated as a mapping,
+    causing dict(...) to probe for an integer index (0) and raise
+    KeyError: 0. Using .items() explicitly avoids that path entirely.
+    """
+    raw = getattr(sess, "metadata", None)
+    if not raw:
+        return {}
+    try:
+        return {str(k): str(v) for k, v in raw.items()}
+    except Exception:
+        logging.warning("Could not parse Stripe metadata safely; defaulting to {}")
+        return {}
+
+
 def _doc(model: BaseModel) -> dict:
     d = model.model_dump()
     for k, v in list(d.items()):
@@ -594,7 +614,7 @@ async def checkout_status(session_id: str):
         new_status = getattr(sess, "status", "unknown")
         amount_total = getattr(sess, "amount_total", None) or 0
         currency = getattr(sess, "currency", existing.get("currency", "usd"))
-        metadata = dict(getattr(sess, "metadata", {}) or {})
+        metadata = _safe_metadata(sess)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
 
@@ -639,7 +659,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
             sess = event.data.object
             session_id = sess.id
             payment_status = getattr(sess, "payment_status", "unknown")
-            metadata = dict(getattr(sess, "metadata", {}) or {})
+            metadata = _safe_metadata(sess)
             customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
 
             await db.payment_transactions.update_one(
