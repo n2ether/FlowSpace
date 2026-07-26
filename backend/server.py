@@ -7,6 +7,7 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
@@ -537,7 +538,8 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         metadata.update({str(k): str(v) for k, v in req.metadata.items()})
 
     try:
-        session = stripe_sdk.checkout.Session.create(
+        session = await asyncio.to_thread(
+            stripe_sdk.checkout.Session.create,
             payment_method_types=["card"],
             line_items=[{
                 "price_data": {
@@ -587,7 +589,7 @@ async def checkout_status(session_id: str):
 
     stripe_sdk.api_key = STRIPE_API_KEY
     try:
-        sess = stripe_sdk.checkout.Session.retrieve(session_id)
+        sess = await asyncio.to_thread(stripe_sdk.checkout.Session.retrieve, session_id)
         new_payment_status = getattr(sess, "payment_status", "unknown")
         new_status = getattr(sess, "status", "unknown")
         amount_total = getattr(sess, "amount_total", None) or 0
@@ -633,44 +635,50 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail=str(e))
 
     if event.type == "checkout.session.completed":
-        sess = event.data.object
-        session_id = sess.id
-        payment_status = getattr(sess, "payment_status", "unknown")
-        metadata = dict(getattr(sess, "metadata", {}) or {})
-        customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
+        try:
+            sess = event.data.object
+            session_id = sess.id
+            payment_status = getattr(sess, "payment_status", "unknown")
+            metadata = dict(getattr(sess, "metadata", {}) or {})
+            customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
 
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"payment_status": payment_status, "status": sess.status, "updated_at": _iso(datetime.now(timezone.utc))}},
-        )
-
-        if payment_status == "paid" and customer_email:
-            # Find the most recent lead for this email that has no session linked
-            lead = await db.leads.find_one(
-                {"email": customer_email, "status": "new"},
-                {"_id": 0},
-                sort=[("created_at", -1)],
+            await db.payment_transactions.update_one(
+                {"session_id": session_id},
+                {"$set": {"payment_status": payment_status, "status": sess.status, "updated_at": _iso(datetime.now(timezone.utc))}},
             )
-            if lead:
-                # Link session to lead
-                await db.leads.update_one(
-                    {"id": lead["id"]},
-                    {"$set": {
-                        "stripe_session_id": session_id,
-                        "package_id": metadata.get("package_id", lead.get("package_id", "")),
-                        "status": "paid",
-                    }},
+
+            if payment_status == "paid" and customer_email:
+                # Find the most recent lead for this email that has no session linked
+                lead = await db.leads.find_one(
+                    {"email": customer_email, "status": "new"},
+                    {"_id": 0},
+                    sort=[("created_at", -1)],
                 )
-                # Update transaction with lead_id
-                await db.payment_transactions.update_one(
-                    {"session_id": session_id},
-                    {"$set": {"lead_id": lead["id"]}},
-                )
-                # Fire automation pipeline
-                background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
-                logging.info("Automation triggered for lead %s after payment", lead["id"])
-            else:
-                logging.warning("No matching lead found for email %s after payment", customer_email)
+                if lead:
+                    # Link session to lead
+                    await db.leads.update_one(
+                        {"id": lead["id"]},
+                        {"$set": {
+                            "stripe_session_id": session_id,
+                            "package_id": metadata.get("package_id", lead.get("package_id", "")),
+                            "status": "paid",
+                        }},
+                    )
+                    # Update transaction with lead_id
+                    await db.payment_transactions.update_one(
+                        {"session_id": session_id},
+                        {"$set": {"lead_id": lead["id"]}},
+                    )
+                    # Fire automation pipeline
+                    background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+                    logging.info("Automation triggered for lead %s after payment", lead["id"])
+                else:
+                    logging.warning("No matching lead found for email %s after payment", customer_email)
+        except Exception:
+            # Log the FULL traceback so it's visible in Railway logs, then
+            # re-raise as a clean 500 so Stripe knows to retry.
+            logging.exception("Webhook processing failed for checkout.session.completed")
+            raise HTTPException(status_code=500, detail="Internal error processing webhook")
 
     return {"received": True}
 
