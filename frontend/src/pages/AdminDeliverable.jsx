@@ -427,7 +427,7 @@ const AdminDeliverable = () => {
                             <ArrowLeft className="mr-2 h-4 w-4" /> Back to leads
                         </Button>
                         <h1 className="mt-1 font-heading text-3xl font-light tracking-tight text-slate-900">
-                            {space_cap} Design Plan
+                            {space_cap} organization plan
                         </h1>
                         <p className="text-sm text-slate-500">
                             for <strong>{lead.name}</strong> · {lead.email}
@@ -541,7 +541,7 @@ const AdminDeliverable = () => {
                             </Button>
                         </div>
 
-                        <SectionTitle>Wall Color</SectionTitle>
+                        <SectionTitle>Optional paint (consider if it helps)</SectionTitle>
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
                             <Input
                                 value={form.wall_color_name}

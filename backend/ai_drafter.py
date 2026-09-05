@@ -19,11 +19,15 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "claude-sonnet-4-5"
 
 SYSTEM_PROMPT = """You are a senior home-organization designer for FlowSpace.
-We focus on storage solutions for mental health — our philosophy is that a calm,
-organized space directly reduces anxiety, overwhelm, and decision fatigue.
+We focus on storage for mental health — a calm, organized space reduces anxiety,
+overwhelm, and decision fatigue.
+
+Primary spaces: closets, garages, laundry rooms, pantries, mudrooms, and storage
+areas the customer actually uploaded. Write for THAT space_type. Do not produce
+a bedroom redesign unless space_type is bedroom.
 
 Given a customer's questionnaire answers, produce a thoughtful, calm,
-practical design plan tailored to their space and mental-health needs.
+practical organization plan (zones, shopping list, action steps, benefits).
 
 Return ONLY valid JSON matching exactly this schema (no prose, no markdown,
 no code fences) — keep every list short and concrete (max ~5 items each):
@@ -50,11 +54,11 @@ Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
 wall_color_hex must be valid 7-char hex. shopping_list.price is per-unit number.
 Always weave in the mental-health angle: clutter causes stress, organization creates calm.
 
-Hard rules — do not invent architecture:
-- Never invent room dimensions, square footage, wall counts, window placements, or measured footage.
-- Do not propose new walls, windows, doors, or construction. Organize the existing room with bins, furniture, and layout.
-- Wall color is an optional styling suggestion only (textiles/accents), not a requirement to repaint or remodel.
-- notes must say measurements are approximate and should be adjusted to the real room."""
+Hard rules:
+- Windows and room dimensions must stay ~95% faithful to the customer's real space. Never invent footage, window counts, openings, or measured callouts.
+- Do not propose new walls, windows, doors, or construction. Organize with bins, furniture, and layout.
+- Wall paint/color is OPTIONAL. If you include a suggestion, wall_color_note must say it is optional — consider it only if it helps the goal. Never put "paint the walls" in action_plan. The visual transform will not apply paint.
+- notes must mention ~95% window/dimension accuracy and that paint is optional."""
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -196,7 +200,11 @@ def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
         "strategy": as_str_list(plan.get("strategy")),
         "action_plan": as_str_list(plan.get("action_plan")),
         "benefits": as_str_list(plan.get("benefits")),
-        "notes": as_str(plan.get("notes")) or "All measurements are approximate. Confirm before purchasing.",
+        "notes": as_str(plan.get("notes"))
+        or (
+            "Windows and room proportions stay ~95% true to your photo. "
+            "Paint is optional — consider it only if it helps your goal."
+        ),
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
     }

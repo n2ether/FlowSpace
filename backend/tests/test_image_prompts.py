@@ -7,27 +7,32 @@ from ai_image_generator import (
 )
 
 
-def test_kontext_prompt_preserves_shell_and_does_not_repaint():
+def test_kontext_prompt_keeps_windows_and_skips_paint():
     prompt = _build_kontext_prompt(
         {
-            "space_type": "bedroom",
-            "style_prefs": ["coastal"],
+            "space_type": "garage",
+            "style_prefs": ["minimal"],
             "color_prefs": ["sage"],
-            "storage_needs": ["clothing"],
+            "storage_needs": ["tools"],
         },
         {"wall_color_name": "Sea Salt", "wall_color_hex": "#cfd7d3"},
-    )
-    assert "exact same room" in prompt.lower()
-    assert "same walls" in prompt.lower()
-    assert "same windows" in prompt.lower()
-    assert "repaint the walls" not in prompt.lower()
-    assert "do not change the wall paint" in prompt.lower() or "same wall paint" in prompt.lower()
-    assert "invent" in prompt.lower()
+    ).lower()
+    assert "95%" in prompt or "~95%" in prompt
+    assert "window" in prompt
+    assert "repaint the walls" not in prompt
+    assert "do not change wall paint" in prompt or "paint is not part of the transform" in prompt
+    # Wall color from the deliverable must not be injected into the visual prompt
+    assert "sea salt" not in prompt
+    assert "#cfd7d3" not in prompt
     assert KONTEXT_MODEL == "black-forest-labs/flux-kontext-pro"
 
 
-def test_text_to_image_is_only_the_no_photo_fallback():
-    prompt = _build_text_to_image_prompt({"space_type": "garage"})
-    assert "Photorealistic" in prompt
+def test_text_to_image_does_not_force_a_paint_makeover():
+    prompt = _build_text_to_image_prompt(
+        {"space_type": "closet"},
+        {"wall_color_name": "Sea Salt", "wall_color_hex": "#cfd7d3"},
+    ).lower()
+    assert "painted-wall makeover" in prompt or "keep existing wall color" in prompt
+    assert "sea salt" not in prompt
     assert TEXT_TO_IMAGE_MODEL == "black-forest-labs/flux-1.1-pro"
     assert KONTEXT_MODEL != TEXT_TO_IMAGE_MODEL

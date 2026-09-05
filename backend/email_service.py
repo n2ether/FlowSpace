@@ -65,7 +65,7 @@ def _customer_html(customer_name: str, space_type: str) -> str:
                 Your Blueprint is Ready, {customer_name}! 🎉
               </h1>
               <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
-                Your personalized <strong>{space} Design Plan</strong> is attached to this email.
+                Your personalized <strong>{space} organization plan</strong> is attached to this email.
                 Inside you'll find your complete FlowSpace Blueprint™ — designed specifically
                 around your space, your style, and your wellbeing.
               </p>

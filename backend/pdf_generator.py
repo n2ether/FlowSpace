@@ -1,18 +1,17 @@
 """
 FlowSpace branded PDF deliverable generator.
 
-Layout reference: Bedroom Design Plan one-pager (sage/teal/charcoal):
+Layout reference (structure only — not a bedroom-redesign product):
   Header brand bar
-  Title + keywords + intro
-  Two columns — visuals (3D front view, floor plan, extra views) |
-                 designed-for-you callout, needs, numbered zones,
-                 optional palette suggestion, shopping list + budget
+  Space-aware title (Garage Organization Plan, Closet Blueprint, …)
+  Two columns — visuals | callout, needs, numbered zones,
+                 optional paint recommendation
+  Full-width shopping list + budget
   Bottom row — Design Strategy | Simple Action Plan | Benefits
-  Footer: measurements are approximate; we do not invent dimensions
-  Extra pages: customer reference photos, then design summary + shopping links
+  Footer: windows/dimensions ~95% true to the photo; paint is optional
 
-Never draw fake wall/window/dimension callouts. Floor plans are included only
-when an image was provided — placeholders do not invent footage.
+Primary spaces: closets, garages, laundry rooms, pantries, mudrooms, storage.
+Never invent wall/window/dimension callouts. Floor plans only when provided.
 
 Pure reportlab — no external services needed.
 """
@@ -49,6 +48,46 @@ MUTED = HexColor("#6b7280")
 LINE = HexColor("#e5e7eb")
 SOFT_BG = HexColor("#f7faf9")
 TAGLINE = "Clear space. Create flow. Live better."
+
+# Customer-facing space names. Underscored intake ids → readable labels.
+SPACE_LABELS = {
+    "living_room": "Living room",
+    "bedroom": "Bedroom",
+    "closet": "Closet",
+    "garage": "Garage",
+    "pantry": "Pantry",
+    "laundry_room": "Laundry",
+    "laundry": "Laundry",
+    "home_office": "Home office",
+    "kids_room": "Kids' room",
+    "mudroom": "Mudroom",
+    "storage": "Storage",
+    "other": "Space",
+}
+
+DEFAULT_NOTES = (
+    "Windows and room proportions stay ~95% true to your photo. "
+    "We do not invent dimensions. Paint is optional — consider it only if it helps your goal."
+)
+OPTIONAL_PAINT_HEADING = "Optional paint — consider if it helps"
+OPTIONAL_PAINT_NOTE = (
+    "Optional recommendation only. Not applied in the visual. "
+    "Consider this color if it helps your organization goal."
+)
+
+
+def space_label(space_type: Optional[str]) -> str:
+    key = (space_type or "space").strip().lower().replace(" ", "_")
+    return SPACE_LABELS.get(key, key.replace("_", " ").title() or "Space")
+
+
+def plan_title(space_type: Optional[str]) -> str:
+    """Space-aware PDF title. Closets use Blueprint; others are Organization Plans."""
+    key = (space_type or "space").strip().lower().replace(" ", "_")
+    label = space_label(space_type)
+    if key == "closet":
+        return "Closet Blueprint"
+    return f"{label} Organization Plan"
 
 PAGE_W, PAGE_H = LETTER
 MARGIN = 0.55 * inch
@@ -421,10 +460,10 @@ def _wall_color_block(
     )
     s = _styles()
     info = [
-        Paragraph(f"<b>{name or 'Palette suggestion'}</b>", s["body"]),
+        Paragraph(f"<b>{name or 'Optional paint suggestion'}</b>", s["body"]),
         Paragraph(f"<font color='#6b7280'>{code or ''}</font>", s["body"]),
         Spacer(1, 2),
-        Paragraph(note or "Optional accent direction — not a requirement to repaint.", s["muted"]),
+        Paragraph(note or OPTIONAL_PAINT_NOTE, s["muted"]),
     ]
     full_w = available_width if available_width else (PAGE_W - 2 * MARGIN)
     t = Table([[swatch, info]], colWidths=[0.62 * inch, max(full_w - 0.62 * inch, 1.2 * inch)])
@@ -627,7 +666,9 @@ def build_pdf(
     """
     buf = io.BytesIO()
     s = _styles()
-    space_label = (lead.get("space_type") or "Space").capitalize()
+    space_key = lead.get("space_type") or "space"
+    space_name = space_label(space_key)
+    title_text = plan_title(space_key)
     customer_name = lead.get("name") or "there"
 
     frame = Frame(
@@ -651,25 +692,24 @@ def build_pdf(
         buf,
         pagesize=LETTER,
         pageTemplates=[template],
-        title=f"{space_label} Design Plan — FlowSpace",
+        title=f"{title_text} — FlowSpace",
         author="FlowSpace",
     )
 
     story: List[Any] = []
 
-    # --- Page 1: Design Plan (template-aligned) ----------------------
+    # --- Page 1: organization plan (template structure, space-aware title)
     content_w = PAGE_W - 2 * MARGIN
     left_w = content_w * 0.54
     right_w = content_w * 0.46 - 8
 
     story.append(Paragraph(f"Hi {customer_name}!", s["body"]))
     story.append(Spacer(1, 2))
-    story.append(Paragraph(f"{space_label} Design Plan", s["h1"]))
+    story.append(Paragraph(title_text, s["h1"]))
     story.append(Paragraph(_keyword_line(lead), s["keywords"]))
     intro = (
         deliverable.get("intro")
-        or "A space that feels welcoming, peaceful, and easy to live in — "
-        "organized around the room you already have."
+        or "A calmer, easier space to live with — organized around the room you already have."
     )
     story.append(Paragraph(intro, s["body"]))
     story.append(Spacer(1, 8))
@@ -720,7 +760,7 @@ def build_pdf(
     budget_note = deliverable.get("budget_note") or ""
 
     right_col: List[Any] = [_callout_box(right_w), Spacer(1, 8)]
-    right_col.append(Paragraph(f"{space_label} Needs", s["h3"]))
+    right_col.append(Paragraph(f"{space_name} needs", s["h3"]))
     if needs:
         right_col.extend(_bullet_list(needs, s["bullet"]))
     else:
@@ -733,7 +773,7 @@ def build_pdf(
     wall_name = (deliverable.get("wall_color_name") or "").strip()
     wall_hex = (deliverable.get("wall_color_hex") or "").strip()
     if wall_name or wall_hex:
-        right_col.append(Paragraph("Palette Suggestion", s["h3"]))
+        right_col.append(Paragraph(OPTIONAL_PAINT_HEADING, s["h3"]))
         right_col.append(
             _wall_color_block(
                 wall_name,
@@ -773,10 +813,7 @@ def build_pdf(
     benefits = deliverable.get("benefits") or []
     story.append(_three_col_section(strategy, action_plan, benefits))
 
-    notes = deliverable.get("notes") or (
-        "Note: Measurements are approximate. Adjust to your room as needed. "
-        "We do not invent wall, window, or room dimensions."
-    )
+    notes = deliverable.get("notes") or DEFAULT_NOTES
     story.append(Spacer(1, 8))
     story.append(Paragraph(notes, s["footerNote"]))
 

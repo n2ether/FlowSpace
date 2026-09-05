@@ -32,8 +32,8 @@ def _build_kontext_prompt(
     lead: Dict[str, Any],
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Prompt for image-EDITING — must instruct the model to keep the room's
-    real structure and only change furniture/storage/decor/color."""
+    """Prompt for image-EDITING — keep windows/dimensions ~95% accurate.
+    Do not change wall paint. Only change furniture/storage/loose items."""
     deliverable = deliverable or {}
     space = (lead.get("space_type") or "room").lower().replace("_", " ")
 
@@ -45,12 +45,12 @@ def _build_kontext_prompt(
         f"Organize this existing {space} — {style_str} styling, {color_str} textiles "
         f"and accessories. Add tidy storage for {storage_str}: matching baskets, "
         f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
-        "IMPORTANT: Preserve the physical shell. Keep the exact same room — same walls, "
-        "same windows, same doors, same camera angle, same architecture, same proportions, "
-        "and the same wall paint. Do not add, remove, move, or invent walls, windows, "
-        "doors, or room dimensions. Do not repaint walls a new color. Only change "
-        "furniture, storage, decor, and loose items. This must look like the same "
-        "physical room, just organized. Photorealistic, natural lighting, "
+        "HARD CONSTRAINT: Windows and room dimensions must stay ~95% accurate to the "
+        "source photo — same window count, size, and placement, same wall lengths, "
+        "same camera angle, same architecture. Do not add, remove, move, or invent "
+        "walls, windows, doors, or dimensions. "
+        "Do not change wall paint in this visual. Paint is not part of the transform. "
+        "Only change furniture, storage, and loose items. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -68,19 +68,14 @@ def _build_text_to_image_prompt(
     feeling_str = ", ".join(_humanize(lead.get("desired_feeling") or [], FEELING)) or "calm and functional"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "general storage"
 
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    wall_phrase = ""
-    if wall_name or wall_hex:
-        bits = [b for b in [wall_name, (f"hex {wall_hex}" if wall_hex else "")] if b]
-        wall_phrase = f" Wall color: {' / '.join(bits)}."
-
     return (
-        f"Photorealistic interior design photograph of a beautifully organized residential {space}. "
-        f"Aesthetic style: {style_str}. Color palette: {color_str}. "
+        f"Photorealistic photograph of a beautifully organized residential {space}. "
+        f"Aesthetic style: {style_str}. Textile and accessory colors: {color_str}. "
         f"Atmosphere: {feeling_str}, mentally calming. "
-        f"Smart storage solutions for {storage_str} — modular shelving, labeled bins, baskets, hooks."
-        f"{wall_phrase} Eye-level front view, wide angle showing full room. "
+        f"Smart storage for {storage_str} — modular shelving, labeled bins, baskets, hooks. "
+        "Do not invent unusual windows or exaggerated room dimensions. "
+        "Do not feature a painted-wall makeover — keep existing wall color. "
+        "Eye-level front view, wide angle showing the full space. "
         "Bright natural lighting, no people, no text or watermarks. "
         "Professional interior photography, magazine quality, ultra detailed, 4K."
     )

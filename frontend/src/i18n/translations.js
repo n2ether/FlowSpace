@@ -74,7 +74,7 @@ export const translations = {
             eyebrow: "FAQ",
             title: "Answers, fast",
             items: [
-                { q: "Do I need exact measurements?", a: "No. A few photos and approximate dimensions are enough for us to design your system." },
+                { q: "Do I need exact measurements?", a: "No. Your photos are enough. We keep windows and proportions about 95% true to the photo and never invent footage." },
                 { q: "What if I don't know what to buy?", a: "We tell you. Our Standard and Premium plans include a full shopping list with links." },
                 { q: "How long does it take?", a: "Blueprints are emailed as a PDF, usually within a few minutes after submit (free) or payment (Plus/Premium)." },
                 { q: "Do I need to install anything complicated?", a: "No. We design around real-life setups with simple, achievable steps — no heavy construction." },
