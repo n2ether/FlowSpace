@@ -12,14 +12,16 @@ const PLANS = {
 };
 
 const SPACE_TYPES = [
-    { id: "living_room",  label: "Living room" },
-    { id: "bedroom",      label: "Bedroom" },
     { id: "closet",       label: "Closet" },
     { id: "garage",       label: "Garage" },
-    { id: "pantry",       label: "Pantry" },
     { id: "laundry_room", label: "Laundry room" },
-    { id: "home_office",  label: "Home office" },
+    { id: "pantry",       label: "Pantry" },
+    { id: "mudroom",      label: "Mudroom" },
+    { id: "storage",      label: "Storage area" },
     { id: "kids_room",    label: "Kids' room" },
+    { id: "home_office",  label: "Home office" },
+    { id: "living_room",  label: "Living room" },
+    { id: "bedroom",      label: "Bedroom" },
     { id: "other",        label: "Other" },
 ];
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Plus, Trash2, Users, Image, CreditCard, FileText } from "lucide-react";
+import { LogOut, Plus, Trash2, Users, Image, CreditCard, FileText, RefreshCcw } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { Input } from "../components/ui/input";
@@ -82,6 +82,25 @@ const Admin = () => {
         } catch {
             toast.error("Could not delete");
         }
+    };
+
+    const retryAutomation = async (id) => {
+        try {
+            await client.post(`/admin/leads/${id}/retry-automation`);
+            toast.success("Automation started — PDF will email when ready");
+            loadAll();
+        } catch {
+            toast.error("Could not retry automation");
+        }
+    };
+
+    const statusTone = (status) => {
+        const s = (status || "new").toLowerCase();
+        if (s === "delivered") return "bg-emerald-50 text-emerald-700";
+        if (s === "processing" || s === "paid") return "bg-sky-50 text-sky-700";
+        if (s === "pdf_ready") return "bg-amber-50 text-amber-800";
+        if (s === "error") return "bg-red-50 text-red-700";
+        return "bg-slate-50 text-slate-600";
     };
 
     const logout = () => {
@@ -167,6 +186,12 @@ const Admin = () => {
                                             <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
                                                 {l.language?.toUpperCase()}
                                             </span>
+                                            <span
+                                                className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-widest ${statusTone(l.status)}`}
+                                                data-testid={`lead-status-${l.id}`}
+                                            >
+                                                {l.status || "new"}
+                                            </span>
                                             <Button
                                                 onClick={() =>
                                                     navigate(`/admin/leads/${l.id}/design`)
@@ -176,6 +201,15 @@ const Admin = () => {
                                             >
                                                 <FileText className="mr-1 h-3.5 w-3.5" />
                                                 Design
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => retryAutomation(l.id)}
+                                                className="rounded-full px-3 py-1 text-xs"
+                                                data-testid={`lead-retry-${l.id}`}
+                                            >
+                                                <RefreshCcw className="mr-1 h-3.5 w-3.5" />
+                                                Retry PDF email
                                             </Button>
                                         </div>
                                     </div>
@@ -271,6 +305,11 @@ const Admin = () => {
                                     {l.goals && (
                                         <p className="mt-1 text-sm text-slate-600">
                                             <strong>Goals:</strong> {l.goals}
+                                        </p>
+                                    )}
+                                    {(l.email_error || l.automation_error) && (
+                                        <p className="mt-2 text-xs text-red-600" data-testid={`lead-error-${l.id}`}>
+                                            {l.email_error || l.automation_error}
                                         </p>
                                     )}
                                     {l.photos && l.photos.length > 0 && (

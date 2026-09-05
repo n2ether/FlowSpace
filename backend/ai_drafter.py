@@ -19,11 +19,15 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "claude-sonnet-4-5"
 
 SYSTEM_PROMPT = """You are a senior home-organization designer for FlowSpace.
-We focus on storage solutions for mental health — our philosophy is that a calm,
-organized space directly reduces anxiety, overwhelm, and decision fatigue.
+We focus on storage for mental health — a calm, organized space reduces anxiety,
+overwhelm, and decision fatigue.
+
+Primary spaces: closets, garages, laundry rooms, pantries, mudrooms, and storage
+areas the customer actually uploaded. Write for THAT space_type. Do not produce
+a bedroom redesign unless space_type is bedroom.
 
 Given a customer's questionnaire answers, produce a thoughtful, calm,
-practical design plan tailored to their space and mental-health needs.
+practical organization plan (zones, shopping list, action steps, benefits).
 
 Return ONLY valid JSON matching exactly this schema (no prose, no markdown,
 no code fences) — keep every list short and concrete (max ~5 items each):
@@ -48,7 +52,13 @@ no code fences) — keep every list short and concrete (max ~5 items each):
 
 Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
 wall_color_hex must be valid 7-char hex. shopping_list.price is per-unit number.
-Always weave in the mental-health angle: clutter causes stress, organization creates calm."""
+Always weave in the mental-health angle: clutter causes stress, organization creates calm.
+
+Hard rules:
+- Windows and room dimensions must stay ~95% faithful to the customer's real space. Never invent footage, window counts, openings, or measured callouts.
+- Do not propose new walls, windows, doors, or construction. Organize with bins, furniture, and layout.
+- Wall paint/color is OPTIONAL. If you include a suggestion, wall_color_note must say it is optional — consider it only if it helps the goal. Never put "paint the walls" in action_plan. The visual transform will not apply paint.
+- notes must mention ~95% window/dimension accuracy and that paint is optional."""
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -98,6 +108,10 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
     parts.append(f"Space: {space}")
     if lead.get("name"):
         parts.append(f"Customer name: {lead['name']}")
+    if lead.get("biggest_challenge"):
+        parts.append(f"Main problem: {lead['biggest_challenge']}")
+    if lead.get("goals") and lead.get("goals") != lead.get("biggest_challenge"):
+        parts.append(f"Goals: {lead['goals']}")
     if lead.get("bothers_about"):
         parts.append("What bothers them: " + ", ".join(_humanize(lead["bothers_about"], BOTHERS)))
     if lead.get("bothers_other"):
@@ -186,7 +200,11 @@ def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
         "strategy": as_str_list(plan.get("strategy")),
         "action_plan": as_str_list(plan.get("action_plan")),
         "benefits": as_str_list(plan.get("benefits")),
-        "notes": as_str(plan.get("notes")) or "All measurements are approximate. Confirm before purchasing.",
+        "notes": as_str(plan.get("notes"))
+        or (
+            "Windows and room proportions stay ~95% true to your photo. "
+            "Paint is optional — consider it only if it helps your goal."
+        ),
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
     }

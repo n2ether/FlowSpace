@@ -49,7 +49,7 @@ const PLANS = [
     features: [
       "Upload up to 2 photos",
       "AI-generated organized rooms",
-      "Quick, no signup",
+      "Starter plan emailed as PDF",
     ],
     pdf: false,
   },
@@ -166,7 +166,7 @@ const VALUES = [
 const FAQS = [
   {
     q: "What does FlowSpace actually do?",
-    a: "You upload photos of a cluttered room. Our AI generates a clean, organized version of the same room — same angle, same dimensions — with storage bins, shelving and a calmer layout, so you can see exactly how it could look.",
+    a: "You upload photos of a cluttered closet, garage, laundry room, pantry, or similar space. Our AI organizes that same space — windows and proportions stay about 95% true to your photo — with bins, shelving, and a calmer layout.",
   },
   {
     q: "Do I need an account to get started?",
@@ -174,11 +174,15 @@ const FAQS = [
   },
   {
     q: "How is the PDF plan different from the AI image?",
-    a: "The AI image shows the visual transformation. The PDF (Plus & Premium) walks you through categories, a shopping list, and step-by-step setup — coming soon to your inbox after submission.",
+    a: "The AI image shows the organized version of your actual space (paint is not forced into that visual). The emailed PDF Blueprint adds zones, a shopping list, a step-by-step action plan, and an optional paint note to consider only if it helps your goal — usually within a few minutes (free after submit; Plus and Premium after payment).",
   },
   {
-    q: "Which rooms work best?",
-    a: "Garages, closets, laundry rooms, mudrooms, pantries, kid rooms, and storage areas all work great. Anything with visible clutter and clear sightlines.",
+    q: "Will you change my windows or paint the walls?",
+    a: "No. Windows and room dimensions stay about 95% accurate to your photo — we don't invent openings or footage. Paint is never applied in the primary visual. The PDF may include an optional color to consider if it helps.",
+  },
+  {
+    q: "Which spaces work best?",
+    a: "Closets, garages, laundry rooms, mudrooms, pantries, and storage areas work best. Kid rooms and other cluttered spaces with clear sightlines are fine too.",
   },
   {
     q: "What photo formats do you accept?",
@@ -214,10 +218,10 @@ export default function Landing() {
               <span className="block text-emerald-600">calm, organized spaces.</span>
             </h1>
             <p className="max-w-xl text-lg leading-relaxed text-slate-600">
-              Upload photos of any messy room. Our AI generates a visual plan
-              for a cleaner, more functional space — with storage bins, labels,
-              and a layout that actually works. Perfect for garages, closets,
-              laundry rooms, and everyday home organization.
+              Upload photos of a cluttered closet, garage, laundry room, or
+              pantry. Our AI organizes that same space — windows and proportions
+              stay about 95% true to your photo — with bins, labels, and a
+              layout you can actually follow.
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <a
@@ -338,7 +342,7 @@ export default function Landing() {
               {
                 n: 3,
                 title: "Get your AI transformation",
-                body: "See a photorealistic ‘after’ for every room — with optional PDF organization plan.",
+                body: "See an organized after of your real space — windows and proportions stay about 95% true to your photo. We email a PDF with zones, shopping list, next steps, and optional paint to consider.",
               },
             ].map((s) => (
               <div
@@ -368,8 +372,9 @@ export default function Landing() {
               Pick a plan that fits your space
             </h2>
             <p className="mt-4 text-slate-600">
-              All plans include AI-generated organized room imagery. Upgrade
-              for more photos and a personalized PDF plan.
+              All plans include an AI-organized room image and an emailed PDF
+              plan. Upgrade for more photos, a fuller shopping guide, and
+              priority delivery.
             </p>
           </div>
           <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">

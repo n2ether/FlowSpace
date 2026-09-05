@@ -32,8 +32,8 @@ def _build_kontext_prompt(
     lead: Dict[str, Any],
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Prompt for image-EDITING — must instruct the model to keep the room's
-    real structure and only change furniture/storage/decor/color."""
+    """Prompt for image-EDITING — keep windows/dimensions ~95% accurate.
+    Do not change wall paint. Only change furniture/storage/loose items."""
     deliverable = deliverable or {}
     space = (lead.get("space_type") or "room").lower().replace("_", " ")
 
@@ -41,23 +41,16 @@ def _build_kontext_prompt(
     color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "everyday items"
 
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    wall_phrase = ""
-    if wall_name or wall_hex:
-        bits = [b for b in [wall_name, (f"hex {wall_hex}" if wall_hex else "")] if b]
-        wall_phrase = f" Repaint the walls {' / '.join(bits)}."
-
     return (
-        f"Transform this {space} into a beautifully organized, {style_str} space "
-        f"with a {color_str} color palette. "
-        f"Add smart, tidy storage for {storage_str} — matching baskets, labeled bins, "
-        f"streamlined shelving. Remove clutter from the floor and surfaces."
-        f"{wall_phrase} "
-        "IMPORTANT: Keep the exact same room — same walls, same windows, same doors, "
-        "same camera angle, same architecture and proportions. Only change the "
-        "furniture, storage, decor, and surface colors. This must look like the same "
-        "physical room, just organized and restyled. Photorealistic, natural lighting, "
+        f"Organize this existing {space} — {style_str} styling, {color_str} textiles "
+        f"and accessories. Add tidy storage for {storage_str}: matching baskets, "
+        f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
+        "HARD CONSTRAINT: Windows and room dimensions must stay ~95% accurate to the "
+        "source photo — same window count, size, and placement, same wall lengths, "
+        "same camera angle, same architecture. Do not add, remove, move, or invent "
+        "walls, windows, doors, or dimensions. "
+        "Do not change wall paint in this visual. Paint is not part of the transform. "
+        "Only change furniture, storage, and loose items. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -68,26 +61,21 @@ def _build_text_to_image_prompt(
 ) -> str:
     """Fallback prompt when there's no customer photo to edit."""
     deliverable = deliverable or {}
-    space = (lead.get("space_type") or "living room").lower().replace("_", " ")
+    space = (lead.get("space_type") or "closet").lower().replace("_", " ")
 
     style_str = ", ".join(_humanize(lead.get("style_prefs") or [], STYLE)) or "modern minimalist"
     color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"
     feeling_str = ", ".join(_humanize(lead.get("desired_feeling") or [], FEELING)) or "calm and functional"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "general storage"
 
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    wall_phrase = ""
-    if wall_name or wall_hex:
-        bits = [b for b in [wall_name, (f"hex {wall_hex}" if wall_hex else "")] if b]
-        wall_phrase = f" Wall color: {' / '.join(bits)}."
-
     return (
-        f"Photorealistic interior design photograph of a beautifully organized residential {space}. "
-        f"Aesthetic style: {style_str}. Color palette: {color_str}. "
+        f"Photorealistic photograph of a beautifully organized residential {space}. "
+        f"Aesthetic style: {style_str}. Textile and accessory colors: {color_str}. "
         f"Atmosphere: {feeling_str}, mentally calming. "
-        f"Smart storage solutions for {storage_str} — modular shelving, labeled bins, baskets, hooks."
-        f"{wall_phrase} Eye-level front view, wide angle showing full room. "
+        f"Smart storage for {storage_str} — modular shelving, labeled bins, baskets, hooks. "
+        "Do not invent unusual windows or exaggerated room dimensions. "
+        "Do not feature a painted-wall makeover — keep existing wall color. "
+        "Eye-level front view, wide angle showing the full space. "
         "Bright natural lighting, no people, no text or watermarks. "
         "Professional interior photography, magazine quality, ultra detailed, 4K."
     )

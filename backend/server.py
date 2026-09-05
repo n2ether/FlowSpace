@@ -21,6 +21,7 @@ from pdf_generator import build_pdf
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from automation import run_automation
+from fulfillment import checkout_lead_lookups, should_auto_start_automation
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -45,10 +46,10 @@ PACKAGES: Dict[str, Dict[str, Any]] = {
 STARTER_GALLERY = [
     {
         "id": str(uuid.uuid4()),
-        "title": "Bedroom — Calming retreat",
+        "title": "Closet — Calm and categorized",
         "category": "closet",
-        "before_url": "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
-        "after_url":  "https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=1400&q=80",
+        "before_url": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1400&q=80",
+        "after_url":  "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
     },
     {
         "id": str(uuid.uuid4()),
@@ -95,6 +96,10 @@ class Lead(BaseModel):
     daily_improvement: Optional[str] = None
     language: str = "en"
     status: str = "new"
+    stripe_session_id: Optional[str] = None
+    email_sent: Optional[bool] = None
+    email_error: Optional[str] = None
+    automation_error: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -265,6 +270,115 @@ async def seed_gallery_if_empty():
             await db.gallery.insert_one(doc)
 
 
+async def _find_lead_for_checkout(
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+    customer_email: Optional[str] = None,
+    transaction_lead_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve the customer lead for a paid Stripe session. Prefer lead_id over email."""
+    for reason, query in checkout_lead_lookups(
+        metadata=metadata,
+        customer_email=customer_email,
+        transaction_lead_id=transaction_lead_id,
+    ):
+        lead = await db.leads.find_one(query, {"_id": 0})
+        if lead:
+            logging.info("Matched lead %s for checkout via %s", lead.get("id"), reason)
+            return lead
+    return None
+
+
+async def _start_automation_for_lead(
+    lead: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+    extra_fields: Optional[Dict[str, Any]] = None,
+    *,
+    force: bool = False,
+) -> bool:
+    """
+    Claim the lead and queue the Claude → FLUX → PDF → Resend pipeline.
+
+    Skips if the lead is already processing/delivered unless force=True (admin retry).
+    """
+    extra_fields = extra_fields or {}
+    lead_id = lead.get("id")
+    if not lead_id:
+        return False
+    now = _iso(datetime.now(timezone.utc))
+    query: Dict[str, Any] = {"id": lead_id}
+    if not force and not should_auto_start_automation(lead.get("status")):
+        logging.info("Skipping automation for lead %s — status=%s", lead_id, lead.get("status"))
+        return False
+    if not force:
+        query["status"] = {"$nin": ["processing", "delivered"]}
+    res = await db.leads.update_one(
+        query,
+        {"$set": {**extra_fields, "status": "processing", "updated_at": now}},
+    )
+    if res.matched_count == 0:
+        logging.info("Skipping automation for lead %s — already in flight or delivered", lead_id)
+        return False
+    queued = {**lead, **extra_fields, "status": "processing"}
+    background_tasks.add_task(run_automation, lead=queued, db=db, fs_bucket=fs_bucket)
+    logging.info("Automation queued for lead %s", lead_id)
+    return True
+
+
+async def _fulfill_paid_checkout(
+    *,
+    session_id: str,
+    metadata: Dict[str, str],
+    customer_email: Optional[str],
+    background_tasks: BackgroundTasks,
+    payment_status: str = "paid",
+    stripe_status: str = "complete",
+) -> None:
+    """Link a paid Stripe session to its lead and start PDF email automation."""
+    existing_tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {
+            "$set": {
+                "payment_status": payment_status,
+                "status": stripe_status,
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
+        },
+    )
+    if payment_status != "paid":
+        return
+
+    lead = await _find_lead_for_checkout(
+        metadata=metadata,
+        customer_email=customer_email,
+        transaction_lead_id=(existing_tx or {}).get("lead_id"),
+    )
+    if not lead:
+        logging.warning(
+            "Paid checkout %s has no matching lead (email=%s metadata_lead_id=%s tx_lead_id=%s)",
+            session_id,
+            customer_email,
+            (metadata or {}).get("lead_id"),
+            (existing_tx or {}).get("lead_id"),
+        )
+        return
+
+    pkg = (metadata or {}).get("package_id") or lead.get("package_id") or ""
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {"lead_id": lead["id"]}},
+    )
+    await _start_automation_for_lead(
+        lead,
+        background_tasks,
+        extra_fields={
+            "stripe_session_id": session_id,
+            "package_id": pkg,
+        },
+    )
+
+
 async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
     if not url:
         return None
@@ -317,8 +431,7 @@ async def create_lead(payload: LeadCreate, background_tasks: BackgroundTasks):
         payload.package_id in PACKAGES and PACKAGES[payload.package_id]["price"] == 0.0
     )
     if is_free:
-        lead_doc = _doc(lead)
-        background_tasks.add_task(run_automation, lead=lead_doc, db=db, fs_bucket=fs_bucket)
+        await _start_automation_for_lead(_doc(lead), background_tasks)
 
     return lead
 
@@ -388,7 +501,7 @@ async def retry_automation(lead_id: str, background_tasks: BackgroundTasks, _: b
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+    await _start_automation_for_lead(lead, background_tasks, force=True)
     return {"message": "Automation started", "lead_id": lead_id}
 
 
@@ -585,6 +698,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         amount=float(pkg["price"]),
         currency=pkg["currency"],
         email=str(req.email) if req.email else None,
+        lead_id=(req.metadata or {}).get("lead_id") or metadata.get("lead_id"),
         payment_status="initiated",
         status="open",
         metadata=metadata,
@@ -594,17 +708,29 @@ async def create_checkout(req: CheckoutRequest, request: Request):
 
 
 @api_router.get("/checkout/status/{session_id}")
-async def checkout_status(session_id: str):
+async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
     existing = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Session not found")
     if existing.get("payment_status") == "paid":
+        # Backup trigger: if the Stripe webhook never reached this backend
+        # (wrong URL, Emergent leftover, missing secret), still start the
+        # PDF → Resend pipeline when the success page confirms payment.
+        meta = existing.get("metadata") or {}
+        await _fulfill_paid_checkout(
+            session_id=session_id,
+            metadata=meta,
+            customer_email=existing.get("email") or meta.get("email"),
+            background_tasks=background_tasks,
+            payment_status="paid",
+            stripe_status=existing.get("status", "complete"),
+        )
         return {
             "payment_status": "paid",
             "status": existing.get("status", "complete"),
             "amount_total": int(float(existing.get("amount", 0)) * 100),
             "currency": existing.get("currency", "usd"),
-            "metadata": existing.get("metadata", {}),
+            "metadata": meta,
         }
 
     stripe_sdk.api_key = STRIPE_API_KEY
@@ -622,6 +748,16 @@ async def checkout_status(session_id: str):
         {"session_id": session_id},
         {"$set": {"payment_status": new_payment_status, "status": new_status, "updated_at": _iso(datetime.now(timezone.utc))}},
     )
+    if new_payment_status == "paid":
+        customer_email = existing.get("email") or metadata.get("email")
+        await _fulfill_paid_checkout(
+            session_id=session_id,
+            metadata=metadata,
+            customer_email=customer_email,
+            background_tasks=background_tasks,
+            payment_status=new_payment_status,
+            stripe_status=new_status,
+        )
     return {
         "payment_status": new_payment_status,
         "status": new_status,
@@ -661,39 +797,14 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
             payment_status = getattr(sess, "payment_status", "unknown")
             metadata = _safe_metadata(sess)
             customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
-
-            await db.payment_transactions.update_one(
-                {"session_id": session_id},
-                {"$set": {"payment_status": payment_status, "status": sess.status, "updated_at": _iso(datetime.now(timezone.utc))}},
+            await _fulfill_paid_checkout(
+                session_id=session_id,
+                metadata=metadata,
+                customer_email=customer_email,
+                background_tasks=background_tasks,
+                payment_status=payment_status,
+                stripe_status=getattr(sess, "status", "complete"),
             )
-
-            if payment_status == "paid" and customer_email:
-                # Find the most recent lead for this email that has no session linked
-                lead = await db.leads.find_one(
-                    {"email": customer_email, "status": "new"},
-                    {"_id": 0},
-                    sort=[("created_at", -1)],
-                )
-                if lead:
-                    # Link session to lead
-                    await db.leads.update_one(
-                        {"id": lead["id"]},
-                        {"$set": {
-                            "stripe_session_id": session_id,
-                            "package_id": metadata.get("package_id", lead.get("package_id", "")),
-                            "status": "paid",
-                        }},
-                    )
-                    # Update transaction with lead_id
-                    await db.payment_transactions.update_one(
-                        {"session_id": session_id},
-                        {"$set": {"lead_id": lead["id"]}},
-                    )
-                    # Fire automation pipeline
-                    background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
-                    logging.info("Automation triggered for lead %s after payment", lead["id"])
-                else:
-                    logging.warning("No matching lead found for email %s after payment", customer_email)
         except Exception:
             # Log the FULL traceback so it's visible in Railway logs, then
             # re-raise as a clean 500 so Stripe knows to retry.

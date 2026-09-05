@@ -1,11 +1,17 @@
 """
 FlowSpace branded PDF deliverable generator.
 
-Layout reference: a multi-page design plan featuring
-  Page 1: Overall Plan (3D front view, floor plan, additional views, room needs,
-          zones, wall color, shopping list/budget, design strategy, action plan, benefits)
-  Pages 2..N: Customer-uploaded space photos (one per page, full bleed)
-  Last page: Design summary + shopping links table
+Layout reference (structure only — not a bedroom-redesign product):
+  Header brand bar
+  Space-aware title (Garage Organization Plan, Closet Blueprint, …)
+  Two columns — visuals | callout, needs, numbered zones,
+                 optional paint recommendation
+  Full-width shopping list + budget
+  Bottom row — Design Strategy | Simple Action Plan | Benefits
+  Footer: windows/dimensions ~95% true to the photo; paint is optional
+
+Primary spaces: closets, garages, laundry rooms, pantries, mudrooms, storage.
+Never invent wall/window/dimension callouts. Floor plans only when provided.
 
 Pure reportlab — no external services needed.
 """
@@ -42,6 +48,46 @@ MUTED = HexColor("#6b7280")
 LINE = HexColor("#e5e7eb")
 SOFT_BG = HexColor("#f7faf9")
 TAGLINE = "Clear space. Create flow. Live better."
+
+# Customer-facing space names. Underscored intake ids → readable labels.
+SPACE_LABELS = {
+    "living_room": "Living room",
+    "bedroom": "Bedroom",
+    "closet": "Closet",
+    "garage": "Garage",
+    "pantry": "Pantry",
+    "laundry_room": "Laundry",
+    "laundry": "Laundry",
+    "home_office": "Home office",
+    "kids_room": "Kids' room",
+    "mudroom": "Mudroom",
+    "storage": "Storage",
+    "other": "Space",
+}
+
+DEFAULT_NOTES = (
+    "Windows and room proportions stay ~95% true to your photo. "
+    "We do not invent dimensions. Paint is optional — consider it only if it helps your goal."
+)
+OPTIONAL_PAINT_HEADING = "Optional paint — consider if it helps"
+OPTIONAL_PAINT_NOTE = (
+    "Optional recommendation only. Not applied in the visual. "
+    "Consider this color if it helps your organization goal."
+)
+
+
+def space_label(space_type: Optional[str]) -> str:
+    key = (space_type or "space").strip().lower().replace(" ", "_")
+    return SPACE_LABELS.get(key, key.replace("_", " ").title() or "Space")
+
+
+def plan_title(space_type: Optional[str]) -> str:
+    """Space-aware PDF title. Closets use Blueprint; others are Organization Plans."""
+    key = (space_type or "space").strip().lower().replace(" ", "_")
+    label = space_label(space_type)
+    if key == "closet":
+        return "Closet Blueprint"
+    return f"{label} Organization Plan"
 
 PAGE_W, PAGE_H = LETTER
 MARGIN = 0.55 * inch
@@ -100,11 +146,11 @@ def _styles():
             "h1",
             parent=base["Title"],
             fontName="Helvetica-Bold",
-            fontSize=24,
-            leading=28,
+            fontSize=20,
+            leading=24,
             textColor=BRAND_DARK,
             alignment=TA_LEFT,
-            spaceAfter=4,
+            spaceAfter=2,
         ),
         "h2": ParagraphStyle(
             "h2",
@@ -169,6 +215,69 @@ def _styles():
             textColor=MUTED,
             alignment=TA_CENTER,
         ),
+        "keywords": ParagraphStyle(
+            "keywords",
+            parent=base["BodyText"],
+            fontName="Helvetica",
+            fontSize=8,
+            leading=11,
+            textColor=BRAND_GREEN,
+            alignment=TA_LEFT,
+            spaceAfter=4,
+        ),
+        "banner": ParagraphStyle(
+            "banner",
+            parent=base["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=7.5,
+            leading=10,
+            textColor=colors.white,
+            alignment=TA_CENTER,
+        ),
+        "calloutTitle": ParagraphStyle(
+            "calloutTitle",
+            parent=base["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=12,
+            textColor=colors.white,
+        ),
+        "calloutBody": ParagraphStyle(
+            "calloutBody",
+            parent=base["BodyText"],
+            fontName="Helvetica",
+            fontSize=8,
+            leading=11,
+            textColor=HexColor("#e8f5ee"),
+        ),
+        "zoneNum": ParagraphStyle(
+            "zoneNum",
+            parent=base["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=11,
+            textColor=colors.white,
+            alignment=TA_CENTER,
+        ),
+        "colHead": ParagraphStyle(
+            "colHead",
+            parent=base["Heading3"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=13,
+            textColor=BRAND_DARK,
+            spaceBefore=0,
+            spaceAfter=4,
+        ),
+        "footerNote": ParagraphStyle(
+            "footerNote",
+            parent=base["BodyText"],
+            fontName="Helvetica-Oblique",
+            fontSize=7.5,
+            leading=10,
+            textColor=MUTED,
+            alignment=TA_CENTER,
+        ),
     }
 
 
@@ -216,15 +325,19 @@ def _bullet_list(items: List[str], style) -> List[Any]:
     return out
 
 
-def _shopping_table(items: List[Dict[str, Any]], currency: str = "$") -> Table:
+def _shopping_table(
+    items: List[Dict[str, Any]],
+    currency: str = "$",
+    available_width: Optional[float] = None,
+) -> Table:
     header = ["Item", "Qty", "Est. Price", "Subtotal"]
     rows = [header]
     total = 0.0
-    full_w = PAGE_W - 2 * MARGIN
-    name_w = full_w * 0.52
+    full_w = available_width if available_width else (PAGE_W - 2 * MARGIN)
+    name_w = full_w * 0.46
     qty_w = full_w * 0.12
-    price_w = full_w * 0.18
-    sub_w = full_w * 0.18
+    price_w = full_w * 0.21
+    sub_w = full_w * 0.21
 
     for it in items or []:
         name = str(it.get("name", ""))
@@ -240,7 +353,7 @@ def _shopping_table(items: List[Dict[str, Any]], currency: str = "$") -> Table:
                 f"{currency}{subtotal:,.2f}",
             ]
         )
-    rows.append(["", "", "Total", f"{currency}{total:,.2f}"])
+    rows.append(["", "", "Estimated Total", f"{currency}{total:,.2f}"])
 
     table = Table(rows, colWidths=[name_w, qty_w, price_w, sub_w])
     table.setStyle(
@@ -257,10 +370,10 @@ def _shopping_table(items: List[Dict[str, Any]], currency: str = "$") -> Table:
                 ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
                 ("BACKGROUND", (0, -1), (-1, -1), HexColor("#ecfdf5")),
                 ("TEXTCOLOR", (0, -1), (-1, -1), BRAND_DARK),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
             ]
         )
     )
@@ -328,9 +441,15 @@ def _zones_table(zones: List[Dict[str, str]], available_width: float) -> Table:
     return t
 
 
-def _wall_color_block(name: str, code: str, hex_color: str, note: str) -> Table:
+def _wall_color_block(
+    name: str,
+    code: str,
+    hex_color: str,
+    note: str,
+    available_width: Optional[float] = None,
+) -> Table:
     swatch_color = HexColor(hex_color) if hex_color and hex_color.startswith("#") else HexColor("#a3b8c2")
-    swatch = Table([[""]], colWidths=[0.65 * inch], rowHeights=[0.65 * inch])
+    swatch = Table([[""]], colWidths=[0.48 * inch], rowHeights=[0.48 * inch])
     swatch.setStyle(
         TableStyle(
             [
@@ -339,14 +458,194 @@ def _wall_color_block(name: str, code: str, hex_color: str, note: str) -> Table:
             ]
         )
     )
+    s = _styles()
     info = [
-        Paragraph(f"<b>{name or 'Suggested Wall Color'}</b>", _styles()["body"]),
-        Paragraph(f"<font color='#6b7280'>{code or ''}</font>", _styles()["body"]),
-        Spacer(1, 3),
-        Paragraph(note or "", _styles()["muted"]),
+        Paragraph(f"<b>{name or 'Optional paint suggestion'}</b>", s["body"]),
+        Paragraph(f"<font color='#6b7280'>{code or ''}</font>", s["body"]),
+        Spacer(1, 2),
+        Paragraph(note or OPTIONAL_PAINT_NOTE, s["muted"]),
     ]
-    t = Table([[swatch, info]], colWidths=[0.85 * inch, PAGE_W - 2 * MARGIN - 0.85 * inch])
+    full_w = available_width if available_width else (PAGE_W - 2 * MARGIN)
+    t = Table([[swatch, info]], colWidths=[0.62 * inch, max(full_w - 0.62 * inch, 1.2 * inch)])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    return t
+
+
+def _keyword_line(lead: Dict[str, Any]) -> str:
+    bits: List[str] = []
+    for raw in (lead.get("style_prefs") or [])[:2]:
+        bits.append(str(raw).replace("_", " ").strip())
+    for raw in (lead.get("desired_feeling") or lead.get("color_prefs") or [])[:2]:
+        label = str(raw).replace("_", " ").strip()
+        if label and label.lower() not in {b.lower() for b in bits}:
+            bits.append(label)
+    if not bits:
+        bits = ["Practical", "Calming", "Organized"]
+    return "  ·  ".join(b.upper() for b in bits[:3])
+
+
+def _visual_block(img_bytes: Optional[bytes], caption: str, width: float, height: float) -> Table:
+    """Image with a dark sage caption banner — template '3D VISUAL – FRONT VIEW' style."""
+    s = _styles()
+    banner = Table([[Paragraph(caption, s["banner"])]], colWidths=[width], rowHeights=[16])
+    banner.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), BRAND_DARK),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    img = _safe_image(img_bytes, width, height)
+    block = Table([[banner], [img]], colWidths=[width])
+    block.setStyle(
+        TableStyle(
+            [
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return block
+
+
+def _callout_box(width: float) -> Table:
+    s = _styles()
+    inner = [
+        Paragraph("DESIGNED FOR HOW YOU LIVE", s["calloutTitle"]),
+        Spacer(1, 3),
+        Paragraph(
+            "Smart storage and a calmer layout — less visual noise, less daily stress. "
+            "We organize the room you already have.",
+            s["calloutBody"],
+        ),
+    ]
+    t = Table([[inner]], colWidths=[width])
+    t.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), BRAND_DARK),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    return t
+
+
+def _numbered_zones(zones: List[Dict[str, str]], available_width: float) -> Table:
+    s = _styles()
+    rows = []
+    for i, z in enumerate(zones or [], 1):
+        title = z.get("title", "") or ""
+        desc = z.get("desc", "") or ""
+        badge = Table([[Paragraph(str(i), s["zoneNum"])]], colWidths=[16], rowHeights=[16])
+        badge.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), BRAND_GREEN),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+        text = [
+            Paragraph(f"<b>{title}</b>", s["label"]),
+            Paragraph(desc, s["body"]),
+        ]
+        rows.append([badge, text])
+    if not rows:
+        return _placeholder(available_width, 32, "Zones will follow your real layout")
+    badge_w = 22
+    t = Table(rows, colWidths=[badge_w, max(available_width - badge_w - 4, 0.8 * inch)])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    return t
+
+
+def _budget_box(note: str, width: float) -> Table:
+    s = _styles()
+    body = note or "Budget is an estimate from typical retail ranges. Confirm prices before you buy."
+    t = Table(
+        [[Paragraph("<b>BUDGET RANGE</b>", s["calloutTitle"])], [Paragraph(body, s["calloutBody"])]],
+        colWidths=[width],
+    )
+    t.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), BRAND_DARK),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (0, 0), 6),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 6),
+            ]
+        )
+    )
+    return t
+
+
+def _three_col_section(
+    strategy: List[str],
+    action_plan: List[str],
+    benefits: List[str],
+) -> Table:
+    s = _styles()
+    col_w = (PAGE_W - 2 * MARGIN - 16) / 3
+
+    def col(title: str, items: List[str], numbered: bool = False) -> List[Any]:
+        out: List[Any] = [Paragraph(title, s["colHead"])]
+        if not items:
+            out.append(Paragraph("—", s["muted"]))
+            return out
+        for i, item in enumerate(items, 1):
+            if not item:
+                continue
+            prefix = f"{i}. " if numbered else "✓  "
+            out.append(Paragraph(f"{prefix}{item}", s["bullet"]))
+        return out
+
+    t = Table(
+        [[col("Design Strategy", strategy), col("Simple Action Plan", action_plan, True), col("Benefits", benefits)]],
+        colWidths=[col_w, col_w, col_w],
+    )
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOX", (0, 0), (0, 0), 0.4, LINE),
+                ("BOX", (1, 0), (1, 0), 0.4, LINE),
+                ("BOX", (2, 0), (2, 0), 0.4, LINE),
+                ("BACKGROUND", (0, 0), (-1, -1), SOFT_BG),
+            ]
+        )
+    )
     return t
 
 
@@ -367,7 +666,9 @@ def build_pdf(
     """
     buf = io.BytesIO()
     s = _styles()
-    space_label = (lead.get("space_type") or "Space").capitalize()
+    space_key = lead.get("space_type") or "space"
+    space_name = space_label(space_key)
+    title_text = plan_title(space_key)
     customer_name = lead.get("name") or "there"
 
     frame = Frame(
@@ -391,140 +692,138 @@ def build_pdf(
         buf,
         pagesize=LETTER,
         pageTemplates=[template],
-        title=f"{space_label} Design Plan — FlowSpace",
+        title=f"{title_text} — FlowSpace",
         author="FlowSpace",
     )
 
     story: List[Any] = []
 
-    # --- Page 1: Overall Plan ----------------------------------------
+    # --- Page 1: organization plan (template structure, space-aware title)
+    content_w = PAGE_W - 2 * MARGIN
+    left_w = content_w * 0.54
+    right_w = content_w * 0.46 - 8
+
     story.append(Paragraph(f"Hi {customer_name}!", s["body"]))
     story.append(Spacer(1, 2))
-    story.append(Paragraph(f"{space_label} Design Plan", s["h1"]))
+    story.append(Paragraph(title_text, s["h1"]))
+    story.append(Paragraph(_keyword_line(lead), s["keywords"]))
     intro = (
         deliverable.get("intro")
-        or "Here's your personalized plan. We focused on a layout that fits your real life, "
-        "with a calm look you'll enjoy walking into every day."
+        or "A calmer, easier space to live with — organized around the room you already have."
     )
     story.append(Paragraph(intro, s["body"]))
     story.append(Spacer(1, 8))
-    story.append(_hr())
-    story.append(Paragraph("Overall Plan", s["h2"]))
 
-    # Front view + floor plan side by side
-    cw = (PAGE_W - 2 * MARGIN - 10) / 2
-    img_h = 2.2 * inch
-    fv = _safe_image(images.get("front_view"), cw, img_h)
-    fp = _safe_image(images.get("floor_plan"), cw, img_h)
-    top = Table(
-        [
-            [fv, fp],
-            [
-                Paragraph("3D Front View", s["imgCaption"]),
-                Paragraph("Floor Plan (Top View)", s["imgCaption"]),
-            ],
-        ],
-        colWidths=[cw, cw],
-    )
-    top.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-    story.append(top)
-    story.append(Spacer(1, 6))
+    # Left: visuals. Right: needs / zones / palette / shopping.
+    # Skip empty floor-plan / extra-view slots so we never invent architecture
+    # and so the two-column plan can stay on the first page.
+    fv = _visual_block(images.get("front_view"), "3D VISUAL – FRONT VIEW", left_w, 1.85 * inch)
+    left_col: List[Any] = [fv]
+    if images.get("floor_plan"):
+        left_col += [Spacer(1, 5), _visual_block(images.get("floor_plan"), "FLOOR PLAN (TOP VIEW)", left_w, 1.35 * inch)]
+    else:
+        left_col += [
+            Spacer(1, 4),
+            Paragraph(
+                "Floor plan not included — we do not invent room dimensions.",
+                s["muted"],
+            ),
+        ]
 
-    # Additional 3 views row
-    cw3 = (PAGE_W - 2 * MARGIN - 16) / 3
-    h3 = 1.3 * inch
-    v1 = _safe_image(images.get("view_1"), cw3, h3)
-    v2 = _safe_image(images.get("view_2"), cw3, h3)
-    v3 = _safe_image(images.get("view_3"), cw3, h3)
-    row = Table(
-        [
-            [v1, v2, v3],
-            [
-                Paragraph("View 1", s["imgCaption"]),
-                Paragraph("View 2", s["imgCaption"]),
-                Paragraph("View 3", s["imgCaption"]),
-            ],
-        ],
-        colWidths=[cw3, cw3, cw3],
-    )
-    row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-    story.append(row)
-    story.append(Spacer(1, 12))
+    extra_slots = [
+        (images.get("view_1"), "VIEW 1"),
+        (images.get("view_2"), "VIEW 2"),
+        (images.get("view_3"), "VIEW 3"),
+    ]
+    provided_views = [(b, cap) for b, cap in extra_slots if b]
+    if provided_views:
+        v_w = (left_w - 8) / max(len(provided_views), 1)
+        v_h = 0.85 * inch
+        extra_views = Table(
+            [[_visual_block(b, cap, v_w, v_h) for b, cap in provided_views]],
+            colWidths=[v_w] * len(provided_views),
+        )
+        extra_views.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+        left_col += [Spacer(1, 5), extra_views]
 
-    # Needs and Zones (two columns)
     needs = deliverable.get("needs") or []
     zones = deliverable.get("zones") or []
+    shopping = deliverable.get("shopping_list") or []
+    budget_note = deliverable.get("budget_note") or ""
 
-    needs_cell: List[Any] = [Paragraph(f"{space_label} Needs", s["h3"])]
+    right_col: List[Any] = [_callout_box(right_w), Spacer(1, 8)]
+    right_col.append(Paragraph(f"{space_name} needs", s["h3"]))
     if needs:
-        needs_cell += _bullet_list(needs, s["bullet"])
+        right_col.extend(_bullet_list(needs, s["bullet"]))
     else:
-        needs_cell.append(Paragraph("—", s["muted"]))
+        right_col.append(Paragraph("—", s["muted"]))
+    right_col.append(Spacer(1, 6))
+    right_col.append(Paragraph("Room Layout & Zones", s["h3"]))
+    right_col.append(_numbered_zones(zones, right_w - 6))
+    right_col.append(Spacer(1, 6))
 
-    col_w = (PAGE_W - 2 * MARGIN - 12) / 2
-    # Subtract a small safety margin for the outer table's own cell padding
-    zones_available_w = col_w - 8
-    zones_cell: List[Any] = [Paragraph("Room Layout & Zones", s["h3"]), _zones_table(zones, zones_available_w)]
+    wall_name = (deliverable.get("wall_color_name") or "").strip()
+    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
+    if wall_name or wall_hex:
+        right_col.append(Paragraph(OPTIONAL_PAINT_HEADING, s["h3"]))
+        right_col.append(
+            _wall_color_block(
+                wall_name,
+                deliverable.get("wall_color_code", ""),
+                wall_hex,
+                deliverable.get("wall_color_note", ""),
+                available_width=right_w - 4,
+            )
+        )
+        right_col.append(Spacer(1, 6))
 
-    nz = Table([[needs_cell, zones_cell]], colWidths=[col_w, col_w])
-    nz.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story.append(nz)
-    story.append(Spacer(1, 10))
-
-    # Wall color
-    story.append(Paragraph("Wall Color Suggestion", s["h3"]))
-    story.append(
-        _wall_color_block(
-            deliverable.get("wall_color_name", ""),
-            deliverable.get("wall_color_code", ""),
-            deliverable.get("wall_color_hex", ""),
-            deliverable.get("wall_color_note", ""),
+    main = Table([[left_col, right_col]], colWidths=[left_w, right_w + 8])
+    main.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 6),
+                ("LEFTPADDING", (1, 0), (1, 0), 6),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+            ]
         )
     )
-    story.append(Spacer(1, 10))
+    story.append(main)
+    story.append(Spacer(1, 8))
 
-    # Shopping list / budget
-    shopping = deliverable.get("shopping_list") or []
-    story.append(Paragraph("Shopping List & Estimated Budget", s["h3"]))
-    story.append(_shopping_table(shopping))
-    budget_note = deliverable.get("budget_note") or ""
+    # Full-width shopping keeps the two-column block short enough for page 1
+    story.append(Paragraph("Shopping List &amp; Estimated Budget", s["h3"]))
+    story.append(_shopping_table(shopping, available_width=content_w))
     if budget_note:
         story.append(Spacer(1, 3))
-        story.append(Paragraph(budget_note, s["muted"]))
-    story.append(Spacer(1, 10))
+        story.append(Paragraph(f"<b>Budget range:</b> {budget_note}", s["muted"]))
+    story.append(Spacer(1, 8))
 
-    # Strategy + Action Plan + Benefits
     strategy = deliverable.get("strategy") or []
     action_plan = deliverable.get("action_plan") or []
     benefits = deliverable.get("benefits") or []
+    story.append(_three_col_section(strategy, action_plan, benefits))
 
-    if strategy:
-        story.append(Paragraph("Design Strategy", s["h3"]))
-        story.extend(_bullet_list(strategy, s["bullet"]))
-        story.append(Spacer(1, 6))
-
-    if action_plan:
-        story.append(Paragraph("Simple Action Plan", s["h3"]))
-        for i, step in enumerate(action_plan, 1):
-            if step:
-                story.append(Paragraph(f"{i}. {step}", s["bullet"]))
-        story.append(Spacer(1, 6))
-
-    if benefits:
-        story.append(Paragraph("Benefits", s["h3"]))
-        story.extend(_bullet_list(benefits, s["bullet"]))
-
-    notes = deliverable.get("notes") or (
-        "Important: All measurements are approximate. Confirm with a tape measure before purchasing."
-    )
+    notes = deliverable.get("notes") or DEFAULT_NOTES
     story.append(Spacer(1, 8))
-    story.append(Paragraph(notes, s["muted"]))
+    story.append(Paragraph(notes, s["footerNote"]))
 
-    # --- Pages 2..N: Customer photos --------------------------------
+    # --- Extra pages: Customer photos (only when present) ------------
     customer_photos: List[Optional[bytes]] = images.get("customer_photos") or []
+    included_photos = 0
     for idx, b in enumerate(customer_photos, 1):
         if not b:
             continue
+        included_photos += 1
         story.append(PageBreak())
         story.append(Spacer(1, 0.05 * inch))
         story.append(Paragraph(f"Reference Photo {idx}", s["h3"]))
@@ -546,8 +845,11 @@ def build_pdf(
         except Exception:
             story.append(_placeholder(max_w, max_h, "Photo unavailable"))
 
-    # --- Last page: Summary + Shopping Links -------------------------
-    story.append(PageBreak())
+    # --- Summary + Shopping Links (new page only if photos used space)
+    if included_photos:
+        story.append(PageBreak())
+    else:
+        story.append(Spacer(1, 10))
     story.append(Paragraph("Design Summary", s["h2"]))
     summary = deliverable.get("summary") or (
         "A calm, functional space tailored to how you live — with smart storage, "

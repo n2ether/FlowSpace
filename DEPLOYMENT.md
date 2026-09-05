@@ -1,5 +1,11 @@
 # FlowSpace — Railway Deployment Guide
 
+> **Live site note (Sept 2026):** https://flowspace.solutions is still the
+> Emergent-hosted marketing app (Emergent chrome / PostHog). The PDF → Resend
+> pipeline in this repo only runs after you deploy **this** backend on Railway
+> (or equivalent) and point the domain + Stripe webhook at it. Until then,
+> customers will not receive Blueprint emails even though Plus/Premium sell a PDF.
+
 ## What you're deploying
 
 Two Railway services from one GitHub repo:
@@ -47,7 +53,8 @@ git push origin main
 | `DB_NAME` | `flowspace` |
 | `ANTHROPIC_API_KEY` | `sk-ant-...` |
 | `REPLICATE_API_TOKEN` | `r8_...` |
-| `RESEND_API_KEY` | `re_...` |
+| `RESEND_API_KEY` | `re_...` (required for any PDF email — without it the PDF is built but never sent; lead status becomes `pdf_ready`) |
+| `RESEND_FROM_EMAIL` | Optional. Defaults to `FlowSpace <blueprints@flowspace.solutions>` |
 | `ADMIN_EMAIL` | Your email (receives admin copies) |
 | `STRIPE_API_KEY` | `sk_live_...` (or `sk_test_...` for testing) |
 | `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below |
@@ -93,7 +100,7 @@ git push origin main
 2. Add `flowspace.solutions`
 3. Add the DNS records Resend provides to your domain registrar
 4. Wait for verification (5–30 min)
-5. The `FROM_EMAIL` in `email_service.py` is set to `blueprints@flowspace.solutions` — this will work once the domain is verified
+5. The default From address is `blueprints@flowspace.solutions` (`RESEND_FROM_EMAIL` overrides it). Production send **will fail** until this domain is verified in Resend. Test-mode Resend keys can only send to the account owner's email.
 
 ---
 
@@ -156,7 +163,8 @@ From the admin panel you can:
 - See all leads and their automation status (`new` / `processing` / `delivered` / `error`)
 - Click **Design** on any lead to view/edit the AI-generated plan
 - Click **Generate PDF** to download the Blueprint
-- Click **Retry Automation** (via `POST /api/admin/leads/{id}/retry-automation`) to re-run for any lead
+- Click **Retry PDF email** on any lead to re-run Claude → FLUX → PDF → Resend (`POST /api/admin/leads/{id}/retry-automation`)
+- Lead status: `new` → `processing` → `delivered` (email sent) or `pdf_ready` (PDF built, Resend failed) or `error`
 
 ---
 

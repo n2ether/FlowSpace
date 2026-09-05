@@ -84,11 +84,11 @@ const Success = () => {
                                 <div className="flex items-start gap-3">
                                     <Mail className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
                                     <div>
-                                        <p className="font-medium text-emerald-900">Check your email in ~2 minutes</p>
+                                        <p className="font-medium text-emerald-900">Check your email in about two minutes</p>
                                         <p className="mt-1 text-sm text-emerald-800">
-                                            We're generating your personalized FlowSpace Blueprint™ right now.
-                                            It includes your room rendering, shopping list, action plan, and color palette —
-                                            delivered as a PDF straight to your inbox.
+                                            We&apos;re generating your FlowSpace Blueprint now — a PDF with your
+                                            room rendering, zones, shopping list, and action plan, sent to the
+                                            inbox you provided. Check spam if it isn&apos;t there.
                                         </p>
                                     </div>
                                 </div>
