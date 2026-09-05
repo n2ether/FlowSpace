@@ -49,7 +49,7 @@ const PLANS = [
     features: [
       "Upload up to 2 photos",
       "AI-generated organized rooms",
-      "Quick, no signup",
+      "Starter plan emailed as PDF",
     ],
     pdf: false,
   },
@@ -174,7 +174,7 @@ const FAQS = [
   },
   {
     q: "How is the PDF plan different from the AI image?",
-    a: "The AI image shows the visual transformation. The PDF (Plus & Premium) walks you through categories, a shopping list, and step-by-step setup — coming soon to your inbox after submission.",
+    a: "The AI image shows the visual transformation of your actual room. Every plan emails a PDF Blueprint with zones, a shopping list, and a step-by-step action plan — usually within a few minutes (free after submit; Plus and Premium after payment).",
   },
   {
     q: "Which rooms work best?",
@@ -338,7 +338,7 @@ export default function Landing() {
               {
                 n: 3,
                 title: "Get your AI transformation",
-                body: "See a photorealistic ‘after’ for every room — with optional PDF organization plan.",
+                body: "See a photorealistic after of your real room. We email a PDF organization plan with zones, shopping list, and next steps.",
               },
             ].map((s) => (
               <div
@@ -368,8 +368,9 @@ export default function Landing() {
               Pick a plan that fits your space
             </h2>
             <p className="mt-4 text-slate-600">
-              All plans include AI-generated organized room imagery. Upgrade
-              for more photos and a personalized PDF plan.
+              All plans include an AI-organized room image and an emailed PDF
+              plan. Upgrade for more photos, a fuller shopping guide, and
+              priority delivery.
             </p>
           </div>
           <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">

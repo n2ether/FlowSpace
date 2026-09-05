@@ -48,7 +48,13 @@ no code fences) — keep every list short and concrete (max ~5 items each):
 
 Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
 wall_color_hex must be valid 7-char hex. shopping_list.price is per-unit number.
-Always weave in the mental-health angle: clutter causes stress, organization creates calm."""
+Always weave in the mental-health angle: clutter causes stress, organization creates calm.
+
+Hard rules — do not invent architecture:
+- Never invent room dimensions, square footage, wall counts, window placements, or measured footage.
+- Do not propose new walls, windows, doors, or construction. Organize the existing room with bins, furniture, and layout.
+- Wall color is an optional styling suggestion only (textiles/accents), not a requirement to repaint or remodel.
+- notes must say measurements are approximate and should be adjusted to the real room."""
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -98,6 +104,10 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
     parts.append(f"Space: {space}")
     if lead.get("name"):
         parts.append(f"Customer name: {lead['name']}")
+    if lead.get("biggest_challenge"):
+        parts.append(f"Main problem: {lead['biggest_challenge']}")
+    if lead.get("goals") and lead.get("goals") != lead.get("biggest_challenge"):
+        parts.append(f"Goals: {lead['goals']}")
     if lead.get("bothers_about"):
         parts.append("What bothers them: " + ", ".join(_humanize(lead["bothers_about"], BOTHERS)))
     if lead.get("bothers_other"):

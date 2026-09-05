@@ -41,23 +41,16 @@ def _build_kontext_prompt(
     color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "everyday items"
 
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    wall_phrase = ""
-    if wall_name or wall_hex:
-        bits = [b for b in [wall_name, (f"hex {wall_hex}" if wall_hex else "")] if b]
-        wall_phrase = f" Repaint the walls {' / '.join(bits)}."
-
     return (
-        f"Transform this {space} into a beautifully organized, {style_str} space "
-        f"with a {color_str} color palette. "
-        f"Add smart, tidy storage for {storage_str} — matching baskets, labeled bins, "
-        f"streamlined shelving. Remove clutter from the floor and surfaces."
-        f"{wall_phrase} "
-        "IMPORTANT: Keep the exact same room — same walls, same windows, same doors, "
-        "same camera angle, same architecture and proportions. Only change the "
-        "furniture, storage, decor, and surface colors. This must look like the same "
-        "physical room, just organized and restyled. Photorealistic, natural lighting, "
+        f"Organize this existing {space} — {style_str} styling, {color_str} textiles "
+        f"and accessories. Add tidy storage for {storage_str}: matching baskets, "
+        f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
+        "IMPORTANT: Preserve the physical shell. Keep the exact same room — same walls, "
+        "same windows, same doors, same camera angle, same architecture, same proportions, "
+        "and the same wall paint. Do not add, remove, move, or invent walls, windows, "
+        "doors, or room dimensions. Do not repaint walls a new color. Only change "
+        "furniture, storage, decor, and loose items. This must look like the same "
+        "physical room, just organized. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 

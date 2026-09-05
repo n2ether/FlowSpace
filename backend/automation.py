@@ -157,7 +157,7 @@ async def run_automation(
 
         # ── Step 4: Send Email ───────────────────────────────────────────
         logger.info("[automation] Step 4: Sending email to %s...", customer_email)
-        sent = await send_blueprint(
+        sent, email_error = await send_blueprint(
             customer_name=customer_name,
             customer_email=customer_email,
             space_type=space_type,
@@ -167,10 +167,18 @@ async def run_automation(
 
         # ── Step 5: Update status ────────────────────────────────────────
         final_status = "delivered" if sent else "pdf_ready"
-        await db.leads.update_one(
-            {"id": lead_id},
-            {"$set": {"status": final_status, "updated_at": _iso(datetime.now(timezone.utc))}},
-        )
+        update = {
+            "status": final_status,
+            "email_sent": bool(sent),
+            "updated_at": _iso(datetime.now(timezone.utc)),
+        }
+        if sent:
+            update["email_error"] = None
+            update["automation_error"] = None
+        else:
+            update["email_error"] = email_error or "Email was not sent"
+            logger.error("[automation] PDF built but email not sent for %s: %s", lead_id, email_error)
+        await db.leads.update_one({"id": lead_id}, {"$set": update})
         logger.info("[automation] Pipeline complete for lead %s — status: %s", lead_id, final_status)
         return sent
 

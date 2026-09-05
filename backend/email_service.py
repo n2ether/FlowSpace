@@ -6,17 +6,26 @@ and a notification copy to the admin inbox.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Optional, Tuple
 
 import resend
 
 logger = logging.getLogger(__name__)
 
-FROM_EMAIL = "FlowSpace <blueprints@flowspace.solutions>"
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "hello@flowspace.solutions")
+DEFAULT_FROM = "FlowSpace <blueprints@flowspace.solutions>"
+DEFAULT_ADMIN = "hello@flowspace.solutions"
+
+
+def _from_email() -> str:
+    return (os.environ.get("RESEND_FROM_EMAIL") or DEFAULT_FROM).strip() or DEFAULT_FROM
+
+
+def _admin_email() -> str:
+    return (os.environ.get("ADMIN_EMAIL") or DEFAULT_ADMIN).strip() or DEFAULT_ADMIN
 
 
 def _customer_html(customer_name: str, space_type: str) -> str:
@@ -153,52 +162,63 @@ async def send_blueprint(
     space_type: str,
     lead_id: str,
     pdf_bytes: bytes,
-) -> bool:
-    """Send the PDF Blueprint to the customer and notify admin. Returns True on success."""
+) -> Tuple[bool, Optional[str]]:
+    """
+    Send the PDF Blueprint to the customer and notify admin.
+
+    Returns (True, None) on customer-email success. Admin notify failures are
+    logged but do not fail the customer send. Returns (False, reason) if the
+    customer email was not sent (missing key, Resend error, etc.).
+    """
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
         logger.error("RESEND_API_KEY not configured — skipping email")
-        return False
+        return False, "RESEND_API_KEY is not configured on this server"
+
+    if not (customer_email or "").strip():
+        return False, "Customer email is missing"
 
     resend.api_key = api_key
-    space = space_type.capitalize()
+    space = (space_type or "space").replace("_", " ").capitalize()
+    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    filename = f"FlowSpace_{space}_Blueprint_{customer_name.replace(' ', '_')}.pdf"
+    filename = f"FlowSpace_{space.replace(' ', '_')}_Blueprint_{safe_name}.pdf"
+    sender = _from_email()
+    attachment = {
+        "filename": filename,
+        "content": pdf_b64,
+        "content_type": "application/pdf",
+    }
 
     try:
-        # Send to customer
-        resend.Emails.send({
-            "from": FROM_EMAIL,
-            "to": [customer_email],
-            "subject": f"Your FlowSpace {space} Blueprint is Ready ✨",
-            "html": _customer_html(customer_name, space_type),
-            "attachments": [
-                {
-                    "filename": filename,
-                    "content": pdf_b64,
-                    "content_type": "application/pdf",
-                }
-            ],
-        })
+        await asyncio.to_thread(
+            resend.Emails.send,
+            {
+                "from": sender,
+                "to": [customer_email.strip()],
+                "subject": f"Your FlowSpace {space} Blueprint is Ready ✨",
+                "html": _customer_html(customer_name, space_type),
+                "attachments": [attachment],
+            },
+        )
         logger.info("Blueprint email sent to %s", customer_email)
-
-        # Notify admin
-        resend.Emails.send({
-            "from": FROM_EMAIL,
-            "to": [ADMIN_EMAIL],
-            "subject": f"[FlowSpace] Blueprint delivered — {customer_name} ({space})",
-            "html": _admin_html(customer_name, customer_email, space_type, lead_id),
-            "attachments": [
-                {
-                    "filename": filename,
-                    "content": pdf_b64,
-                    "content_type": "application/pdf",
-                }
-            ],
-        })
-        logger.info("Admin notification sent")
-        return True
-
     except Exception as e:
-        logger.exception("Email delivery failed: %s", e)
-        return False
+        logger.exception("Customer email delivery failed: %s", e)
+        return False, f"Resend customer send failed: {e}"
+
+    try:
+        await asyncio.to_thread(
+            resend.Emails.send,
+            {
+                "from": sender,
+                "to": [_admin_email()],
+                "subject": f"[FlowSpace] Blueprint delivered — {customer_name} ({space})",
+                "html": _admin_html(customer_name, customer_email, space_type, lead_id),
+                "attachments": [attachment],
+            },
+        )
+        logger.info("Admin notification sent")
+    except Exception as e:
+        logger.warning("Admin notification failed (customer already sent): %s", e)
+
+    return True, None
