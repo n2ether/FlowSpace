@@ -14,6 +14,8 @@ from typing import Optional, Tuple
 
 import resend
 
+from pdf_generator import plan_title, space_label
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FROM = "FlowSpace <blueprints@flowspace.solutions>"
@@ -29,7 +31,7 @@ def _admin_email() -> str:
 
 
 def _customer_html(customer_name: str, space_type: str) -> str:
-    space = space_type.capitalize()
+    space = plan_title(space_type)
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -65,7 +67,7 @@ def _customer_html(customer_name: str, space_type: str) -> str:
                 Your Blueprint is Ready, {customer_name}! 🎉
               </h1>
               <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
-                Your personalized <strong>{space} organization plan</strong> is attached to this email.
+                Your personalized <strong>{space}</strong> is attached to this email.
                 Inside you'll find your complete FlowSpace Blueprint™ — designed specifically
                 around your space, your style, and your wellbeing.
               </p>
@@ -79,16 +81,16 @@ def _customer_html(customer_name: str, space_type: str) -> str:
                     </p>
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; AI-generated 3D room rendering</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Organized visual of your actual space</td>
                       </tr>
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Room zones & functional layout plan</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Zones &amp; functional layout plan</td>
                       </tr>
                       <tr>
                         <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Curated shopping list with prices</td>
                       </tr>
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Wall color recommendation with swatch</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Optional paint note (consider only if it helps)</td>
                       </tr>
                       <tr>
                         <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Step-by-step action plan</td>
@@ -146,7 +148,7 @@ def _admin_html(customer_name: str, customer_email: str, space_type: str, lead_i
   <table style="border-collapse:collapse;width:100%;max-width:480px;">
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Customer</td><td>{customer_name}</td></tr>
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Email</td><td>{customer_email}</td></tr>
-    <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Space</td><td>{space_type.capitalize()}</td></tr>
+    <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Space</td><td>{space_label(space_type)}</td></tr>
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Lead ID</td><td><code>{lead_id}</code></td></tr>
   </table>
   <p style="margin-top:20px;color:#475569;">The Blueprint PDF has been sent to the customer automatically. You can view and edit the plan in the admin panel.</p>
@@ -179,10 +181,10 @@ async def send_blueprint(
         return False, "Customer email is missing"
 
     resend.api_key = api_key
-    space = (space_type or "space").replace("_", " ").capitalize()
+    space = plan_title(space_type)
     safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    filename = f"FlowSpace_{space.replace(' ', '_')}_Blueprint_{safe_name}.pdf"
+    filename = f"FlowSpace_{space.replace(' ', '_')}_{safe_name}.pdf"
     sender = _from_email()
     attachment = {
         "filename": filename,
@@ -196,7 +198,7 @@ async def send_blueprint(
             {
                 "from": sender,
                 "to": [customer_email.strip()],
-                "subject": f"Your FlowSpace {space} Blueprint is Ready ✨",
+                "subject": f"Your FlowSpace {space} is Ready ✨",
                 "html": _customer_html(customer_name, space_type),
                 "attachments": [attachment],
             },

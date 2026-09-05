@@ -13,7 +13,7 @@ def test_skips_when_api_key_missing(monkeypatch):
         send_blueprint(
             customer_name="Ada",
             customer_email="ada@example.com",
-            space_type="bedroom",
+            space_type="garage",
             lead_id="lead-1",
             pdf_bytes=PDF,
         )
@@ -28,7 +28,7 @@ def test_skips_when_customer_email_missing(monkeypatch):
         send_blueprint(
             customer_name="Ada",
             customer_email="  ",
-            space_type="bedroom",
+            space_type="garage",
             lead_id="lead-1",
             pdf_bytes=PDF,
         )
@@ -53,7 +53,7 @@ def test_sends_customer_then_admin(monkeypatch):
         send_blueprint(
             customer_name="Ada Lovelace",
             customer_email="ada@example.com",
-            space_type="bedroom",
+            space_type="garage",
             lead_id="lead-1",
             pdf_bytes=PDF,
         )
@@ -63,7 +63,7 @@ def test_sends_customer_then_admin(monkeypatch):
     assert len(calls) == 2
     customer, admin = calls
     assert customer["to"] == ["ada@example.com"]
-    assert "Blueprint" in customer["subject"]
+    assert "Garage Organization Plan" in customer["subject"]
     assert customer["attachments"][0]["filename"].endswith(".pdf")
     assert customer["attachments"][0]["content_type"] == "application/pdf"
     assert admin["to"] == ["owner@flowspace.solutions"]

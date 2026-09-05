@@ -61,7 +61,7 @@ def _build_text_to_image_prompt(
 ) -> str:
     """Fallback prompt when there's no customer photo to edit."""
     deliverable = deliverable or {}
-    space = (lead.get("space_type") or "living room").lower().replace("_", " ")
+    space = (lead.get("space_type") or "closet").lower().replace("_", " ")
 
     style_str = ", ".join(_humanize(lead.get("style_prefs") or [], STYLE)) or "modern minimalist"
     color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"

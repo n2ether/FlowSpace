@@ -46,10 +46,10 @@ PACKAGES: Dict[str, Dict[str, Any]] = {
 STARTER_GALLERY = [
     {
         "id": str(uuid.uuid4()),
-        "title": "Bedroom — Calming retreat",
+        "title": "Closet — Calm and categorized",
         "category": "closet",
-        "before_url": "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
-        "after_url":  "https://images.unsplash.com/photo-1551298370-9d3d53740c72?auto=format&fit=crop&w=1400&q=80",
+        "before_url": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1400&q=80",
+        "after_url":  "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=1400&q=80",
     },
     {
         "id": str(uuid.uuid4()),
