@@ -1,8 +1,8 @@
 """
 FlowSpace Blueprint PDF — magazine-style organization plan.
 
-Visual template (layout only): numbered sections, warm neutrals, serif brand
-mark + sans body. Content is always an organization plan for closets, garages,
+Visual template (layout only): numbered sections, site emerald/slate palette,
+Fraunces display + Inter body. Content is always an organization plan for closets, garages,
 laundry rooms, pantries, mudrooms, and storage — never a bedroom redesign.
 
 Hard rules:
@@ -17,7 +17,6 @@ Public API is unchanged: build_pdf(lead=, deliverable=, images=) -> bytes
 from __future__ import annotations
 
 import io
-import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -44,21 +43,34 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-# ──────────────────────────── Palette ─────────────────────────────
-FOREST = HexColor("#3E5244")
-FOREST_DEEP = HexColor("#2F3F34")
-SAGE = HexColor("#8E9B7B")
-SAGE_SOFT = HexColor("#C5CDB8")
-CREAM = HexColor("#F7F3EA")
-CREAM_CARD = HexColor("#FFFcf6")
-WOOD = HexColor("#A67C52")
-INK = HexColor("#2C2C2C")
-MUTED = HexColor("#6B6560")
-LINE = HexColor("#D9D2C5")
-SOFT_BG = HexColor("#F0EBE0")
+# ──────────────────────────── Palette (site design system) ─────────────────────────────
+# Matches frontend/src/index.css — emerald / mint / slate / white
+EMERALD = HexColor("#059669")
+EMERALD_DEEP = HexColor("#047857")
+MINT = HexColor("#34d399")
+MINT_BG = HexColor("#ecfdf5")
+SLATE = HexColor("#0f172a")
+SLATE_MUTED = HexColor("#475569")
+SLATE_SOFT = HexColor("#64748b")
+SURFACE = HexColor("#ffffff")
+SOFT = HexColor("#f8fafc")
+BORDER = HexColor("#e2e8f0")
 WHITE = colors.white
+# Legacy aliases so remaining helpers can be migrated incrementally
+FOREST = EMERALD
+FOREST_DEEP = EMERALD_DEEP
+SAGE = HexColor("#10b981")
+SAGE_SOFT = HexColor("#a7f3d0")
+CREAM = SURFACE
+CREAM_CARD = SURFACE
+WOOD = HexColor("#A67C52")
+INK = SLATE
+MUTED = SLATE_MUTED
+LINE = BORDER
+SOFT_BG = SOFT
 TAGLINE = "Clear space. Create flow. Live better."
 VALUES_LINE = "BOUTIQUE  ·  FUNCTIONAL  ·  INTENTIONAL  ·  AFFORDABLE"
+RADIUS = 8  # ~0.75rem at 72dpi
 
 SPACE_LABELS = {
     "living_room": "Living room",
@@ -103,9 +115,9 @@ DEFAULT_RESET = [
 
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 _FONT_FILES = {
-    "FSSerif": "NotoSerif-Regular.ttf",
-    "FSSerif-Bold": "NotoSerif-Bold.ttf",
-    "FSSerif-Italic": "NotoSerif-Italic.ttf",
+    "FSSerif": "Fraunces-Regular.ttf",
+    "FSSerif-Bold": "Fraunces-Bold.ttf",
+    "FSSerif-Italic": "Fraunces-Regular.ttf",
     "FSSans": "Inter-Regular.ttf",
     "FSSans-Medium": "Inter-Medium.ttf",
     "FSSans-Semi": "Inter-SemiBold.ttf",
@@ -174,25 +186,25 @@ def _styles():
     base = getSampleStyleSheet()
     return {
         "h1": ParagraphStyle(
-            "h1", parent=base["Title"], fontName=_font("FSSans-Bold"),
-            fontSize=18, leading=21, textColor=FOREST_DEEP, alignment=TA_LEFT,
-            spaceAfter=0, tracking=30,
+            "h1", parent=base["Title"], fontName=_font("FSSerif-Bold"),
+            fontSize=20, leading=23, textColor=SLATE, alignment=TA_LEFT,
+            spaceAfter=0,
         ),
         "values": ParagraphStyle(
             "values", parent=base["BodyText"], fontName=_font("FSSans-Medium"),
-            fontSize=6.5, leading=9, textColor=SAGE, alignment=TA_LEFT,
+            fontSize=6.5, leading=9, textColor=EMERALD_DEEP, alignment=TA_LEFT,
         ),
         "kicker": ParagraphStyle(
             "kicker", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=7, leading=9, textColor=FOREST, alignment=TA_LEFT,
+            fontSize=7, leading=9, textColor=EMERALD_DEEP, alignment=TA_LEFT,
         ),
         "h2": ParagraphStyle(
             "h2", parent=base["Heading2"], fontName=_font("FSSerif-Bold"),
-            fontSize=11, leading=13, textColor=FOREST_DEEP, spaceBefore=0, spaceAfter=4,
+            fontSize=12, leading=14, textColor=SLATE, spaceBefore=0, spaceAfter=3,
         ),
         "h3": ParagraphStyle(
             "h3", parent=base["Heading3"], fontName=_font("FSSans-Semi"),
-            fontSize=8.5, leading=11, textColor=FOREST, spaceBefore=2, spaceAfter=3,
+            fontSize=8.5, leading=11, textColor=EMERALD_DEEP, spaceBefore=2, spaceAfter=3,
         ),
         "body": ParagraphStyle(
             "body", parent=base["BodyText"], fontName=_font("FSSans"),
@@ -212,15 +224,15 @@ def _styles():
         ),
         "label": ParagraphStyle(
             "label", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=8, leading=10, textColor=FOREST_DEEP,
+            fontSize=8, leading=10, textColor=SLATE,
         ),
         "cardCat": ParagraphStyle(
             "cardCat", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=6, leading=8, textColor=SAGE, alignment=TA_LEFT,
+            fontSize=6, leading=8, textColor=EMERALD_DEEP, alignment=TA_LEFT,
         ),
         "cardTitle": ParagraphStyle(
             "cardTitle", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=7.4, leading=9.4, textColor=FOREST_DEEP,
+            fontSize=7.4, leading=9.4, textColor=SLATE,
         ),
         "cardMeta": ParagraphStyle(
             "cardMeta", parent=base["BodyText"], fontName=_font("FSSans"),
@@ -236,7 +248,7 @@ def _styles():
         ),
         "scoreBig": ParagraphStyle(
             "scoreBig", parent=base["Title"], fontName=_font("FSSerif-Bold"),
-            fontSize=16, leading=18, textColor=FOREST, alignment=TA_CENTER,
+            fontSize=16, leading=18, textColor=EMERALD, alignment=TA_CENTER,
         ),
         "scoreLabel": ParagraphStyle(
             "scoreLabel", parent=base["BodyText"], fontName=_font("FSSans"),
@@ -244,15 +256,23 @@ def _styles():
         ),
         "footerSeg": ParagraphStyle(
             "footerSeg", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.2, leading=8, textColor=HexColor("#E4E8DE"), alignment=TA_CENTER,
+            fontSize=6.2, leading=8, textColor=HexColor("#e2e8f0"), alignment=TA_CENTER,
         ),
         "whiteTiny": ParagraphStyle(
             "whiteTiny", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.4, leading=8.2, textColor=HexColor("#E8EDE4"),
+            fontSize=6.4, leading=8.2, textColor=HexColor("#ecfdf5"),
+        ),
+        "th": ParagraphStyle(
+            "th", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=6.4, leading=8, textColor=WHITE,
         ),
         "signoff": ParagraphStyle(
             "signoff", parent=base["BodyText"], fontName=_font("FSSerif-Italic"),
-            fontSize=8, leading=11, textColor=FOREST_DEEP,
+            fontSize=8.5, leading=11, textColor=SLATE,
+        ),
+        "price": ParagraphStyle(
+            "price", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=7.2, leading=9, textColor=EMERALD_DEEP,
         ),
     }
 
@@ -274,7 +294,9 @@ def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
 def _cover_image(src: Optional[bytes], width: float, height: float) -> Any:
     """Crop-to-fill a box so the hero reads like a magazine photo."""
     if not src:
-        return _placeholder(width, height, "Organized view coming soon")
+        return _placeholder(
+            width, height, "Organized view coming soon", "Your photo, re-zoned — visual arrives with the plan"
+        )
     try:
         ir = ImageReader(io.BytesIO(src))
         iw, ih = ir.getSize()
@@ -282,7 +304,7 @@ def _cover_image(src: Optional[bytes], width: float, height: float) -> Any:
             raise ValueError("empty")
         scale = max(width / iw, height / ih)
         draw_w, draw_h = iw * scale, ih * scale
-        # ReportLab Image doesn't crop; we letterbox on cream instead of inventing pixels.
+        # ReportLab Image doesn't crop; we letterbox on white instead of inventing pixels.
         img = PlatypusImage(io.BytesIO(src), width=min(draw_w, width), height=min(draw_h, height))
         img.hAlign = "CENTER"
         return img
@@ -290,24 +312,129 @@ def _cover_image(src: Optional[bytes], width: float, height: float) -> Any:
         return _placeholder(width, height, "Image unavailable")
 
 
-def _placeholder(w: float, h: float, label: str):
-    s = _styles()
-    t = Table([[Paragraph(f"<font color='#8A8378'>{label}</font>", s["bodySmall"])]], colWidths=[w], minRowHeights=[h])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BOX", (0, 0), (-1, -1), 0.5, LINE),
-                ("BACKGROUND", (0, 0), (-1, -1), SOFT_BG),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ]
-        )
-    )
-    return t
+class BrandedPlaceholder(Flowable):
+    """Soft mint panel with a house mark — not a gray void."""
+
+    def __init__(self, width: float, height: float, label: str, sublabel: str = ""):
+        super().__init__()
+        self.width = width
+        self.height = max(height, 36)
+        self.label = label
+        self.sublabel = sublabel
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(MINT_BG)
+        c.roundRect(0, 0, self.width, self.height, RADIUS, fill=1, stroke=0)
+        c.setStrokeColor(MINT)
+        c.setLineWidth(0.9)
+        c.roundRect(0.4, 0.4, self.width - 0.8, self.height - 0.8, RADIUS, fill=0, stroke=1)
+        cx, cy = self.width / 2.0, self.height / 2.0 + (10 if self.sublabel else 6)
+        s = min(18.0, self.height * 0.24)
+        c.setStrokeColor(EMERALD)
+        c.setLineWidth(1.5)
+        p = c.beginPath()
+        p.moveTo(cx - s * 0.55, cy)
+        p.lineTo(cx, cy + s * 0.5)
+        p.lineTo(cx + s * 0.55, cy)
+        p.lineTo(cx + s * 0.55, cy - s * 0.5)
+        p.lineTo(cx - s * 0.55, cy - s * 0.5)
+        p.close()
+        c.drawPath(p, stroke=1, fill=0)
+        c.setFillColor(EMERALD_DEEP)
+        c.setFont(_font("FSSans-Semi"), 7.2)
+        ly = max(14 if self.sublabel else 8, cy - s - 12)
+        c.drawCentredString(self.width / 2.0, ly, self.label)
+        if self.sublabel:
+            c.setFillColor(SLATE_SOFT)
+            c.setFont(_font("FSSans"), 6.2)
+            c.drawCentredString(self.width / 2.0, max(6, ly - 11), self.sublabel)
+
+
+def _placeholder(w: float, h: float, label: str, sublabel: str = ""):
+    return BrandedPlaceholder(w, h, label, sublabel)
+
+
+class CategoryChip(Flowable):
+    """Small mint thumbnail for shopping cards."""
+
+    def __init__(self, label: str, width: float, height: float = 26):
+        super().__init__()
+        self.label = (label or "ORG")[:10]
+        self.width = width
+        self.height = height
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(MINT_BG)
+        c.roundRect(0, 0, self.width, self.height, 5, fill=1, stroke=0)
+        c.setStrokeColor(MINT)
+        c.setLineWidth(0.7)
+        c.roundRect(0.3, 0.3, self.width - 0.6, self.height - 0.6, 5, fill=0, stroke=1)
+        c.setFillColor(EMERALD_DEEP)
+        c.setFont(_font("FSSans-Semi"), 6.4)
+        c.drawCentredString(self.width / 2.0, self.height / 2.0 - 2.2, self.label)
+
+
+class ZoneMosaic(Flowable):
+    """Abstract zone tiles — not a measured floor plan."""
+
+    def __init__(self, zones: Sequence[Dict[str, str]], width: float, height: float):
+        super().__init__()
+        self.zones = list(zones or [])[:6]
+        self.width = width
+        self.height = max(height, 72)
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(SOFT)
+        c.roundRect(0, 0, self.width, self.height, RADIUS, fill=1, stroke=0)
+        c.setStrokeColor(BORDER)
+        c.setLineWidth(0.7)
+        c.roundRect(0.4, 0.4, self.width - 0.8, self.height - 0.8, RADIUS, fill=0, stroke=1)
+
+        n = max(len(self.zones), 1)
+        cols = 3 if n >= 5 else (2 if n >= 4 else min(n, 3) or 1)
+        rows = (n + cols - 1) // cols
+        pad = 7
+        gap = 5
+        inner_w = self.width - pad * 2
+        inner_h = self.height - pad * 2
+        tw = (inner_w - gap * (cols - 1)) / cols
+        th = (inner_h - gap * (rows - 1)) / rows
+        fills = (WHITE, MINT_BG)
+
+        for i in range(n):
+            z = self.zones[i] if i < len(self.zones) else {}
+            r, col = divmod(i, cols)
+            x = pad + col * (tw + gap)
+            y = self.height - pad - (r + 1) * th - r * gap
+            c.setFillColor(fills[i % 2])
+            c.roundRect(x, y, tw, th, 5, fill=1, stroke=0)
+            c.setStrokeColor(MINT)
+            c.setLineWidth(0.8)
+            c.roundRect(x, y, tw, th, 5, fill=0, stroke=1)
+            badge_r = 6
+            c.setFillColor(EMERALD if i % 2 == 0 else EMERALD_DEEP)
+            c.circle(x + 10, y + th - 11, badge_r, fill=1, stroke=0)
+            c.setFillColor(WHITE)
+            c.setFont(_font("FSSans-Bold"), 7)
+            c.drawCentredString(x + 10, y + th - 13.4, str(i + 1))
+            max_chars = max(10, int((tw - 24) / 4.0))
+            title = (z.get("title") or f"Zone {i + 1}").upper()
+            c.setFillColor(SLATE)
+            c.setFont(_font("FSSans-Semi"), 6.2)
+            c.drawString(x + 20, y + th - 14, title[:max_chars])
+            if th > 30:
+                desc_chars = max(12, int((tw - 12) / 3.6))
+                desc = (z.get("desc") or "Keep the existing shell.")[:desc_chars]
+                c.setFillColor(SLATE_MUTED)
+                c.setFont(_font("FSSans"), 5.6)
+                c.drawString(x + 8, y + 8, desc)
 
 
 class NumberBadge(Flowable):
-    def __init__(self, n: int, size: float = 12, fill: Color = FOREST):
+    def __init__(self, n: int, size: float = 12, fill: Color = EMERALD):
         super().__init__()
         self.n = n
         self.size = size
@@ -335,19 +462,21 @@ def _section_head(number: str, title: str, width: float) -> Table:
     except Exception:
         badge = NumberBadge(1, size=12)
     title_p = Paragraph(title.upper(), s["kicker"])
-    t = Table([[badge, title_p]], colWidths=[16, max(width - 16, 40)])
-    t.setStyle(
+    rule = Table([[""]], colWidths=[18], rowHeights=[1.1])
+    rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), MINT)]))
+    head = Table([[badge, title_p, rule]], colWidths=[16, max(width - 40, 40), 22])
+    head.setStyle(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
-    return t
+    return head
 
 
 def _hairline(width: float) -> Table:
@@ -361,8 +490,9 @@ def _card(inner, width: float, pad: float = 6) -> Table:
     t.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), CREAM_CARD),
-                ("BOX", (0, 0), (-1, -1), 0.4, LINE),
+                ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+                ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
                 ("LEFTPADDING", (0, 0), (-1, -1), pad),
                 ("RIGHTPADDING", (0, 0), (-1, -1), pad),
                 ("TOPPADDING", (0, 0), (-1, -1), pad),
@@ -393,7 +523,7 @@ def _item_category(name: str) -> str:
     rules = (
         (("bin", "tote", "box"), "BINS"),
         (("basket",), "BASKETS"),
-        (("shelf", "shelving", "rack"), "SHELVING"),
+        (("shelf", "shelves", "shelving", "rack"), "SHELVING"),
         (("hook", "peg"), "HOOKS"),
         (("label", "sticker"), "LABELS"),
         (("light", "lamp"), "LIGHTING"),
@@ -431,13 +561,13 @@ def _materials(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Tuple[
     colors_pref = [str(c).replace("_", " ").title() for c in (lead.get("color_prefs") or [])[:2]]
     styles = [str(c).replace("_", " ").title() for c in (lead.get("style_prefs") or [])[:2]]
     if "Sage" in " ".join(colors_pref) or "Green" in " ".join(colors_pref):
-        out.append(("Sage bins", "tone", "#8E9B7B"))
+        out.append(("Sage bins", "tone", "#10b981"))
     if any("wood" in s.lower() or "natural" in s.lower() for s in styles + colors_pref):
         out.append(("Natural wood", "material", "#A67C52"))
     if any("white" in s.lower() or "light" in s.lower() for s in colors_pref):
-        out.append(("Soft white", "tone", "#F4F1EA"))
-    out.append(("Clear / labeled", "material", "#D7D2C8"))
-    out.append(("Woven / linen", "material", "#C4B49A"))
+        out.append(("Soft white", "tone", "#f8fafc"))
+    out.append(("Clear / labeled", "material", "#e2e8f0"))
+    out.append(("Woven / linen", "material", "#d6d3d1"))
     # de-dupe by label
     seen = set()
     unique = []
@@ -495,45 +625,49 @@ def _draw_logo(canvas, x: float, y: float, size: float = 16) -> None:
 
 def _draw_chrome(canvas, doc, customer_name: str = "") -> None:
     canvas.saveState()
-    canvas.setFillColor(CREAM)
+    canvas.setFillColor(WHITE)
     canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    # Header bar
-    canvas.setFillColor(FOREST_DEEP)
+    # Header bar — emerald, matching site CTAs
+    canvas.setFillColor(EMERALD)
     canvas.rect(0, PAGE_H - HEADER_H, PAGE_W, HEADER_H, fill=1, stroke=0)
+    canvas.setFillColor(MINT)
+    canvas.rect(0, PAGE_H - HEADER_H - 2.2, PAGE_W, 2.2, fill=1, stroke=0)
     _draw_logo(canvas, MARGIN, PAGE_H - HEADER_H / 2 + 1, 15)
     canvas.setFillColor(WHITE)
-    canvas.setFont(_font("FSSerif-Bold"), 13)
+    canvas.setFont(_font("FSSerif-Bold"), 13.5)
     canvas.drawString(MARGIN + 22, PAGE_H - HEADER_H / 2 + 2, "FlowSpace")
     canvas.setFont(_font("FSSans"), 7)
-    canvas.setFillColor(SAGE_SOFT)
-    canvas.drawString(MARGIN + 22 + 68, PAGE_H - HEADER_H / 2 + 3, TAGLINE.upper())
+    canvas.setFillColor(HexColor("#d1fae5"))
+    canvas.drawString(MARGIN + 22 + 72, PAGE_H - HEADER_H / 2 + 3.5, TAGLINE.upper())
 
     # Blueprint badge
-    badge_w, badge_h = 132, 22
+    badge_w, badge_h = 136, 24
     bx = PAGE_W - MARGIN - badge_w
     by = PAGE_H - HEADER_H / 2 - badge_h / 2 + 1
-    canvas.setFillColor(FOREST)
-    canvas.roundRect(bx, by, badge_w, badge_h, 2, fill=1, stroke=0)
+    canvas.setFillColor(EMERALD_DEEP)
+    canvas.roundRect(bx, by, badge_w, badge_h, 6, fill=1, stroke=0)
     canvas.setFillColor(WHITE)
-    canvas.setFont(_font("FSSans-Bold"), 6.2)
-    canvas.drawCentredString(bx + badge_w / 2, by + 12, "FLOWSPACE BLUEPRINT™")
+    canvas.setFont(_font("FSSans-Bold"), 6.3)
+    canvas.drawCentredString(bx + badge_w / 2, by + 13, "FLOWSPACE BLUEPRINT™")
     canvas.setFont(_font("FSSans"), 5.6)
-    canvas.setFillColor(SAGE_SOFT)
-    canvas.drawCentredString(bx + badge_w / 2, by + 4.5, "Your space. Your flow. Your life.")
+    canvas.setFillColor(HexColor("#a7f3d0"))
+    canvas.drawCentredString(bx + badge_w / 2, by + 5, "Your space. Your flow. Your life.")
 
     # Footer bar
-    canvas.setFillColor(FOREST_DEEP)
+    canvas.setFillColor(SLATE)
     canvas.rect(0, 0, PAGE_W, FOOTER_H, fill=1, stroke=0)
+    canvas.setFillColor(MINT)
+    canvas.rect(0, FOOTER_H, PAGE_W, 2, fill=1, stroke=0)
     segs = [
-        "Better spaces. Better living.",
+        "The FlowSpace Design Team",
         "Functional design",
         "Quality materials",
         "Thoughtful solutions",
         "Lasting value",
     ]
-    canvas.setFillColor(HexColor("#D5DCCB"))
-    canvas.setFont(_font("FSSans"), 6)
+    canvas.setFillColor(HexColor("#e2e8f0"))
+    canvas.setFont(_font("FSSans"), 6.2)
     gap = (PAGE_W - 2 * MARGIN) / len(segs)
     for i, seg in enumerate(segs):
         canvas.drawCentredString(MARGIN + gap * i + gap / 2, FOOTER_H / 2 - 2, seg)
@@ -557,7 +691,7 @@ def _hero_block(
     banner.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), FOREST),
+                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -567,31 +701,26 @@ def _hero_block(
             ]
         )
     )
-    # Numbered dots sit in a slim overlay column — they mark organization
-    # systems, never invented windows or dimensions.
-    overlay_items = []
+    # Compact numbered chips — organization systems, never invented dimensions.
+    chips = []
     for i, z in enumerate((zones or [])[:5], 1):
-        overlay_items.append(
-            [
-                NumberBadge(i, size=11),
-                Paragraph(z.get("title") or f"Zone {i}", s["bodySmall"]),
-            ]
-        )
-    if overlay_items:
-        legend = Table(overlay_items, colWidths=[14, width - 22])
-        legend.setStyle(
+        chips.append(Paragraph(f"<b>{i}</b>  {z.get('title') or f'Zone {i}'}", s["bodySmall"]))
+    chip_row = None
+    if chips:
+        chip_row = Table([chips], colWidths=[width / len(chips)] * len(chips))
+        chip_row.setStyle(
             TableStyle(
                 [
+                    ("BACKGROUND", (0, 0), (-1, -1), MINT_BG),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-                    ("TOPPADDING", (0, 0), (-1, -1), 1),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-                    ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F7F3EA")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ]
             )
         )
-        stack = Table([[banner], [photo], [legend]], colWidths=[width])
+        stack = Table([[banner], [photo], [chip_row]], colWidths=[width])
     else:
         stack = Table([[banner], [photo]], colWidths=[width])
     stack.setStyle(
@@ -601,7 +730,8 @@ def _hero_block(
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ("BOX", (0, 0), (-1, -1), 0.5, FOREST),
+                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]
         )
@@ -627,7 +757,7 @@ def _whats_new(needs: List[str], zones: List[Dict[str, str]], width: float) -> L
     for i, (title, desc) in enumerate(items, 1):
         rows.append(
             [
-                NumberBadge(i, size=12, fill=FOREST),
+                NumberBadge(i, size=12, fill=EMERALD),
                 [
                     Paragraph(title, s["label"]),
                     Paragraph(desc, s["bodySmall"]),
@@ -655,50 +785,32 @@ def _zone_flow(zones: List[Dict[str, str]], floor_plan: Optional[bytes], width: 
     left_w = width * 0.42
     right_w = width - left_w - 8
     if floor_plan:
-        visual = _cover_image(floor_plan, left_w, 1.15 * inch)
+        visual = _cover_image(floor_plan, left_w, 1.12 * inch)
         caption = Paragraph("Room flow from your photo — no invented dimensions.", s["muted"])
         left = [visual, Spacer(1, 3), caption]
     else:
-        # Abstract zone chips — not a fake architectural plan.
-        chips = []
-        for i, z in enumerate((zones or [])[:4], 1):
-            chips.append(
-                Paragraph(
-                    f"<b>{i}</b>  {(z.get('title') or 'Zone').upper()}",
-                    s["bodySmall"],
-                )
-            )
-        if not chips:
-            chips = [Paragraph("Zones will follow the layout in your photo.", s["muted"])]
-        left = [_card(chips, left_w, pad=8)]
-        left.append(Spacer(1, 3))
-        left.append(Paragraph("Floor plan not included — we do not invent room dimensions.", s["muted"]))
+        left = [
+            ZoneMosaic(zones or [], left_w, 1.12 * inch),
+            Spacer(1, 3),
+            Paragraph("Conceptual zone map — not a measured floor plan. We do not invent room dimensions.", s["muted"]),
+        ]
 
-    legend_rows = []
-    for i, z in enumerate((zones or [])[:6], 1):
-        legend_rows.append(
-            [
-                NumberBadge(i, size=11, fill=SAGE if i % 2 else FOREST),
-                [
-                    Paragraph(z.get("title") or f"Zone {i}", s["label"]),
-                    Paragraph(z.get("desc") or "", s["bodySmall"]),
-                ],
-            ]
-        )
-    if not legend_rows:
-        legend = Paragraph("Zones will follow your real layout.", s["muted"])
-    else:
-        legend = Table(legend_rows, colWidths=[14, right_w - 16])
-        legend.setStyle(
-            TableStyle(
-                [
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ]
-            )
-        )
+    titles = [z.get("title") or f"Zone {i}" for i, z in enumerate((zones or [])[:6], 1)]
+    path = "  →  ".join(titles) if titles else "Zones will follow your real layout."
+    move_rows = [
+        Paragraph("HOW YOU MOVE", s["cardCat"]),
+        Spacer(1, 3),
+        Paragraph(path, s["label"]),
+        Spacer(1, 4),
+        Paragraph(
+            "Enter, drop, walk the path the photo already shows, then store on existing walls. "
+            "The stall / floor stays a destination — not a dump.",
+            s["bodySmall"],
+        ),
+        Spacer(1, 5),
+        Paragraph("Floor plan not included — we do not invent room dimensions.", s["muted"]),
+    ]
+    legend = _card(move_rows, right_w + 4, pad=7)
     t = Table([[left, legend]], colWidths=[left_w, right_w + 8])
     t.setStyle(
         TableStyle(
@@ -731,13 +843,16 @@ def _detail_cards(
             "Contain clutter in matching bins",
         ]
         img = provided[i] if i < len(provided) else None
+        zone_label = (title or f"Zone {i + 1}").upper()
         body = [
-            _cover_image(img, card_w - 10, 0.62 * inch) if img else _placeholder(card_w - 10, 0.55 * inch, f"{i + 1}"),
+            _cover_image(img, card_w - 10, 0.52 * inch)
+            if img
+            else _placeholder(card_w - 10, 0.42 * inch, zone_label, "Existing shell"),
             Spacer(1, 3),
-            Paragraph((title or f"Zone {i + 1}").upper(), s["cardCat"]),
-            Paragraph((title or "Storage detail"), s["cardTitle"]),
+            Paragraph(f"0{i + 1}  {zone_label}", s["cardCat"]),
+            Paragraph(title or "Storage detail", s["cardTitle"]),
         ]
-        for b in bullets[:3]:
+        for b in bullets[:2]:
             body.append(Paragraph(f"· {b}", s["cardMeta"]))
         cards.append(_card(body, card_w, pad=5))
     t = Table([cards], colWidths=[card_w] * count)
@@ -753,22 +868,41 @@ def _detail_cards(
     return t
 
 
+def _item_value(name: str) -> str:
+    return {
+        "BINS": "Contain · label · return",
+        "BASKETS": "Corral loose daily items",
+        "SHELVING": "Mount on existing walls",
+        "HOOKS": "Hang daily, clear the floor",
+        "LABELS": "Name every home",
+        "LIGHTING": "See what you own",
+        "FLOOR": "Mark the parking stall",
+        "LAUNDRY": "Sort dirty from done",
+        "HANGING": "Use the rod you have",
+        "DIVIDERS": "Stop the pile-up",
+        "TOOLS": "Park tools on the wall",
+    }.get(_item_category(name), "Contain · label · return")
+
+
 def _shopping_cards(items: List[Dict[str, Any]], width: float) -> Any:
     s = _styles()
     if not items:
         return Paragraph("Shopping list will follow your plan.", s["muted"])
     show = items[:8]
-    cols = min(4, len(show))
+    cols = min(5, len(show))
     card_w = (width - 6) / cols
     row: List[Any] = []
     rows: List[List[Any]] = []
     for it in show:
         name = str(it.get("name") or "Organizer")
+        cat = _item_category(name)
         body = [
-            Paragraph(_item_category(name), s["cardCat"]),
+            CategoryChip(cat, card_w - 10, 22),
+            Spacer(1, 4),
+            Paragraph(cat, s["cardCat"]),
             Paragraph(name, s["cardTitle"]),
-            Paragraph(_price_label(it), s["cardMeta"]),
-            Paragraph("Contain · label · return", s["muted"]),
+            Paragraph(_price_label(it), s["price"]),
+            Paragraph(_item_value(name), s["muted"]),
         ]
         row.append(_card(body, card_w, pad=5))
         if len(row) == cols:
@@ -966,21 +1100,33 @@ def _assessment_row(deliverable: Dict[str, Any], width: float) -> Table:
             [
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("BACKGROUND", (0, 0), (-1, -1), CREAM_CARD),
-                ("BOX", (0, 0), (-1, -1), 0.4, LINE),
+                ("BACKGROUND", (0, 0), (-1, -1), SOFT),
+                ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
-    overall = _card(
-        [
-            Paragraph(f"{data['overall']:.1f}", s["scoreBig"]),
-            Paragraph("OVERALL POTENTIAL", s["scoreLabel"]),
-            Paragraph("Plan completeness — not a room measurement.", s["muted"]),
-        ],
-        width * 0.26,
-        pad=6,
+    overall_inner = [
+        Paragraph(f"{data['overall']:.1f}", s["scoreBig"]),
+        Paragraph("OVERALL POTENTIAL", s["scoreLabel"]),
+        Paragraph("Plan completeness — not a room measurement.", s["muted"]),
+    ]
+    overall = Table([[overall_inner]], colWidths=[width * 0.26])
+    overall.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), MINT_BG),
+                ("BOX", (0, 0), (-1, -1), 0.7, MINT),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
     )
     t = Table([[meters, overall]], colWidths=[width * 0.73, width * 0.27])
     t.setStyle(
@@ -997,19 +1143,19 @@ def _assessment_row(deliverable: Dict[str, Any], width: float) -> Table:
 
 def _links_table(links: List[Dict[str, str]], width: float) -> Table:
     s = _styles()
-    rows = [[Paragraph("ITEM", s["cardCat"]), Paragraph("LINK", s["cardCat"])]]
+    rows = [[Paragraph("ITEM", s["th"]), Paragraph("LINK", s["th"])]]
     for link in links or []:
         name = link.get("name", "") or ""
         url = link.get("url", "") or ""
-        html = f'<link href="{url}" color="#3E5244"><u>{url}</u></link>' if url else ""
+        html = f'<link href="{url}" color="#047857"><u>{url}</u></link>' if url else ""
         rows.append([Paragraph(name, s["bodySmall"]), Paragraph(html, s["bodySmall"])])
     table = Table(rows, colWidths=[width * 0.28, width * 0.72])
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), FOREST),
+                ("BACKGROUND", (0, 0), (-1, 0), EMERALD),
                 ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [CREAM_CARD, SOFT_BG]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SOFT]),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.3, LINE),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
@@ -1088,10 +1234,25 @@ def build_pdf(
     story: List[Any] = []
 
     # ── Title band
+    eyebrow = Table(
+        [[Paragraph("ORGANIZATION PLAN", s["kicker"])]],
+        colWidths=[content_w * 0.46],
+    )
+    eyebrow.setStyle(
+        TableStyle(
+            [
+                ("LINEBEFORE", (0, 0), (0, 0), 1.4, MINT),
+                ("LEFTPADDING", (0, 0), (0, 0), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
     title_left = [
+        eyebrow,
         Paragraph(title_text, s["h1"]),
         Paragraph(VALUES_LINE, s["values"]),
-        Paragraph(_keyword_line(lead), s["muted"]),
+        Paragraph(_keyword_line(lead) + "  ·  SAME WALLS  ·  SAME WINDOWS", s["muted"]),
     ]
     story_blk = [
         Paragraph(f"Hi {customer_name} — this plan is designed for how you live.", s["bodySmall"]),
@@ -1118,7 +1279,7 @@ def build_pdf(
     # ── 01 Hero + 02/03 story already above + What's new
     left_w = content_w * 0.56
     right_w = content_w * 0.42
-    hero = _hero_block(images.get("front_view"), zones, left_w, 2.15 * inch)
+    hero = _hero_block(images.get("front_view"), zones, left_w, 1.95 * inch)
     right = [
         _section_head("01", "Project story", right_w),
         Paragraph(
@@ -1141,12 +1302,12 @@ def build_pdf(
         )
     )
     story.append(top)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 4))
 
     # ── 03 Room flow
     story.append(_section_head("03", f"{space_name} flow guide — Room layout & zones", content_w))
     story.append(_zone_flow(zones, images.get("floor_plan"), content_w))
-    story.append(Spacer(1, 7))
+    story.append(Spacer(1, 4))
 
     # ── 04 Detail cards
     story.append(_section_head("04", "System details", content_w))
@@ -1157,7 +1318,7 @@ def build_pdf(
             content_w,
         )
     )
-    story.append(Spacer(1, 7))
+    story.append(Spacer(1, 4))
 
     # ── 05 Curated selections
     shop_head = Table(
@@ -1168,8 +1329,7 @@ def build_pdf(
         colWidths=[content_w * 0.72, content_w * 0.28],
     )
     shop_head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    story.append(shop_head)
-    story.append(_shopping_cards(shopping, content_w))
+    shop_bits: List[Any] = [shop_head, Spacer(1, 2), _shopping_cards(shopping, content_w)]
     if shopping:
         total = 0.0
         for it in shopping:
@@ -1177,9 +1337,23 @@ def build_pdf(
                 total += float(it.get("qty", 1) or 1) * float(it.get("price", 0) or 0)
             except (TypeError, ValueError):
                 pass
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(f"<b>Estimated total</b>  ${total:,.2f}  ·  Budget is a typical retail range.", s["muted"]))
-    story.append(Spacer(1, 7))
+        shop_bits += [
+            Spacer(1, 3),
+            Paragraph(f"<b>Estimated total</b>  ${total:,.2f}  ·  Budget is a typical retail range.", s["muted"]),
+        ]
+    early_links = deliverable.get("shopping_links") or []
+    if early_links:
+        shop_bits.append(Spacer(1, 3))
+        shop_bits.append(Paragraph("Shopping Links", s["h3"]))
+        link_line = "   ·   ".join(
+            f'<link href="{lnk.get("url") or ""}" color="#047857"><u>{lnk.get("name") or lnk.get("url")}</u></link>'
+            for lnk in early_links[:6]
+            if lnk.get("name") or lnk.get("url")
+        )
+        if link_line:
+            shop_bits.append(Paragraph(link_line, s["bodySmall"]))
+    story.append(KeepTogether(shop_bits))
+    story.append(Spacer(1, 3))
 
     # ── 06 Palette
     story.append(_section_head("06", "Color & material palette", content_w))
@@ -1189,30 +1363,48 @@ def build_pdf(
     if wall_name or wall_hex:
         story.append(Spacer(1, 2))
         story.append(Paragraph(OPTIONAL_PAINT_NOTE, s["muted"]))
-    story.append(Spacer(1, 7))
+    story.append(Spacer(1, 3))
 
     # ── 07 Roadmap
     story.append(_section_head("07", "Implementation roadmap — Simple action plan", content_w))
     story.append(_roadmap(action_plan, content_w))
-    story.append(Spacer(1, 7))
+    story.append(Spacer(1, 3))
 
     # ── 08 / 09 Principles + reset
     story.append(_section_head("08", "Styling rules & weekly reset", content_w))
     story.append(_principles_and_reset(strategy, benefits, content_w))
-    story.append(Spacer(1, 7))
+    story.append(Spacer(1, 3))
 
     # ── 09 Notes
     notes = deliverable.get("notes") or DEFAULT_NOTES
     story.append(_section_head("09", "Notes & tips", content_w))
-    story.append(_card(Paragraph(notes, s["bodySmall"]), content_w, pad=7))
-    story.append(Spacer(1, 7))
+    notes_card = Table([[Paragraph(notes, s["bodySmall"])]], colWidths=[content_w])
+    notes_card.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), SOFT),
+                ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+                ("LINEBEFORE", (0, 0), (0, 0), 3, MINT),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+    story.append(notes_card)
+    story.append(Spacer(1, 3))
 
     # ── 10 Assessment
-    story.append(_section_head("10", "Designer assessment", content_w))
-    story.append(_assessment_row(deliverable, content_w))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Designed for how you live.", s["signoff"]))
-    story.append(Paragraph("<b>The FlowSpace Design Team</b>  ·  " + TAGLINE, s["muted"]))
+    story.append(
+        KeepTogether(
+            [
+                _section_head("10", "Designer assessment", content_w),
+                _assessment_row(deliverable, content_w),
+            ]
+        )
+    )
 
     # ── Extra pages: customer photos
     customer_photos: List[Optional[bytes]] = images.get("customer_photos") or []
@@ -1241,17 +1433,23 @@ def build_pdf(
 
     links = deliverable.get("shopping_links") or []
     attachment_note = deliverable.get("attachment_note") or ""
-    if links or attachment_note:
+    # Compact links already sit under curated selections. Only add a full table
+    # when there are reference photos or a fulfillment attachment note.
+    if included_photos or attachment_note:
+        link_bits: List[Any] = []
         if included_photos:
             story.append(PageBreak())
         else:
-            story.append(Spacer(1, 10))
-        story.append(Paragraph("Shopping Links", s["h3"]))
+            link_bits.append(Spacer(1, 6))
+        if attachment_note or (links and included_photos):
+            link_bits.append(Paragraph("Shopping Links", s["h3"]))
         if attachment_note:
-            story.append(Paragraph(attachment_note, s["bodySmall"]))
-            story.append(Spacer(1, 4))
-        if links:
-            story.append(_links_table(links, content_w))
+            link_bits.append(Paragraph(attachment_note, s["bodySmall"]))
+            link_bits.append(Spacer(1, 3))
+        if links and included_photos:
+            link_bits.append(_links_table(links, content_w))
+        if link_bits:
+            story.append(KeepTogether(link_bits))
 
     doc.build(story)
     return buf.getvalue()

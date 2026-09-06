@@ -5,8 +5,8 @@
   python scripts/render_sample_blueprint.py
 
 Writes:
-  /tmp/flowspace-blueprint-sample.pdf
-  /tmp/flowspace-blueprint-sample-pageN.png  (if PyMuPDF is installed)
+  backend/samples/flowspace-blueprint-sample.pdf
+  backend/samples/flowspace-blueprint-sample-pageN.png  (if PyMuPDF is installed)
 """
 from __future__ import annotations
 
@@ -64,7 +64,9 @@ DELIVERABLE = {
 
 
 def main() -> None:
-    out_pdf = Path("/tmp/flowspace-blueprint-sample.pdf")
+    out_dir = ROOT / "samples"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_pdf = out_dir / "flowspace-blueprint-sample.pdf"
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     out_pdf.write_bytes(pdf)
     print(f"wrote {out_pdf} ({len(pdf)} bytes)")
@@ -75,9 +77,11 @@ def main() -> None:
         return
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     print(f"pages {doc.page_count}")
+    for stale in out_dir.glob("flowspace-blueprint-sample-page*.png"):
+        stale.unlink()
     for i, page in enumerate(doc, 1):
         pix = page.get_pixmap(matrix=pymupdf.Matrix(1.8, 1.8), alpha=False)
-        png = Path(f"/tmp/flowspace-blueprint-sample-page{i}.png")
+        png = out_dir / f"flowspace-blueprint-sample-page{i}.png"
         pix.save(str(png))
         print(f"wrote {png} ({pix.width}x{pix.height})")
 
