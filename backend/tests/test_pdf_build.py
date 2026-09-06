@@ -77,7 +77,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "designer assessment" in low
     assert "Shopping Links" in text
     assert "The FlowSpace Design Team" in text
-    assert PdfReader(io.BytesIO(pdf)).num_pages <= 2
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 2
     assert "plan completeness" in low
     assert "measurement" in low
     assert "15 ft" not in text
