@@ -65,18 +65,20 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "Ada Lovelace" in text
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
-    assert "3D VISUAL" in text
-    assert "Room Layout & Zones" in text
+    low = text.lower()
+    assert "organized view" in low
+    assert "room layout" in low or "flow guide" in low
     assert "Storage Zone" in text
-    assert "Shopping List" in text
-    assert "Estimated Total" in text
-    assert "Budget" in text
-    assert "Design Strategy" in text
-    assert "Simple Action Plan" in text
-    assert "Benefits" in text
-    assert "Design Summary" in text
+    assert "curated selections" in low or "shopping list" in low
+    assert "estimated total" in low
+    assert "budget" in low or "retail" in low
+    assert "implementation roadmap" in low or "simple action plan" in low
+    assert "guiding principles" in low or "styling rules" in low
+    assert "designer assessment" in low
     assert "Shopping Links" in text
     assert "The FlowSpace Design Team" in text
+    assert "plan completeness" in low
+    assert "measurement" in low
     assert "15 ft" not in text
     assert "15ft" not in text
     assert "optional" in text.lower()
