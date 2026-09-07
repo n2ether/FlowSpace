@@ -42,6 +42,7 @@ const blankDeliverable = {
     view_2_url: "",
     view_3_url: "",
     include_customer_photos: true,
+    blueprint_layers: null,
 };
 
 const SectionTitle = ({ children }) => (
@@ -263,6 +264,9 @@ const AdminDeliverable = () => {
                 draft.shopping_list?.length
             ) {
                 out.shopping_list = draft.shopping_list;
+            }
+            if (!f.blueprint_layers && draft.blueprint_layers) {
+                out.blueprint_layers = draft.blueprint_layers;
             }
             return out;
         });
@@ -699,6 +703,40 @@ const AdminDeliverable = () => {
                             placeholder="e.g. All measurements are approximate."
                             data-testid="d-notes"
                         />
+
+                        <SectionTitle>Six Brain layers</SectionTitle>
+                        <p className="mb-3 text-xs text-slate-500">
+                            Persisted on the deliverable and rendered on the PDF. Observation →
+                            Human need → Spatial constraint → Recommendation → Validation →
+                            Customer instruction.
+                        </p>
+                        {form.blueprint_layers ? (
+                            <div
+                                className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 md:grid-cols-2"
+                                data-testid="d-blueprint-layers"
+                            >
+                                {[
+                                    ["Observation", form.blueprint_layers.observation?.space_seen],
+                                    ["Human need / routine", form.blueprint_layers.human_need?.routine],
+                                    ["Spatial constraint", (form.blueprint_layers.spatial_constraint?.known_from_photo || []).join(" · ")],
+                                    ["Recommendation", form.blueprint_layers.recommendation?.why_it_should_work || form.blueprint_layers.recommendation?.system],
+                                    ["Validation / budget", form.blueprint_layers.validation?.budget_band?.note || form.blueprint_layers.validation?.budget_band?.band],
+                                    ["Customer instruction", form.blueprint_layers.customer_instruction?.start_here],
+                                ].map(([label, text]) => (
+                                    <div key={label}>
+                                        <div className="text-[10px] font-semibold uppercase tracking-widest text-emerald-800">
+                                            {label}
+                                        </div>
+                                        <p className="mt-1 text-xs text-slate-700">{text || "—"}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-xs text-slate-400" data-testid="d-blueprint-layers-empty">
+                                Draft with AI to fill the six layers, or they will be derived from
+                                this plan when the PDF is built.
+                            </p>
+                        )}
 
                         <SectionTitle>Design Summary</SectionTitle>
                         <Textarea

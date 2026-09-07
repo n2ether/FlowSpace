@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Render a sample FlowSpace Blueprint PDF (no Mongo / AI / Stripe).
 
+Uses the bake-off garage fixture so the six Brain layers are customer-visible.
+
   cd backend
   python scripts/render_sample_blueprint.py
 
@@ -10,6 +12,7 @@ Writes:
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -18,58 +21,22 @@ sys.path.insert(0, str(ROOT))
 
 from pdf_generator import build_pdf  # noqa: E402
 
-LEAD = {
-    "name": "Ada Lovelace",
-    "email": "ada@example.com",
-    "space_type": "garage",
-    "style_prefs": ["minimal", "natural"],
-    "color_prefs": ["sage", "wood"],
-    "desired_feeling": ["practical", "calm"],
-}
+FIXTURE = ROOT / "fixtures" / "bakeoff" / "garage_org_space.json"
 
-DELIVERABLE = {
-    "intro": "A garage that is easy to park in and easy to find things — same walls and windows, a calmer system.",
-    "needs": ["Hidden storage for tools", "Clear floor for the car", "A landing zone by the door"],
-    "zones": [
-        {"title": "Parking Zone", "desc": "Keep the existing stall clear. No new walls."},
-        {"title": "Storage Zone", "desc": "Bins and wall-mounted shelves on the existing wall."},
-        {"title": "Circulation Zone", "desc": "Keep the walk path your photo already shows."},
-        {"title": "Workbench", "desc": "Tools in labeled bins, not a new built-in."},
-        {"title": "Door Drop", "desc": "Hooks and a basket for daily in-and-out."},
-    ],
-    "wall_color_name": "Sea Salt",
-    "wall_color_code": "SW 6204",
-    "wall_color_hex": "#cfd7d3",
-    "wall_color_note": "Optional — consider if it helps the goal.",
-    "shopping_list": [
-        {"name": "Lidded bins", "qty": 6, "price": 12.0},
-        {"name": "Wall shelves", "qty": 2, "price": 39.0},
-        {"name": "Peg hooks", "qty": 8, "price": 4.0},
-        {"name": "Label maker tape", "qty": 2, "price": 8.0},
-        {"name": "Floor mat", "qty": 1, "price": 29.0},
-    ],
-    "budget_note": "$100 – $300 typical for this starter kit",
-    "strategy": [
-        "Keep the layout balanced",
-        "Hide clutter in matching bins",
-        "Leave a path to the car",
-        "One home per tool family",
-    ],
-    "action_plan": ["Declutter", "Mount shelves", "Place bins", "Label homes"],
-    "benefits": ["Less visual noise", "Better daily routine", "Easier to park"],
-    "notes": "",
-    "summary": "Organize the garage you already have.",
-    "shopping_links": [{"name": "Bins", "url": "https://example.com/bins"}],
-}
+
+def load_fixture() -> tuple[dict, dict]:
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return doc["lead"], doc["deliverable"]
 
 
 def main() -> None:
+    lead, deliverable = load_fixture()
     out_dir = ROOT / "samples"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_pdf = out_dir / "flowspace-blueprint-sample.pdf"
-    pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
     out_pdf.write_bytes(pdf)
-    print(f"wrote {out_pdf} ({len(pdf)} bytes)")
+    print(f"wrote {out_pdf} ({len(pdf)} bytes) from {FIXTURE.relative_to(ROOT)}")
     try:
         import pymupdf
     except ImportError:

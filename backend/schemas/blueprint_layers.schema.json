@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowspace.solutions/schemas/blueprint_layers.schema.json",
+  "title": "blueprint_layers",
+  "description": "Six FlowSpace Brain layers persisted on a Blueprint deliverable and rendered on the customer PDF. Never invent footage, window counts, or a floor plan.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "observation",
+    "human_need",
+    "spatial_constraint",
+    "recommendation",
+    "validation",
+    "customer_instruction"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["space_seen", "current_state", "possessions", "evidence"],
+      "properties": {
+        "space_seen": {
+          "type": "string",
+          "description": "What the photo and answers show. No invented dimensions."
+        },
+        "current_state": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 6
+        },
+        "possessions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 6,
+          "description": "Named items they own or must keep — Ryan: possessions."
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 6
+        }
+      }
+    },
+    "human_need": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routine", "desired_feeling", "jobs_to_be_done", "pain"],
+      "properties": {
+        "routine": {
+          "type": "string",
+          "description": "Daily/weekly use of this space — Ryan: routine."
+        },
+        "desired_feeling": { "type": "string" },
+        "jobs_to_be_done": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 6
+        },
+        "pain": { "type": "string" }
+      }
+    },
+    "spatial_constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preserve_shell",
+        "windows_dims_fidelity",
+        "known_from_photo",
+        "unknowns",
+        "no_invented_floor_plan",
+        "paint_optional"
+      ],
+      "properties": {
+        "preserve_shell": { "type": "boolean", "const": true },
+        "windows_dims_fidelity": {
+          "type": "string",
+          "description": "Always ~95% faithful to the customer photo."
+        },
+        "known_from_photo": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Qualitative only: stall, door path, existing wall. No footage."
+        },
+        "unknowns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "no_invented_floor_plan": { "type": "boolean", "const": true },
+        "paint_optional": { "type": "boolean", "const": true }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "zones", "why_it_should_work"],
+      "properties": {
+        "system": { "type": "string" },
+        "zones": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "why"],
+            "properties": {
+              "title": { "type": "string" },
+              "why": { "type": "string" }
+            }
+          }
+        },
+        "why_it_should_work": {
+          "type": "string",
+          "description": "Causal argument — Ryan: why it should work."
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fit",
+        "flow",
+        "budget_band",
+        "possession_respect",
+        "conflicts",
+        "assumptions"
+      ],
+      "properties": {
+        "fit": { "$ref": "#/$defs/check" },
+        "flow": { "$ref": "#/$defs/check" },
+        "budget_band": {
+          "allOf": [
+            { "$ref": "#/$defs/check" },
+            {
+              "type": "object",
+              "properties": {
+                "band": {
+                  "type": "string",
+                  "description": "Stated or typical retail band — Ryan: budget."
+                }
+              }
+            }
+          ]
+        },
+        "possession_respect": { "$ref": "#/$defs/check" },
+        "conflicts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "customer_instruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_here", "do_this_week", "do_not", "weekly_reset"],
+      "properties": {
+        "start_here": { "type": "string" },
+        "do_this_week": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 6
+        },
+        "do_not": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "weekly_reset": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "note"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "watch", "fail"] },
+        "note": { "type": "string" },
+        "band": { "type": "string" }
+      }
+    }
+  }
+}

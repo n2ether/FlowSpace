@@ -1,0 +1,162 @@
+{
+  "id": "bakeoff-garage-ada-2026",
+  "title": "Completed org-space case — two-car garage (Ada Lovelace sample)",
+  "space_type": "garage",
+  "source": "backend/samples + tests/test_pdf_build.py garage deliverable, completed with six Brain layers",
+  "notes": "Not a bedroom. Shell preserved. No invented footage. Paint optional. Answers Ryan's five bake-off questions from layers + PDF.",
+  "lead": {
+    "name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "space_type": "garage",
+    "biggest_challenge": "Can't park both cars and still find tools or the kids' sports bags.",
+    "goals": "Park nightly, find gear in under a minute, less visual noise.",
+    "bothers_about": ["clutter", "no_storage", "no_function"],
+    "desired_feeling": ["practical", "calm"],
+    "must_stay": "Existing workbench, kids' bikes, lawn mower",
+    "storage_needs": ["tools", "sports"],
+    "style_prefs": ["minimal", "natural"],
+    "color_prefs": ["sage", "wood"],
+    "budget": "100_300",
+    "diy_level": "simple",
+    "daily_improvement": "Park both cars after school pickup, drop sports bags by the door, grab tools without stepping over piles."
+  },
+  "deliverable": {
+    "intro": "A garage that is easy to park in and easy to find things — same walls and windows, a calmer system.",
+    "needs": [
+      "Hidden storage for tools",
+      "Clear floor for both cars",
+      "A landing zone by the door for sports bags"
+    ],
+    "zones": [
+      {"title": "Parking Zone", "desc": "Keep the existing stall clear. No new walls."},
+      {"title": "Storage Zone", "desc": "Bins and wall-mounted shelves on the existing wall."},
+      {"title": "Circulation Zone", "desc": "Keep the walk path your photo already shows."},
+      {"title": "Workbench", "desc": "Tools in labeled bins on the workbench you already own."},
+      {"title": "Door Drop", "desc": "Hooks and a basket for daily in-and-out."}
+    ],
+    "wall_color_name": "Sea Salt",
+    "wall_color_code": "SW 6204",
+    "wall_color_hex": "#cfd7d3",
+    "wall_color_note": "Optional — consider if it helps the goal.",
+    "shopping_list": [
+      {"name": "Lidded bins", "qty": 6, "price": 12.0},
+      {"name": "Wall shelves", "qty": 2, "price": 39.0},
+      {"name": "Peg hooks", "qty": 8, "price": 4.0},
+      {"name": "Label maker tape", "qty": 2, "price": 8.0},
+      {"name": "Floor mat", "qty": 1, "price": 29.0}
+    ],
+    "budget_note": "$100 – $300 typical for this starter kit",
+    "strategy": [
+      "Keep the layout balanced",
+      "Hide clutter in matching bins",
+      "Leave a path to the car",
+      "One home per tool family"
+    ],
+    "action_plan": ["Declutter the floor", "Mount shelves on the existing wall", "Place labeled bins", "Hang the door-drop hooks"],
+    "benefits": ["Less visual noise", "Better daily routine", "Easier to park"],
+    "notes": "Windows and room proportions stay ~95% true to your photo. We do not invent dimensions. Paint is optional — consider it only if it helps your goal.",
+    "summary": "Organize the garage you already have: stall stays a destination, tools and sports get labeled homes on existing walls.",
+    "shopping_links": [{"name": "Bins", "url": "https://example.com/bins"}],
+    "blueprint_layers": {
+      "schema_version": "1.0",
+      "observation": {
+        "space_seen": "Two-car garage photographed as used today: floor is a dump, tools mixed with sports bags, existing workbench still in place, bikes and mower share the stall.",
+        "current_state": [
+          "Floor overflow blocks parking",
+          "Tools and sports gear share one pile",
+          "No landing zone at the door"
+        ],
+        "possessions": [
+          "Existing workbench",
+          "Kids' bikes",
+          "Lawn mower",
+          "Tools",
+          "Sports bags"
+        ],
+        "evidence": [
+          "Intake space_type is garage.",
+          "Must keep: existing workbench, kids' bikes, lawn mower.",
+          "Daily goal: park both cars after school pickup and find gear fast.",
+          "Photo is the source of truth for the shell. No invented footage."
+        ]
+      },
+      "human_need": {
+        "routine": "After-school pickup: park both cars, drop sports bags at the door, grab a tool without stepping over piles, leave a clear stall overnight.",
+        "desired_feeling": "Practical, calm",
+        "jobs_to_be_done": [
+          "Park both cars nightly",
+          "Find a sports bag in under a minute",
+          "Reach a tool without hunting"
+        ],
+        "pain": "Can't park both cars and still find tools or the kids' sports bags."
+      },
+      "spatial_constraint": {
+        "preserve_shell": true,
+        "windows_dims_fidelity": "~95%",
+        "known_from_photo": [
+          "Keep the existing parking stall as a destination, not a dump.",
+          "Use the walls and door path the photo already shows.",
+          "Workbench stays where it already sits."
+        ],
+        "unknowns": [
+          "Exact footage, window counts, and opening sizes were not measured — we do not invent them."
+        ],
+        "no_invented_floor_plan": true,
+        "paint_optional": true
+      },
+      "recommendation": {
+        "system": "Five zones on the existing shell: stall, wall storage, circulation, workbench bins, door drop.",
+        "zones": [
+          {"title": "Parking Zone", "why": "Stall stays empty so both cars fit the path the photo already shows."},
+          {"title": "Storage Zone", "why": "Matching bins and two wall shelves get tools off the floor."},
+          {"title": "Circulation Zone", "why": "The walk path in the photo stays the walk path."},
+          {"title": "Workbench", "why": "Keep the bench they already own; only add labeled bins."},
+          {"title": "Door Drop", "why": "Hooks + basket catch sports bags at the daily entry."}
+        ],
+        "why_it_should_work": "The routine is park → drop bags → find a tool. Zoning the stall, the door, and the existing bench removes the pile that blocks all three, without changing walls or windows."
+      },
+      "validation": {
+        "fit": {
+          "status": "pass",
+          "note": "Two wall shelves, peg hooks, and lidded bins mount on the existing wall and sit on the workbench they already own. No new walls."
+        },
+        "flow": {
+          "status": "pass",
+          "note": "Door drop → circulation → stall. Floor mat marks the parking destination; bags never land in the stall."
+        },
+        "budget_band": {
+          "status": "pass",
+          "note": "Kit totals $227, inside the stated $100 – $300 band.",
+          "band": "$100 – $300"
+        },
+        "possession_respect": {
+          "status": "pass",
+          "note": "Workbench stays. Bikes hang or stand on the existing wall path. Mower parks beside the stall, not in it."
+        },
+        "conflicts": [
+          "Mower vs stall: mower must live on the side wall, not in a parking bay."
+        ],
+        "assumptions": [
+          "Existing walls can take light shelving and peg hooks.",
+          "Customer will confirm retail prices before buying.",
+          "Stud locations were not measured."
+        ]
+      },
+      "customer_instruction": {
+        "start_here": "Clear the stall and the door path first — nothing stays on the floor overnight.",
+        "do_this_week": [
+          "Declutter the floor",
+          "Mount two shelves on the existing wall",
+          "Park tools in labeled lidded bins on the workbench",
+          "Hang door-drop hooks and the sports basket"
+        ],
+        "do_not": [
+          "Do not add walls, windows, or doors.",
+          "Do not invent room dimensions.",
+          "Paint is optional — skip it unless it helps the goal."
+        ],
+        "weekly_reset": "Return tools to labeled bins, hang bags on the door hooks, roll the mower to the side wall, wipe the workbench."
+      }
+    }
+  }
+}

@@ -10,9 +10,11 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import anthropic
+
+from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,8 @@ areas the customer actually uploaded. Write for THAT space_type. Do not produce
 a bedroom redesign unless space_type is bedroom.
 
 Given a customer's questionnaire answers, produce a thoughtful, calm,
-practical organization plan (zones, shopping list, action steps, benefits).
+practical organization plan (zones, shopping list, action steps, benefits)
+AND the six Brain layers. Layers are customer-visible — not private notes.
 
 Return ONLY valid JSON matching exactly this schema (no prose, no markdown,
 no code fences) — keep every list short and concrete (max ~5 items each):
@@ -47,7 +50,7 @@ no code fences) — keep every list short and concrete (max ~5 items each):
   "benefits": [string],
   "notes": string,
   "summary": string,
-  "attachment_note": string
+  "attachment_note": string,""" + DRAFTER_SCHEMA_SNIPPET + """
 }
 
 Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
@@ -58,7 +61,15 @@ Hard rules:
 - Windows and room dimensions must stay ~95% faithful to the customer's real space. Never invent footage, window counts, openings, or measured callouts.
 - Do not propose new walls, windows, doors, or construction. Organize with bins, furniture, and layout.
 - Wall paint/color is OPTIONAL. If you include a suggestion, wall_color_note must say it is optional — consider it only if it helps the goal. Never put "paint the walls" in action_plan. The visual transform will not apply paint.
-- notes must mention ~95% window/dimension accuracy and that paint is optional."""
+- notes must mention ~95% window/dimension accuracy and that paint is optional.
+
+Brain-layer rules:
+- Observation: only what the photo/answers show. Name possessions. No invented dims.
+- Human need: answer the routine (daily/weekly use) in human_need.routine.
+- Spatial constraint: preserve_shell true, windows_dims_fidelity "~95%", no_invented_floor_plan true. known_from_photo is qualitative only.
+- Recommendation: one system + why_it_should_work (causal, not fluff).
+- Validation: REAL checks — fit, flow, budget_band (vs stated budget), possession_respect, plus conflicts and assumptions. status is pass, watch, or fail. Do not invent scores or room measurements.
+- Customer instruction: start_here + do_this_week the customer can do without construction."""
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -150,7 +161,7 @@ def _extract_json(raw: str) -> Dict[str, Any]:
         return json.loads(m.group(0))
 
 
-def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
+def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     def as_str(v):
         return "" if v is None else str(v).strip()
 
@@ -187,7 +198,7 @@ def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", hex_color or ""):
         hex_color = "#cfd7d3"
 
-    return {
+    coerced = {
         "intro": as_str(plan.get("intro")),
         "needs": as_str_list(plan.get("needs")),
         "zones": zones,
@@ -207,7 +218,13 @@ def _coerce(plan: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
+        "blueprint_layers": {},
     }
+    coerced["blueprint_layers"] = merge_layers(
+        plan.get("blueprint_layers") or {},
+        derive_layers(lead or {}, coerced),
+    )
+    return coerced
 
 
 async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,12 +237,14 @@ async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
     user_text = (
         "Customer questionnaire answers:\n\n"
         + _summarize_lead(lead)
-        + "\n\nReturn ONLY the JSON object — no markdown, no preamble."
+        + "\n\nFill blueprint_layers completely so a reviewer can answer: "
+        "routine, possessions, physical fit, budget, and why it should work. "
+        "Return ONLY the JSON object — no markdown, no preamble."
     )
 
     message = client.messages.create(
         model=MODEL_NAME,
-        max_tokens=2048,
+        max_tokens=4096,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_text}],
     )
@@ -233,4 +252,4 @@ async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
     raw = message.content[0].text
     logger.info("AI draft received (%d chars)", len(raw or ""))
     plan = _extract_json(raw)
-    return _coerce(plan)
+    return _coerce(plan, lead=lead)

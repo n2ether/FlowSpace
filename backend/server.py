@@ -18,6 +18,7 @@ import stripe as stripe_sdk
 import httpx
 
 from pdf_generator import build_pdf
+from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from automation import run_automation
@@ -242,6 +243,7 @@ class Deliverable(BaseModel):
     view_2_url: Optional[str] = None
     view_3_url: Optional[str] = None
     include_customer_photos: bool = True
+    blueprint_layers: Optional[Dict[str, Any]] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -781,6 +783,8 @@ async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depen
         raise HTTPException(status_code=404, detail="Lead not found")
     payload.lead_id = lead_id
     payload.updated_at = datetime.now(timezone.utc)
+    if payload.blueprint_layers:
+        payload.blueprint_layers = coerce_layers(payload.blueprint_layers)
     doc = _doc(payload)
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
     return payload
