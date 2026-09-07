@@ -22,6 +22,26 @@ from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from automation import run_automation
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
+from auth import (
+    COOKIE_NAME,
+    cookie_kwargs,
+    create_token,
+    decode_token,
+    extract_token,
+    normalize_email,
+    validate_password,
+    verify_password,
+)
+from members import (
+    claim_leads_for_email,
+    ensure_member_indexes,
+    free_limit_error,
+    is_free_package,
+    new_member_doc,
+    public_member,
+    public_space,
+    usage_for_member,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -96,6 +116,7 @@ class Lead(BaseModel):
     daily_improvement: Optional[str] = None
     language: str = "en"
     status: str = "new"
+    member_id: Optional[str] = None
     stripe_session_id: Optional[str] = None
     email_sent: Optional[bool] = None
     email_error: Optional[str] = None
@@ -125,6 +146,18 @@ class LeadCreate(BaseModel):
     diy_level: Optional[str] = None
     daily_improvement: Optional[str] = None
     language: str = "en"
+    password: Optional[str] = None
+
+
+class MemberSignup(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class MemberLogin(BaseModel):
+    email: EmailStr
+    password: str
 
 
 class GalleryItem(BaseModel):
@@ -260,6 +293,138 @@ async def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> 
     if not x_admin_token or x_admin_token != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
+
+
+def _cors_origins() -> List[str]:
+    """Explicit origins only — browsers reject Access-Control-Allow-Origin: * with cookies."""
+    raw = (os.environ.get("CORS_ORIGINS") or "").strip()
+    defaults = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://flowspace.solutions",
+        "https://www.flowspace.solutions",
+    ]
+    if not raw or raw == "*":
+        return defaults
+    origins = [o.strip() for o in raw.split(",") if o.strip() and o.strip() != "*"]
+    return origins or defaults
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(COOKIE_NAME, token, **cookie_kwargs())
+
+
+def _clear_session_cookie(response: Response) -> None:
+    kwargs = cookie_kwargs()
+    response.delete_cookie(
+        COOKIE_NAME,
+        path=kwargs.get("path", "/"),
+        samesite=kwargs.get("samesite"),
+        secure=kwargs.get("secure"),
+        httponly=True,
+    )
+
+
+async def optional_member(request: Request) -> Optional[Dict[str, Any]]:
+    token = extract_token(request)
+    payload = decode_token(token) if token else None
+    if not payload or not payload.get("sub"):
+        return None
+    member = await db.members.find_one({"id": payload["sub"]}, {"_id": 0})
+    return member
+
+
+async def require_member(request: Request) -> Dict[str, Any]:
+    member = await optional_member(request)
+    if not member:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "ACCOUNT_REQUIRED",
+                "message": "Log in or create a free account to continue.",
+            },
+        )
+    return member
+
+
+async def _usage_for(member_id: str) -> Dict[str, Any]:
+    return await usage_for_member(db, member_id, PACKAGES)
+
+
+async def _auth_payload(member: Dict[str, Any], token: str, claimed_spaces: int = 0) -> Dict[str, Any]:
+    usage = await _usage_for(member["id"])
+    return {
+        "token": token,
+        "member": public_member(member, usage),
+        "claimed_spaces": claimed_spaces,
+    }
+
+
+async def _signup_or_authenticate(
+    *,
+    name: str,
+    email: str,
+    password: str,
+    allow_login: bool,
+) -> tuple:
+    """Create a member or, when allow_login=True, sign them in if the email exists."""
+    email_n = normalize_email(email)
+    existing = await db.members.find_one({"email": email_n}, {"_id": 0})
+    if existing:
+        if not allow_login:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "EMAIL_IN_USE",
+                    "message": "An account with this email already exists. Log in to continue.",
+                },
+            )
+        if not verify_password(password, existing.get("password_hash") or ""):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "Invalid email or password.",
+                },
+            )
+        claimed = await claim_leads_for_email(db, existing["id"], email_n)
+        token = create_token(existing["id"], existing["email"])
+        return existing, token, claimed
+
+    pw_err = validate_password(password)
+    if pw_err:
+        raise HTTPException(status_code=400, detail=pw_err)
+    doc = new_member_doc(name, email_n, password)
+    await db.members.insert_one(doc)
+    claimed = await claim_leads_for_email(db, doc["id"], email_n)
+    token = create_token(doc["id"], doc["email"])
+    return doc, token, claimed
+
+
+async def _resolve_member_for_lead(
+    payload: "LeadCreate",
+    request: Request,
+    response: Response,
+) -> Dict[str, Any]:
+    member = await optional_member(request)
+    if member:
+        return member
+    if payload.password:
+        member, token, _ = await _signup_or_authenticate(
+            name=payload.name,
+            email=payload.email,
+            password=payload.password,
+            allow_login=True,
+        )
+        _set_session_cookie(response, token)
+        return member
+    raise HTTPException(
+        status_code=401,
+        detail={
+            "code": "ACCOUNT_REQUIRED",
+            "message": "Create a free account (or log in) to keep this plan and start your Blueprint.",
+        },
+    )
 
 
 async def seed_gallery_if_empty():
@@ -415,22 +580,91 @@ async def get_packages():
     return {"packages": list(PACKAGES.values())}
 
 
+@api_router.post("/auth/signup")
+async def member_signup(payload: MemberSignup, response: Response):
+    member, token, claimed = await _signup_or_authenticate(
+        name=payload.name,
+        email=str(payload.email),
+        password=payload.password,
+        allow_login=False,
+    )
+    _set_session_cookie(response, token)
+    return await _auth_payload(member, token, claimed)
+
+
+@api_router.post("/auth/login")
+async def member_login(payload: MemberLogin, response: Response):
+    email_n = normalize_email(str(payload.email))
+    member = await db.members.find_one({"email": email_n}, {"_id": 0})
+    if not member or not verify_password(payload.password, member.get("password_hash") or ""):
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "INVALID_CREDENTIALS", "message": "Invalid email or password."},
+        )
+    claimed = await claim_leads_for_email(db, member["id"], email_n)
+    token = create_token(member["id"], member["email"])
+    _set_session_cookie(response, token)
+    return await _auth_payload(member, token, claimed)
+
+
+@api_router.post("/auth/logout")
+async def member_logout(response: Response):
+    _clear_session_cookie(response)
+    return {"ok": True}
+
+
+@api_router.get("/auth/me")
+async def member_me(member: Dict[str, Any] = Depends(require_member)):
+    usage = await _usage_for(member["id"])
+    return public_member(member, usage)
+
+
+@api_router.get("/me/spaces")
+async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
+    leads = (
+        await db.leads.find({"member_id": member["id"]}, {"_id": 0})
+        .sort("created_at", -1)
+        .to_list(500)
+    )
+    lead_ids = [lead.get("id") for lead in leads if lead.get("id")]
+    deliverables = []
+    if lead_ids:
+        deliverables = await db.deliverables.find(
+            {"lead_id": {"$in": lead_ids}}, {"_id": 0}
+        ).to_list(500)
+    by_lead = {d.get("lead_id"): d for d in deliverables}
+    return {
+        "spaces": [public_space(lead, by_lead.get(lead.get("id"))) for lead in leads],
+        "usage": await _usage_for(member["id"]),
+    }
+
+
 @api_router.post("/leads", response_model=Lead)
-async def create_lead(payload: LeadCreate, background_tasks: BackgroundTasks):
+async def create_lead(payload: LeadCreate, request: Request, response: Response, background_tasks: BackgroundTasks):
     """
-    Create a lead.
+    Create a lead owned by a member account.
     - Free tier (or no package selected): fire the automation pipeline immediately
+      unless the member has already used their one free generation.
     - Paid tier: return the lead, frontend then creates a Stripe checkout session
     """
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
-    lead = Lead(**payload.model_dump())
+
+    member = await _resolve_member_for_lead(payload, request, response)
+    usage = await _usage_for(member["id"])
+    free = is_free_package(payload.package_id, PACKAGES)
+    if free and not usage["can_generate_free"]:
+        raise HTTPException(status_code=403, detail=free_limit_error(usage["free_generations_used"]))
+
+    data = payload.model_dump(exclude={"password"})
+    data["email"] = normalize_email(str(member.get("email") or data.get("email") or ""))
+    if member.get("name") and not (data.get("name") or "").strip():
+        data["name"] = member["name"]
+    data["member_id"] = member["id"]
+    lead = Lead(**data)
     await db.leads.insert_one(_doc(lead))
 
-    is_free = (not payload.package_id) or (
-        payload.package_id in PACKAGES and PACKAGES[payload.package_id]["price"] == 0.0
-    )
-    if is_free:
+    if free:
         await _start_automation_for_lead(_doc(lead), background_tasks)
 
     return lead
@@ -669,6 +903,13 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         metadata["email"] = str(req.email)
     if req.metadata:
         metadata.update({str(k): str(v) for k, v in req.metadata.items()})
+    member = await optional_member(request)
+    checkout_email = str(req.email) if req.email else None
+    if member:
+        metadata["member_id"] = member["id"]
+        checkout_email = checkout_email or member.get("email")
+        if checkout_email and not metadata.get("email"):
+            metadata["email"] = checkout_email
 
     try:
         session = await asyncio.to_thread(
@@ -685,7 +926,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
             mode="payment",
             success_url=success_url,
             cancel_url=cancel_url,
-            customer_email=str(req.email) if req.email else None,
+            customer_email=checkout_email,
             metadata=metadata,
         )
     except Exception as e:
@@ -697,7 +938,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         package_id=pkg["id"],
         amount=float(pkg["price"]),
         currency=pkg["currency"],
-        email=str(req.email) if req.email else None,
+        email=checkout_email,
         lead_id=(req.metadata or {}).get("lead_id") or metadata.get("lead_id"),
         payment_status="initiated",
         status="open",
@@ -714,8 +955,8 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="Session not found")
     if existing.get("payment_status") == "paid":
         # Backup trigger: if the Stripe webhook never reached this backend
-        # (wrong URL, Emergent leftover, missing secret), still start the
-        # PDF → Resend pipeline when the success page confirms payment.
+        # (wrong URL or missing secret), still start the PDF → Resend pipeline
+        # when the success page confirms payment.
         meta = existing.get("metadata") or {}
         await _fulfill_paid_checkout(
             session_id=session_id,
@@ -820,7 +1061,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -835,6 +1076,7 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def _startup():
     await seed_gallery_if_empty()
+    await ensure_member_indexes(db)
 
 
 @app.on_event("shutdown")

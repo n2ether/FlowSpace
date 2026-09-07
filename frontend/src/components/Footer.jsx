@@ -48,6 +48,15 @@ export default function Footer() {
                   Examples
                 </a>
               </li>
+              <li>
+                <a
+                  href="/login"
+                  className="hover:text-emerald-600"
+                  data-testid="footer-link-members"
+                >
+                  Members
+                </a>
+              </li>
             </ul>
           </div>
           <div>

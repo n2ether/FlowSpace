@@ -59,7 +59,8 @@ git push origin main
 | `STRIPE_API_KEY` | `sk_live_...` (or `sk_test_...` for testing) |
 | `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below |
 | `ADMIN_PASSWORD` | Change this to a strong password |
-| `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` |
+| `JWT_SECRET` | Long random string for member session JWTs |
+| `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` (plus the Railway frontend origin if it is different) |
 
 5. Click **Deploy** — Railway builds the Docker image and starts the server
 6. Note the generated URL, e.g. `https://flowspace-backend-xyz.up.railway.app`

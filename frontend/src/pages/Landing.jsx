@@ -47,6 +47,7 @@ const PLANS = [
     tagline: "Try the FlowSpace experience",
     price: 0,
     features: [
+      "1 space included per account",
       "Upload up to 2 photos",
       "AI-generated organized rooms",
       "Starter plan emailed as PDF",
@@ -170,7 +171,7 @@ const FAQS = [
   },
   {
     q: "Do I need an account to get started?",
-    a: "Nope. Pick a plan, upload your photos, and we get to work. You'll receive your transformation right in your browser, with a copy delivered to your email.",
+    a: "Yes — a free member account keeps every space you create. You can sign up from Members in the nav, or set a password on the intake form. After your first free Blueprint, Plus or Premium unlocks another space.",
   },
   {
     q: "How is the PDF plan different from the AI image?",
@@ -331,8 +332,8 @@ export default function Landing() {
             {[
               {
                 n: 1,
-                title: "Pick a plan",
-                body: "Choose Free, Plus, or Premium — based on how many photos you want transformed.",
+                title: "Create your free account",
+                body: "Save every space you organize. The first Blueprint is free; Plus and Premium add more photos and another space.",
               },
               {
                 n: 2,
@@ -388,7 +389,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-8 text-center text-xs text-slate-500">
-            No payment required. Pick a plan and start uploading.
+            Free includes one Blueprint per account. Create a member login to keep your plans.
           </p>
         </div>
       </section>

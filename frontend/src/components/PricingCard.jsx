@@ -66,7 +66,7 @@ export default function PricingCard({ plan, highlighted = false, testId }) {
         }`}
         data-testid={`${testId}-cta`}
       >
-        {plan.price === 0 ? "Start free" : `Choose ${plan.name}`}
+        {plan.price === 0 ? "Start free — 1 space" : `Choose ${plan.name}`}
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="16"

@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 
 const PLANS = {
     free:    { name: "Free",    price: 0,  maxPhotos: 2 },
@@ -48,10 +49,12 @@ export default function Intake() {
     const [search] = useSearchParams();
     const planId = (search.get("plan") || "free").toLowerCase();
     const plan = PLANS[planId] || PLANS.free;
+    const { member, signup, login, refresh } = useAuth();
 
     const [form, setForm] = useState({
         name: "",
         email: "",
+        password: "",
         space_type: "",
         style: "",
         colors: "",
@@ -60,6 +63,23 @@ export default function Intake() {
     const [photos, setPhotos] = useState([]);
     const [uploading, setUploading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [blocked, setBlocked] = useState(false);
+
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
+    useEffect(() => {
+        if (!member) return;
+        setForm((f) => ({
+            ...f,
+            name: f.name || member.name || "",
+            email: f.email || member.email || "",
+        }));
+        if (plan.price === 0 && member.usage && member.usage.can_generate_free === false) {
+            setBlocked(true);
+        }
+    }, [member, plan.price]);
 
     const canSubmit = useMemo(
         () =>
@@ -68,8 +88,9 @@ export default function Intake() {
             form.space_type &&
             form.style &&
             form.colors &&
-            form.problem.trim().length >= 5,
-        [form]
+            form.problem.trim().length >= 5 &&
+            (member || form.password.length >= 8),
+        [form, member]
     );
 
     const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -137,6 +158,32 @@ export default function Intake() {
                 language: "en",
             };
 
+            if (!member) {
+                let nextMember;
+                try {
+                    nextMember = await signup({
+                        name: form.name.trim(),
+                        email: form.email.trim(),
+                        password: form.password,
+                    });
+                } catch (authErr) {
+                    if (apiErrorCode(authErr) === "EMAIL_IN_USE") {
+                        nextMember = await login({
+                            email: form.email.trim(),
+                            password: form.password,
+                        });
+                    } else {
+                        throw authErr;
+                    }
+                }
+                if (plan.price === 0 && nextMember?.usage?.can_generate_free === false) {
+                    setBlocked(true);
+                    toast.error("You've already used your free Blueprint. Upgrade to organize another space.");
+                    setSubmitting(false);
+                    return;
+                }
+            }
+
             const { data: lead } = await api.post("/leads", payload);
 
             // Free tier: automation fires immediately on the backend
@@ -150,16 +197,15 @@ export default function Intake() {
             const { data: checkout } = await api.post("/checkout/session", {
                 package_id: planId,
                 origin_url: origin,
-                email: form.email.trim(),
+                email: (member?.email || form.email).trim(),
                 metadata: { lead_id: lead.id },
             });
             window.location.href = checkout.url;
         } catch (err) {
-            const msg =
-                err?.response?.data?.detail ||
-                err?.message ||
-                "Something went wrong. Please try again.";
-            toast.error(String(msg));
+            if (apiErrorCode(err) === "FREE_TIER_LIMIT") {
+                setBlocked(true);
+            }
+            toast.error(apiErrorMessage(err));
             setSubmitting(false);
         }
     };
@@ -175,7 +221,7 @@ export default function Intake() {
                             Tell us about your space
                         </h1>
                         <p className="mt-3 text-slate-600">
-                            Five quick questions and you're done. We'll build your
+                            Five quick questions and you&apos;re done. We&apos;ll build your
                             personalized FlowSpace Blueprint&trade; and email it to you
                             in about two minutes.
                         </p>
@@ -190,6 +236,29 @@ export default function Intake() {
                         </div>
                     </div>
 
+                    {blocked ? (
+                        <div
+                            className="rounded-3xl border border-amber-200 bg-white p-8 shadow-sm"
+                            data-testid="intake-upgrade-wall"
+                        >
+                            <span className="eyebrow">Free plan used</span>
+                            <h2 className="mt-4 font-display text-3xl font-light text-slate-900">
+                                Your free Blueprint is already in your account
+                            </h2>
+                            <p className="mt-3 text-slate-600">
+                                Free members get one organized space. Upgrade to Plus or Premium
+                                to generate another plan — your existing spaces stay saved.
+                            </p>
+                            <div className="mt-8 flex flex-wrap gap-3">
+                                <a href="/#packages" className="btn-primary" data-testid="intake-upgrade-cta">
+                                    See Plus &amp; Premium
+                                </a>
+                                <Link to="/account" className="btn-ghost" data-testid="intake-view-spaces">
+                                    View my spaces
+                                </Link>
+                            </div>
+                        </div>
+                    ) : (
                     <div className="space-y-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
                         {/* 1. Space */}
                         <Field label="What kind of space are we working on?">
@@ -286,7 +355,7 @@ export default function Intake() {
                             </div>
                         </Field>
 
-                        {/* Contact */}
+                        {/* Contact + account */}
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <Field label="Your name">
                                 <input
@@ -304,10 +373,44 @@ export default function Intake() {
                                     onChange={set("email")}
                                     className="input"
                                     placeholder="jane@example.com"
+                                    disabled={Boolean(member)}
                                     data-testid="intake-email"
                                 />
                             </Field>
                         </div>
+                        {member ? (
+                            <p className="text-sm text-slate-500" data-testid="intake-signed-in">
+                                Signed in as {member.email}. This plan will be saved to your account.
+                            </p>
+                        ) : (
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                                <Field
+                                    label="Create a password to keep this plan"
+                                    hint="A free member account lets you come back to this space. First Blueprint is free."
+                                >
+                                    <input
+                                        type="password"
+                                        value={form.password}
+                                        onChange={set("password")}
+                                        className="input"
+                                        placeholder="At least 8 characters"
+                                        autoComplete="new-password"
+                                        data-testid="intake-password"
+                                    />
+                                </Field>
+                                <p className="mt-3 text-xs text-slate-600">
+                                    Already a member?{" "}
+                                    <Link
+                                        to={`/login?next=${encodeURIComponent(`/intake?plan=${planId}`)}`}
+                                        className="font-medium text-emerald-700 hover:text-emerald-800"
+                                        data-testid="intake-login-link"
+                                    >
+                                        Log in
+                                    </Link>
+                                    {" "}and we&apos;ll use that account instead.
+                                </p>
+                            </div>
+                        )}
 
                         <div className="border-t border-slate-100 pt-6">
                             <button
@@ -324,11 +427,12 @@ export default function Intake() {
                             </button>
                             <p className="mt-3 text-center text-xs text-slate-500">
                                 {plan.price === 0
-                                    ? "No payment. Your Blueprint arrives by email in about 2 minutes."
+                                    ? "No payment. Your Blueprint arrives by email in about 2 minutes and stays in My spaces."
                                     : "Secure payment via Stripe. Blueprint delivered by email after payment."}
                             </p>
                         </div>
                     </div>
+                    )}
                 </div>
             </main>
             <Footer />
