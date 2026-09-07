@@ -43,6 +43,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from blueprint_layers import layer_card_copy, resolve_layers
+
 # ──────────────────────────── Palette (site design system) ─────────────────────────────
 # Matches frontend/src/index.css — emerald / mint / slate / white
 EMERALD = HexColor("#059669")
@@ -1082,6 +1084,91 @@ def _principles_and_reset(
     return t
 
 
+def _layers_strip(layers: Dict[str, Any], width: float) -> Table:
+    """Customer-visible six Brain layers — compact 2×3 magazine cards."""
+    s = _styles()
+    cards = layer_card_copy(layers)
+    col_w = (width - 8) / 3
+    rows: List[List[Any]] = []
+    row: List[Any] = []
+    for num, title, body in cards:
+        inner = [
+            Paragraph(f"L{num}  {title}", s["label"]),
+            Spacer(1, 2),
+            Paragraph(body, s["bodySmall"]),
+        ]
+        row.append(_card(inner, col_w, pad=5))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        row += [""] * (3 - len(row))
+        rows.append(row)
+    t = Table(rows, colWidths=[col_w] * 3)
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ]
+        )
+    )
+    return t
+
+
+def _validation_checks(layers: Dict[str, Any], width: float) -> Table:
+    """Real validation — fit, flow, budget band, possession respect — not fluff scores."""
+    s = _styles()
+    val = (layers or {}).get("validation") or {}
+    items = [
+        ("Fit", val.get("fit") or {}),
+        ("Flow", val.get("flow") or {}),
+        ("Budget", val.get("budget_band") or {}),
+        ("Possessions", val.get("possession_respect") or {}),
+    ]
+    col_w = (width - 6) / 2
+    cards = []
+    for label, check in items:
+        status = str(check.get("status") or "watch").upper()
+        note = check.get("note") or ""
+        band = check.get("band") or ""
+        body = [
+            Paragraph(label.upper(), s["cardCat"]),
+            Paragraph(status, s["cardTitle"]),
+        ]
+        if band:
+            body.append(Paragraph(band, s["price"]))
+        if note:
+            body.append(Paragraph(note, s["cardMeta"]))
+        cards.append(_card(body, col_w, pad=5))
+    rows = [cards[0:2], cards[2:4]]
+    checks = Table(rows, colWidths=[col_w, col_w])
+    checks.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    extras: List[Any] = [checks]
+    conflicts = [c for c in (val.get("conflicts") or []) if c]
+    assumptions = [c for c in (val.get("assumptions") or []) if c]
+    if conflicts:
+        extras.append(Paragraph("Conflicts: " + "; ".join(conflicts[:3]), s["muted"]))
+    if assumptions:
+        extras.append(Paragraph("Assumptions: " + "; ".join(assumptions[:3]), s["muted"]))
+    wrap = Table([[e] for e in extras], colWidths=[width])
+    wrap.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    return wrap
+
+
 def _assessment_row(deliverable: Dict[str, Any], width: float) -> Table:
     s = _styles()
     data = _assessment(deliverable)
@@ -1221,11 +1308,15 @@ def build_pdf(
         author="FlowSpace",
     )
 
+    layers = resolve_layers(lead, deliverable)
     zones = deliverable.get("zones") or []
     needs = deliverable.get("needs") or []
     shopping = deliverable.get("shopping_list") or []
     strategy = deliverable.get("strategy") or []
     action_plan = deliverable.get("action_plan") or []
+    inst = layers.get("customer_instruction") or {}
+    if inst.get("do_this_week"):
+        action_plan = inst["do_this_week"]
     benefits = deliverable.get("benefits") or []
     intro = (
         deliverable.get("intro")
@@ -1276,10 +1367,16 @@ def build_pdf(
     )
     story.append(band)
 
+    # ── Six Brain layers (customer-visible structured reasoning)
+    story.append(Paragraph("SIX-LAYER REASONING  ·  OBSERVATION → INSTRUCTION", s["kicker"]))
+    story.append(Spacer(1, 2))
+    story.append(_layers_strip(layers, content_w))
+    story.append(Spacer(1, 3))
+
     # ── 01 Hero + 02/03 story already above + What's new
     left_w = content_w * 0.56
     right_w = content_w * 0.42
-    hero = _hero_block(images.get("front_view"), zones, left_w, 1.95 * inch)
+    hero = _hero_block(images.get("front_view"), zones, left_w, 1.72 * inch)
     right = [
         _section_head("01", "Project story", right_w),
         Paragraph(
@@ -1396,7 +1493,7 @@ def build_pdf(
     story.append(notes_card)
     story.append(Spacer(1, 3))
 
-    # ── 10 Assessment
+    # ── 10 Assessment + real validation (fit / flow / budget / possessions)
     story.append(
         KeepTogether(
             [
@@ -1405,6 +1502,10 @@ def build_pdf(
             ]
         )
     )
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("Validation — real checks, not room measurements.", s["muted"]))
+    story.append(Spacer(1, 2))
+    story.append(_validation_checks(layers, content_w))
 
     # ── Extra pages: customer photos
     customer_photos: List[Optional[bytes]] = images.get("customer_photos") or []

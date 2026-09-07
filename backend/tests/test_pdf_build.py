@@ -1,9 +1,14 @@
 """Unit tests for branded PDF generation (no Mongo / live API)."""
 import io
+import json
+from pathlib import Path
 
 from pypdf import PdfReader
 
+from blueprint_layers import ryan_answers
 from pdf_generator import build_pdf, plan_title, space_label
+
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bakeoff" / "garage_org_space.json"
 
 
 LEAD = {
@@ -12,6 +17,10 @@ LEAD = {
     "space_type": "garage",
     "style_prefs": ["minimal"],
     "desired_feeling": ["practical"],
+    "must_stay": "Existing workbench, kids' bikes",
+    "daily_improvement": "Park both cars and find the sports bag",
+    "budget": "100_300",
+    "storage_needs": ["tools", "sports"],
 }
 
 DELIVERABLE = {
@@ -77,7 +86,18 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "designer assessment" in low
     assert "Shopping Links" in text
     assert "The FlowSpace Design Team" in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 2
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
+    for layer_name in (
+        "Observation",
+        "Human need",
+        "Spatial constraint",
+        "Recommendation",
+        "Validation",
+        "Customer instruction",
+    ):
+        assert layer_name.lower() in low
+    assert "routine" in low or "park" in low
+    assert "workbench" in low or "possessions" in low
     assert "plan completeness" in low
     assert "measurement" in low
     assert "15 ft" not in text
@@ -107,4 +127,31 @@ def test_pdf_handles_empty_deliverable():
     assert "Closet Blueprint" in text
     assert "FlowSpace" in text
     assert "95%" in text
+    assert "observation" in text.lower()
     assert pdf[:5] == b"%PDF-"
+
+
+def test_bakeoff_fixture_pdf_answers_ryan_questions():
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    pdf = build_pdf(lead=doc["lead"], deliverable=doc["deliverable"], images={})
+    text = _text(pdf)
+    low = text.lower()
+    answers = ryan_answers(doc["deliverable"]["blueprint_layers"])
+
+    assert "Garage Organization Plan" in text
+    assert "Bedroom Design Plan" not in text
+    assert "observation" in low and "human need" in low
+    assert "spatial constraint" in low and "recommendation" in low
+    assert "validation" in low and "customer instruction" in low
+    assert "park both cars" in low
+    assert "workbench" in low
+    assert "95%" in text
+    assert "$100" in text or "100" in text
+    assert "227" in text or "budget" in low
+    assert "why" in low or "should work" in low or "routine is park" in low
+    assert "15 ft" not in text
+    assert "optional" in low
+    assert answers["routine"]
+    assert "workbench" in answers["possessions"].lower()
+    # Compact magazine plan — layers add a third page at most
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
