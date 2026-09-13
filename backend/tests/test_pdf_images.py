@@ -14,6 +14,8 @@ def test_image_keys_document_hero_and_detail_slots():
     assert "view_2" in IMAGE_BYTE_KEYS
     assert "view_3" in IMAGE_BYTE_KEYS
     assert "floor_plan" in IMAGE_BYTE_KEYS
+    assert "before" in IMAGE_BYTE_KEYS
+    assert "after" in IMAGE_BYTE_KEYS
 
 
 def test_coerce_rejects_urls_and_empty():
@@ -56,3 +58,20 @@ def test_normalize_empty_images_is_placeholder():
     assert images["front_view_kind"] == "placeholder"
     assert images["customer_photos"] == []
     assert images["view_1"] is None
+    assert images["before"] is None
+    assert images["after"] is None
+
+
+def test_assemble_derives_before_after_from_hero_and_photos():
+    images = assemble_pdf_images(
+        hero_bytes=b"flux",
+        hero_kind="organized",
+        customer_photos=[b"original", b"extra"],
+    )
+    assert images["before"] == b"original"
+    assert images["after"] == b"flux"
+    assert images["front_view"] == b"flux"
+
+    only_original = assemble_pdf_images(hero_bytes=b"photo", hero_kind="original")
+    assert only_original["before"] == b"photo"
+    assert only_original["after"] is None  # never invent an after

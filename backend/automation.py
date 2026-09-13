@@ -191,13 +191,17 @@ async def run_automation(
         images = assemble_pdf_images(
             hero_bytes=hero_bytes,
             hero_kind=hero_kind,
+            before=original_bytes,
+            after=organized_bytes,
             customer_photos=customer_photos,
             fetched=fetched,
         )
         logger.info(
-            "[automation] PDF images: hero=%s (%s bytes) views=%s/%s/%s floor_plan=%s photos=%d",
+            "[automation] PDF images: hero=%s (%s bytes) before=%s after=%s views=%s/%s/%s floor_plan=%s photos=%d",
             images.get("front_view_kind"),
             len(images.get("front_view") or b""),
+            "y" if images.get("before") else "n",
+            "y" if images.get("after") else "n",
             "y" if images.get("view_1") else "n",
             "y" if images.get("view_2") else "n",
             "y" if images.get("view_3") else "n",

@@ -23,14 +23,24 @@ view_1, view_2, view_3 : bytes | None
     Optional detail-card photos (admin extra renders). Unused slots stay
     as labeled zone cards — we do not duplicate the hero into every card.
 customer_photos : list[bytes]
-    Original customer uploads for later reference pages.
+    Original customer uploads for later reference pages (photos after the
+    first still get their own pages). The first upload is also ``before``.
+before : bytes | None
+    Last-page **Before** panel — the customer's original uploaded photo.
+    Derived from this key, else the first ``customer_photos`` item, else
+    ``front_view`` when ``front_view_kind="original"``.
+after : bytes | None
+    Last-page **After** panel — the FLUX organized render. Derived from
+    this key, else ``front_view`` when ``front_view_kind="organized"``.
+    Never invented. If FLUX failed, the panel is an honest empty state.
 
 UX when FLUX fails
 ------------------
 Show the customer's original photo as the hero, banner-labeled so it is
 not mistaken for the organized render. If no original exists, keep the
 branded mint placeholder. Either path is a soft fail — the PDF and
-email still go out.
+email still go out. The last page still shows Before | After: the
+available photo plus a labeled unavailable panel (no fake after).
 """
 from __future__ import annotations
 
@@ -38,13 +48,28 @@ import io
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # Slots whose values are a single image payload (not a list).
-IMAGE_BYTE_KEYS = ("front_view", "floor_plan", "view_1", "view_2", "view_3")
+IMAGE_BYTE_KEYS = (
+    "front_view",
+    "floor_plan",
+    "view_1",
+    "view_2",
+    "view_3",
+    "before",
+    "after",
+)
 HERO_KINDS = ("organized", "original", "placeholder")
 
 HERO_BANNER_ORGANIZED = "ORGANIZED VIEW — YOUR REAL SPACE, RE-ZONED"
 HERO_BANNER_ORIGINAL = "YOUR PHOTO — ORGANIZED VIEW UNAVAILABLE"
 HERO_PLACEHOLDER_LABEL = "Organized view coming soon"
 HERO_PLACEHOLDER_SUB = "Your photo, re-zoned — visual arrives with the plan"
+
+COMPARE_BEFORE_BANNER = "BEFORE — YOUR PHOTO"
+COMPARE_AFTER_BANNER = "AFTER — ORGANIZED VIEW"
+COMPARE_BEFORE_EMPTY = "Original photo not provided"
+COMPARE_BEFORE_EMPTY_SUB = "We compare against the photo you uploaded"
+COMPARE_AFTER_EMPTY = "Organized view unavailable"
+COMPARE_AFTER_EMPTY_SUB = "We do not invent an organized after"
 
 
 def coerce_image_bytes(src: Any) -> Optional[bytes]:
@@ -104,6 +129,8 @@ def assemble_pdf_images(
     view_1: Optional[bytes] = None,
     view_2: Optional[bytes] = None,
     view_3: Optional[bytes] = None,
+    before: Optional[bytes] = None,
+    after: Optional[bytes] = None,
     customer_photos: Optional[Iterable[Any]] = None,
     fetched: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -112,6 +139,8 @@ def assemble_pdf_images(
 
     In-memory hero bytes win over a GridFS re-fetch (``fetched['front_view']``).
     Detail / floor-plan slots use the explicit args, then ``fetched``.
+    ``before`` / ``after`` feed the last-page comparison; they are derived
+    from the hero + first customer photo when omitted.
     """
     fetched = dict(fetched or {})
     kind = (hero_kind or "placeholder").strip().lower()
@@ -124,6 +153,19 @@ def assemble_pdf_images(
     elif kind == "placeholder":
         kind = "organized"
 
+    photos = coerce_photo_list(
+        customer_photos if customer_photos is not None else fetched.get("customer_photos")
+    )
+    before_b = coerce_image_bytes(before) or coerce_image_bytes(fetched.get("before"))
+    after_b = coerce_image_bytes(after) or coerce_image_bytes(fetched.get("after"))
+    if not before_b:
+        if photos:
+            before_b = photos[0]
+        elif kind == "original" and front:
+            before_b = front
+    if not after_b and kind == "organized" and front:
+        after_b = front
+
     return {
         "front_view": front,
         "front_view_kind": kind,
@@ -131,7 +173,9 @@ def assemble_pdf_images(
         "view_1": coerce_image_bytes(view_1) or coerce_image_bytes(fetched.get("view_1")),
         "view_2": coerce_image_bytes(view_2) or coerce_image_bytes(fetched.get("view_2")),
         "view_3": coerce_image_bytes(view_3) or coerce_image_bytes(fetched.get("view_3")),
-        "customer_photos": coerce_photo_list(customer_photos if customer_photos is not None else fetched.get("customer_photos")),
+        "before": before_b,
+        "after": after_b,
+        "customer_photos": photos,
     }
 
 
@@ -145,5 +189,7 @@ def normalize_pdf_images(images: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         view_1=images.get("view_1"),
         view_2=images.get("view_2"),
         view_3=images.get("view_3"),
+        before=images.get("before"),
+        after=images.get("after"),
         customer_photos=images.get("customer_photos"),
     )

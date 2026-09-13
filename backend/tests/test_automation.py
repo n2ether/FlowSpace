@@ -146,6 +146,8 @@ def test_automation_passes_flux_bytes_even_when_gridfs_upload_fails(monkeypatch)
     images = captured["images"]
     assert images["front_view"] == flux
     assert images["front_view_kind"] == "organized"
+    assert images["after"] == flux
+    assert images["before"] is None
     from pypdf import PdfReader
 
     # The captured images were also rendered; re-check via a direct build
@@ -180,6 +182,8 @@ def test_automation_uses_labeled_original_when_flux_fails(monkeypatch):
     images = captured["images"]
     assert images["front_view"] == original
     assert images["front_view_kind"] == "original"
+    assert images["before"] == original
+    assert images["after"] is None
 
 
 def test_automation_placeholder_when_flux_fails_and_no_photo(monkeypatch):
@@ -206,3 +210,23 @@ def test_automation_does_not_crash_pipeline_on_flux_failure(monkeypatch):
     sent, captured, db, fs = _run(monkeypatch, generate=boom)
     assert sent is True
     assert db.leads.docs["lead-img-1"]["status"] == "delivered"
+
+
+def test_automation_passes_before_and_after_when_both_exist(monkeypatch):
+    original = _jpeg((110, 90, 60))
+    flux = _jpeg((10, 90, 50))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    captured: Dict[str, Any] = {}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=lambda **k: (flux, "image/jpeg"),
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    images = captured["images"]
+    assert images["before"] == original
+    assert images["after"] == flux
+    assert images["front_view"] == flux
+    assert images["front_view_kind"] == "organized"

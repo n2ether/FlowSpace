@@ -8,8 +8,8 @@ Uses the bake-off garage fixture so the six Brain layers are customer-visible.
 
 Writes:
     backend/samples/flowspace-blueprint-sample.pdf
-        With a synthetic organized-space JPEG in ``front_view`` (what live
-        automation embeds after FLUX succeeds).
+        Synthetic original (``before``) + organized FLUX stand-in (``after`` /
+        ``front_view``). Last page is the Before | After comparison.
     backend/samples/flowspace-blueprint-sample-placeholders.pdf
         Same plan with ``images={}`` — mint “Organized view coming soon” hero.
     backend/samples/flowspace-blueprint-sample-pageN.png
@@ -39,6 +39,24 @@ FIXTURE = ROOT / "fixtures" / "bakeoff" / "garage_org_space.json"
 def load_fixture() -> tuple[dict, dict]:
     doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     return doc["lead"], doc["deliverable"]
+
+
+def _synthetic_original_jpeg(width: int = 960, height: int = 640) -> bytes:
+    """Stand-in for the customer's uploaded before photo."""
+    img = Image.new("RGB", (width, height), (196, 176, 148))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, int(height * 0.62), width, height], fill=(92, 78, 58))
+    draw.rectangle([0, 0, width, int(height * 0.62)], fill=(168, 148, 120))
+    # Same window placement as the organized render (shell preserved)
+    draw.rectangle([int(width * 0.62), 48, int(width * 0.90), int(height * 0.36)], fill=(140, 168, 188), outline=(80, 70, 50), width=6)
+    # Clutter piles
+    for i, x0 in enumerate((48, 170, 292, 414)):
+        draw.rectangle([x0, 90 + (i % 2) * 20, x0 + 100, int(height * 0.58)], fill=(110, 72, 48), outline=(70, 50, 30), width=2)
+    draw.ellipse([80, int(height * 0.68), 200, int(height * 0.88)], fill=(70, 60, 50))
+    draw.ellipse([240, int(height * 0.72), 360, int(height * 0.92)], fill=(90, 70, 40))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
 
 
 def _synthetic_organized_jpeg(width: int = 960, height: int = 640) -> bytes:
@@ -89,15 +107,20 @@ def main() -> None:
     empty_pdf.write_bytes(empty)
     print(f"wrote {empty_pdf} ({len(empty)} bytes) images={{}}")
 
+    original = _synthetic_original_jpeg()
+    organized = _synthetic_organized_jpeg()
     images = assemble_pdf_images(
-        hero_bytes=_synthetic_organized_jpeg(),
+        hero_bytes=organized,
         hero_kind="organized",
+        before=original,
+        after=organized,
         view_1=_synthetic_organized_jpeg(480, 320),
+        customer_photos=[original],
     )
     filled = build_pdf(lead=lead, deliverable=deliverable, images=images)
     filled_pdf = out_dir / "flowspace-blueprint-sample.pdf"
     filled_pdf.write_bytes(filled)
-    print(f"wrote {filled_pdf} ({len(filled)} bytes) with front_view + view_1")
+    print(f"wrote {filled_pdf} ({len(filled)} bytes) with before + after + front_view")
 
     _rasterize(filled, out_dir, "flowspace-blueprint-sample")
     _rasterize(empty, out_dir, "flowspace-blueprint-placeholders")

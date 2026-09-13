@@ -871,9 +871,9 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
             b = await _resolve_image_bytes(url, request)
             if b:
                 customer_photos.append(b)
-    # Same hero policy as live automation: organized render, else labeled original.
-    first_original = None
-    if not fetched.get("front_view"):
+    # First customer photo is the Before panel even when extra reference pages are off.
+    first_original = customer_photos[0] if customer_photos else None
+    if not first_original:
         first_photo = (lead.get("photos") or [None])[0]
         if first_photo:
             url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
@@ -885,6 +885,8 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
     images = assemble_pdf_images(
         hero_bytes=hero_bytes,
         hero_kind=hero_kind,
+        before=first_original,
+        after=fetched.get("front_view"),
         customer_photos=customer_photos,
         fetched=fetched,
     )

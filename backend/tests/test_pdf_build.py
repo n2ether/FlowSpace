@@ -8,7 +8,12 @@ from pypdf import PdfReader
 
 from blueprint_layers import ryan_answers
 from pdf_generator import build_pdf, plan_title, space_label
-from pdf_images import HERO_PLACEHOLDER_LABEL
+from pdf_images import (
+    COMPARE_AFTER_EMPTY,
+    COMPARE_BEFORE_BANNER,
+    COMPARE_BEFORE_EMPTY,
+    HERO_PLACEHOLDER_LABEL,
+)
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bakeoff" / "garage_org_space.json"
 
@@ -150,6 +155,8 @@ def test_pdf_placeholder_when_images_missing():
     text = _text(pdf)
     assert HERO_PLACEHOLDER_LABEL in text
     assert _page_image_count(pdf, 0) == 0
+    assert "BEFORE & AFTER" not in text
+    assert COMPARE_BEFORE_BANNER not in text
 
 
 def test_pdf_embeds_front_view_bytes_in_hero():
@@ -194,6 +201,61 @@ def test_pdf_labels_original_photo_as_interim_hero():
     assert "YOUR PHOTO" in text
     assert "ORGANIZED VIEW UNAVAILABLE" in text
     assert _page_image_count(pdf, 0) >= 1
+
+
+def test_pdf_last_page_before_after_when_both_present():
+    before = _jpeg_bytes((140, 110, 70), (640, 420))
+    after = _jpeg_bytes((20, 110, 70), (640, 420))
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={
+            "front_view": after,
+            "front_view_kind": "organized",
+            "before": before,
+            "after": after,
+        },
+    )
+    reader = PdfReader(io.BytesIO(pdf))
+    assert len(reader.pages) >= 4
+    last = reader.pages[-1]
+    last_text = last.extract_text() or ""
+    assert "Before & after" in last_text or "BEFORE" in last_text
+    assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in last_text
+    assert "YOUR PHOTO" in last_text
+    assert "ORGANIZED VIEW" in last_text
+    assert COMPARE_BEFORE_EMPTY not in last_text
+    assert COMPARE_AFTER_EMPTY not in last_text
+    assert len(last.images) >= 2
+    # Page 1 hero still shows the organized render
+    assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
+    assert _page_image_count(pdf, 0) >= 1
+
+
+def test_pdf_last_page_honest_empty_when_only_after():
+    after = _jpeg_bytes((20, 110, 70), (400, 280))
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"front_view": after, "front_view_kind": "organized"},
+    )
+    last_text = PdfReader(io.BytesIO(pdf)).pages[-1].extract_text() or ""
+    assert COMPARE_BEFORE_EMPTY in last_text
+    assert COMPARE_AFTER_EMPTY not in last_text
+    assert "ORGANIZED VIEW" in last_text
+
+
+def test_pdf_last_page_honest_empty_when_only_before():
+    original = _jpeg_bytes((140, 110, 70), (400, 280))
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"before": original, "front_view": original, "front_view_kind": "original"},
+    )
+    last_text = PdfReader(io.BytesIO(pdf)).pages[-1].extract_text() or ""
+    assert COMPARE_AFTER_EMPTY in last_text
+    assert COMPARE_BEFORE_EMPTY not in last_text
+    assert "YOUR PHOTO" in last_text
 
 
 def test_pdf_ignores_non_bytes_front_view():
