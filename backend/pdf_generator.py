@@ -44,6 +44,20 @@ from reportlab.platypus import (
 )
 
 from blueprint_layers import layer_card_copy, resolve_layers
+from pdf_images import (
+    COMPARE_AFTER_BANNER,
+    COMPARE_AFTER_EMPTY,
+    COMPARE_AFTER_EMPTY_SUB,
+    COMPARE_BEFORE_BANNER,
+    COMPARE_BEFORE_EMPTY,
+    COMPARE_BEFORE_EMPTY_SUB,
+    HERO_BANNER_ORGANIZED,
+    HERO_BANNER_ORIGINAL,
+    HERO_PLACEHOLDER_LABEL,
+    HERO_PLACEHOLDER_SUB,
+    coerce_image_bytes,
+    normalize_pdf_images,
+)
 
 # ──────────────────────────── Palette (site design system) ─────────────────────────────
 # Matches frontend/src/index.css — emerald / mint / slate / white
@@ -281,10 +295,11 @@ def _styles():
 
 # ──────────────────────────── Primitives ─────────────────────────────
 def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
-    if not src:
+    data = coerce_image_bytes(src)
+    if not data:
         return _placeholder(width, height, "Image not provided")
     try:
-        bio = io.BytesIO(src)
+        bio = io.BytesIO(data)
         bio.seek(0)
         img = PlatypusImage(bio, width=width, height=height, kind="proportional")
         img.hAlign = "CENTER"
@@ -293,21 +308,27 @@ def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
         return _placeholder(width, height, "Image unavailable")
 
 
-def _cover_image(src: Optional[bytes], width: float, height: float) -> Any:
-    """Crop-to-fill a box so the hero reads like a magazine photo."""
-    if not src:
-        return _placeholder(
-            width, height, "Organized view coming soon", "Your photo, re-zoned — visual arrives with the plan"
-        )
+def _cover_image(
+    src: Optional[bytes],
+    width: float,
+    height: float,
+    *,
+    missing_label: str = "Image not provided",
+    missing_sublabel: str = "",
+) -> Any:
+    """Letterbox a photo into a box so the hero reads like a magazine image."""
+    data = coerce_image_bytes(src)
+    if not data:
+        return _placeholder(width, height, missing_label, missing_sublabel)
     try:
-        ir = ImageReader(io.BytesIO(src))
+        ir = ImageReader(io.BytesIO(data))
         iw, ih = ir.getSize()
         if iw <= 0 or ih <= 0:
             raise ValueError("empty")
         scale = max(width / iw, height / ih)
         draw_w, draw_h = iw * scale, ih * scale
         # ReportLab Image doesn't crop; we letterbox on white instead of inventing pixels.
-        img = PlatypusImage(io.BytesIO(src), width=min(draw_w, width), height=min(draw_h, height))
+        img = PlatypusImage(io.BytesIO(data), width=min(draw_w, width), height=min(draw_h, height))
         img.hAlign = "CENTER"
         return img
     except Exception:
@@ -682,11 +703,24 @@ def _hero_block(
     zones: List[Dict[str, str]],
     width: float,
     height: float,
+    kind: str = "organized",
 ) -> Table:
     s = _styles()
-    photo = _cover_image(img_bytes, width, height - 14)
+    data = coerce_image_bytes(img_bytes)
+    if data:
+        photo = _cover_image(data, width, height - 14)
+        banner_text = HERO_BANNER_ORIGINAL if kind == "original" else HERO_BANNER_ORGANIZED
+    else:
+        photo = _cover_image(
+            None,
+            width,
+            height - 14,
+            missing_label=HERO_PLACEHOLDER_LABEL,
+            missing_sublabel=HERO_PLACEHOLDER_SUB,
+        )
+        banner_text = HERO_BANNER_ORGANIZED
     banner = Table(
-        [[Paragraph("ORGANIZED VIEW — YOUR REAL SPACE, RE-ZONED", s["banner"])]],
+        [[Paragraph(banner_text, s["banner"])]],
         colWidths=[width],
         rowHeights=[14],
     )
@@ -739,6 +773,93 @@ def _hero_block(
         )
     )
     return stack
+
+
+def _compare_panel(
+    img_bytes: Optional[bytes],
+    width: float,
+    height: float,
+    banner: str,
+    empty_label: str,
+    empty_sub: str,
+) -> Table:
+    s = _styles()
+    data = coerce_image_bytes(img_bytes)
+    if data:
+        photo = _cover_image(data, width, height)
+    else:
+        photo = _cover_image(
+            None,
+            width,
+            height,
+            missing_label=empty_label,
+            missing_sublabel=empty_sub,
+        )
+    head = Table(
+        [[Paragraph(banner, s["banner"])]],
+        colWidths=[width],
+        rowHeights=[16],
+    )
+    head.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    stack = Table([[head], [photo]], colWidths=[width])
+    stack.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 1), (0, 1), WHITE),
+            ]
+        )
+    )
+    return stack
+
+
+def _before_after_section(
+    before: Optional[bytes],
+    after: Optional[bytes],
+    width: float,
+) -> Table:
+    gap = 10
+    col_w = (width - gap) / 2
+    photo_h = 4.55 * inch
+    left = _compare_panel(
+        before, col_w, photo_h,
+        COMPARE_BEFORE_BANNER, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
+    )
+    right = _compare_panel(
+        after, col_w, photo_h,
+        COMPARE_AFTER_BANNER, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
+    )
+    t = Table([[left, right]], colWidths=[col_w, col_w])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), gap),
+                ("LEFTPADDING", (1, 0), (1, 0), 0),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+            ]
+        )
+    )
+    return t
 
 
 def _whats_new(needs: List[str], zones: List[Dict[str, str]], width: float) -> List[Any]:
@@ -1273,9 +1394,11 @@ def build_pdf(
 
     `lead` — questionnaire/lead document
     `deliverable` — zones, needs, shopping_list, strategy, action_plan, …
-    `images` — front_view, floor_plan, view_1/2/3, customer_photos
+    `images` — see ``pdf_images``: front_view (+ front_view_kind), floor_plan,
+    view_1/2/3, before, after, customer_photos. Values must be image bytes, not URLs.
     """
     _register_fonts()
+    images = normalize_pdf_images(images)
     buf = io.BytesIO()
     s = _styles()
     space_key = lead.get("space_type") or "space"
@@ -1376,7 +1499,13 @@ def build_pdf(
     # ── 01 Hero + 02/03 story already above + What's new
     left_w = content_w * 0.56
     right_w = content_w * 0.42
-    hero = _hero_block(images.get("front_view"), zones, left_w, 1.72 * inch)
+    hero = _hero_block(
+        images.get("front_view"),
+        zones,
+        left_w,
+        1.72 * inch,
+        kind=str(images.get("front_view_kind") or "organized"),
+    )
     right = [
         _section_head("01", "Project story", right_w),
         Paragraph(
@@ -1507,11 +1636,15 @@ def build_pdf(
     story.append(Spacer(1, 2))
     story.append(_validation_checks(layers, content_w))
 
-    # ── Extra pages: customer photos
+    # ── Extra pages: additional customer photos (first upload is the Before panel)
     customer_photos: List[Optional[bytes]] = images.get("customer_photos") or []
+    before_bytes = coerce_image_bytes(images.get("before"))
+    after_bytes = coerce_image_bytes(images.get("after"))
     included_photos = 0
     for idx, b in enumerate(customer_photos, 1):
         if not b:
+            continue
+        if before_bytes and idx == 1:
             continue
         included_photos += 1
         story.append(PageBreak())
@@ -1551,6 +1684,21 @@ def build_pdf(
             link_bits.append(_links_table(links, content_w))
         if link_bits:
             story.append(KeepTogether(link_bits))
+
+    # ── Last page: Before | After (Ryan) — only when at least one real photo exists
+    if before_bytes or after_bytes:
+        story.append(PageBreak())
+        story.append(_section_head("11", "Before & after — your space, re-zoned", content_w))
+        story.append(
+            Paragraph(
+                "Your original photo on the left. The organized view on the right — "
+                "same windows and walls (~95%). Paint is optional — not applied in the visual. "
+                "We do not invent an after image.",
+                s["muted"],
+            )
+        )
+        story.append(Spacer(1, 8))
+        story.append(_before_after_section(before_bytes, after_bytes, content_w))
 
     doc.build(story)
     return buf.getvalue()

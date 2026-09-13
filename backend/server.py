@@ -18,6 +18,7 @@ import stripe as stripe_sdk
 import httpx
 
 from pdf_generator import build_pdf
+from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
@@ -692,7 +693,7 @@ async def upload_photo(file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
     file_id = await fs_bucket.upload_from_stream(
         file.filename or "upload",
-        contents,
+        as_gridfs_source(contents),
         metadata={"content_type": ct, "uploaded_at": _iso(datetime.now(timezone.utc))},
     )
     return {"id": str(file_id), "url": f"/api/uploads/photo/{file_id}"}
@@ -838,7 +839,7 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
     ext = "jpg" if "jpeg" in (mime or "") else "png"
     file_id = await fs_bucket.upload_from_stream(
         f"ai_{slot}_{lead_id}.{ext}",
-        png_bytes,
+        as_gridfs_source(png_bytes),
         metadata={"content_type": mime or "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "ai", "lead_id": lead_id, "slot": slot},
     )
     url = f"/api/uploads/photo/{file_id}"
@@ -856,12 +857,12 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {"lead_id": lead_id}
-    images: Dict[str, Any] = {
-        "front_view":  await _resolve_image_bytes(d.get("front_view_url"), request),
-        "floor_plan":  await _resolve_image_bytes(d.get("floor_plan_url"), request),
-        "view_1":      await _resolve_image_bytes(d.get("view_1_url"), request),
-        "view_2":      await _resolve_image_bytes(d.get("view_2_url"), request),
-        "view_3":      await _resolve_image_bytes(d.get("view_3_url"), request),
+    fetched = {
+        "front_view": await _resolve_image_bytes(d.get("front_view_url"), request),
+        "floor_plan": await _resolve_image_bytes(d.get("floor_plan_url"), request),
+        "view_1": await _resolve_image_bytes(d.get("view_1_url"), request),
+        "view_2": await _resolve_image_bytes(d.get("view_2_url"), request),
+        "view_3": await _resolve_image_bytes(d.get("view_3_url"), request),
     }
     customer_photos = []
     if d.get("include_customer_photos", True):
@@ -870,7 +871,25 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
             b = await _resolve_image_bytes(url, request)
             if b:
                 customer_photos.append(b)
-    images["customer_photos"] = customer_photos
+    # First customer photo is the Before panel even when extra reference pages are off.
+    first_original = customer_photos[0] if customer_photos else None
+    if not first_original:
+        first_photo = (lead.get("photos") or [None])[0]
+        if first_photo:
+            url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+            first_original = await _resolve_image_bytes(url, request)
+    hero_bytes, hero_kind = choose_hero(
+        organized_bytes=fetched.get("front_view"),
+        original_bytes=first_original,
+    )
+    images = assemble_pdf_images(
+        hero_bytes=hero_bytes,
+        hero_kind=hero_kind,
+        before=first_original,
+        after=fetched.get("front_view"),
+        customer_photos=customer_photos,
+        fetched=fetched,
+    )
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
     safe_name = (lead.get("name") or "client").replace(" ", "_")
     space = (lead.get("space_type") or "space").capitalize()
