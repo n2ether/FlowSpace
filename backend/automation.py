@@ -11,21 +11,46 @@ Full flow:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from bson import ObjectId
+from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from email_service import send_blueprint
 from pdf_generator import build_pdf
+from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 
 logger = logging.getLogger(__name__)
 
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
+
+
+async def _fetch_gridfs_bytes(fs_bucket, url: Optional[str]) -> Optional[bytes]:
+    """Read a GridFS photo from a relative ``/api/uploads/photo/{id}`` URL."""
+    if not url or "/api/uploads/photo/" not in str(url):
+        return None
+    try:
+        photo_id = str(url).rsplit("/", 1)[-1]
+        try:
+            oid = ObjectId(photo_id)
+        except Exception:
+            logger.warning("[automation] Invalid GridFS photo id in %s", url)
+            return None
+        stream = await fs_bucket.open_download_stream(oid)
+        data = await stream.read()
+        return data or None
+    except NoFile:
+        logger.warning("[automation] GridFS file missing for %s", url)
+        return None
+    except Exception as exc:
+        logger.warning("[automation] Could not fetch image %s: %s", url, exc)
+        return None
 
 
 async def run_automation(
@@ -69,88 +94,116 @@ async def run_automation(
 
         # ── Step 2: AI Image Generation ──────────────────────────────────
         logger.info("[automation] Step 2: Generating room rendering via Replicate...")
-        image_bytes: Optional[bytes] = None
+        organized_bytes: Optional[bytes] = None
+        original_bytes: Optional[bytes] = None
         image_mime: str = "image/jpeg"
-        try:
-            # Fetch the customer's own uploaded photo (if any) so the AI
-            # transforms their ACTUAL room instead of inventing one from scratch.
-            reference_photo_bytes: Optional[bytes] = None
-            first_photo = (lead.get("photos") or [None])[0]
-            if first_photo:
-                photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
-                if photo_url and "/api/uploads/photo/" in photo_url:
-                    try:
-                        from bson import ObjectId
-                        photo_id = photo_url.rsplit("/", 1)[-1]
-                        stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
-                        reference_photo_bytes = await stream.read()
-                        logger.info("[automation] Using customer's uploaded photo as render reference")
-                    except Exception as fetch_err:
-                        logger.warning("[automation] Could not fetch customer photo: %s", fetch_err)
 
-            image_bytes, image_mime = await generate_front_view(
+        # Fetch the customer's own uploaded photo (if any) so FLUX Kontext
+        # transforms their ACTUAL room — and so we can use it as a labeled
+        # interim hero if generation fails.
+        first_photo = (lead.get("photos") or [None])[0]
+        if first_photo:
+            photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+            original_bytes = await _fetch_gridfs_bytes(fs_bucket, photo_url)
+            if original_bytes:
+                logger.info("[automation] Using customer's uploaded photo as render reference")
+
+        try:
+            organized_bytes, image_mime = await generate_front_view(
                 lead=lead,
                 deliverable=plan,
                 fs_bucket=fs_bucket,
-                reference_photo_bytes=reference_photo_bytes,
+                reference_photo_bytes=original_bytes,
             )
-            ext = "jpg" if "jpeg" in image_mime else "png"
-            file_id = await fs_bucket.upload_from_stream(
-                f"ai_front_view_{lead_id}.{ext}",
-                image_bytes,
-                metadata={
-                    "content_type": image_mime,
-                    "uploaded_at": _iso(datetime.now(timezone.utc)),
-                    "source": "automation",
-                    "lead_id": lead_id,
-                },
+            logger.info(
+                "[automation] FLUX organized render ready: %d bytes (%s)",
+                len(organized_bytes or b""),
+                image_mime,
             )
-            front_view_url = f"/api/uploads/photo/{file_id}"
-            await db.deliverables.update_one(
-                {"lead_id": lead_id},
-                {"$set": {"front_view_url": front_view_url}},
-            )
-            logger.info("[automation] Rendering saved: %s", front_view_url)
         except Exception as img_err:
-            logger.warning("[automation] Image generation failed (continuing without): %s", img_err)
-            image_bytes = None
-            front_view_url = None
+            logger.warning(
+                "[automation] FLUX generation failed (soft-fail, PDF continues): %s",
+                img_err,
+            )
+            organized_bytes = None
+
+        # Persist the organized render when we have one. Upload failure must
+        # NOT discard in-memory bytes — those still go into build_pdf().
+        if organized_bytes:
+            try:
+                ext = "jpg" if "jpeg" in image_mime else "png"
+                file_id = await fs_bucket.upload_from_stream(
+                    f"ai_front_view_{lead_id}.{ext}",
+                    as_gridfs_source(organized_bytes),
+                    metadata={
+                        "content_type": image_mime,
+                        "uploaded_at": _iso(datetime.now(timezone.utc)),
+                        "source": "automation",
+                        "lead_id": lead_id,
+                    },
+                )
+                front_view_url = f"/api/uploads/photo/{file_id}"
+                await db.deliverables.update_one(
+                    {"lead_id": lead_id},
+                    {"$set": {"front_view_url": front_view_url, "front_view_kind": "organized"}},
+                )
+                logger.info("[automation] Rendering saved: %s", front_view_url)
+            except Exception as upload_err:
+                logger.warning(
+                    "[automation] GridFS upload failed; keeping in-memory FLUX bytes: %s",
+                    upload_err,
+                )
 
         # ── Step 3: Build PDF ────────────────────────────────────────────
         logger.info("[automation] Step 3: Building PDF...")
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
 
-        # Resolve customer photos from GridFS
-        from bson import ObjectId
-        from gridfs.errors import NoFile
-
-        async def _fetch_bytes(url: Optional[str]) -> Optional[bytes]:
-            if not url:
-                return None
-            try:
-                if "/api/uploads/photo/" in url:
-                    photo_id = url.rsplit("/", 1)[-1]
-                    oid = ObjectId(photo_id)
-                    stream = await fs_bucket.open_download_stream(oid)
-                    return await stream.read()
-            except Exception:
-                return None
-            return None
-
-        images = {
-            "front_view": await _fetch_bytes(deliverable_doc.get("front_view_url")),
-            "floor_plan": await _fetch_bytes(deliverable_doc.get("floor_plan_url")),
-            "view_1": await _fetch_bytes(deliverable_doc.get("view_1_url")),
-            "view_2": await _fetch_bytes(deliverable_doc.get("view_2_url")),
-            "view_3": await _fetch_bytes(deliverable_doc.get("view_3_url")),
+        fetched = {
+            "front_view": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("front_view_url")),
+            "floor_plan": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("floor_plan_url")),
+            "view_1": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_1_url")),
+            "view_2": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_2_url")),
+            "view_3": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_3_url")),
         }
         customer_photos = []
         for p in (lead.get("photos") or [])[:6]:
             url = p if isinstance(p, str) else (p.get("url") if isinstance(p, dict) else None)
-            b = await _fetch_bytes(url)
+            b = await _fetch_gridfs_bytes(fs_bucket, url)
             if b:
                 customer_photos.append(b)
-        images["customer_photos"] = customer_photos
+
+        # Prefer this-run FLUX bytes, then a previously stored organized render,
+        # then the labeled original photo — never drop a real image for a mint panel.
+        hero_bytes, hero_kind = choose_hero(
+            organized_bytes=organized_bytes or fetched.get("front_view"),
+            original_bytes=original_bytes,
+        )
+        if hero_kind == "original":
+            logger.warning(
+                "[automation] FLUX unavailable — using labeled customer original as interim hero (%d bytes)",
+                len(hero_bytes or b""),
+            )
+        elif hero_kind == "placeholder":
+            logger.warning("[automation] No FLUX render and no original photo — branded placeholder hero")
+        else:
+            logger.info("[automation] Hero source=organized (%d bytes)", len(hero_bytes or b""))
+
+        images = assemble_pdf_images(
+            hero_bytes=hero_bytes,
+            hero_kind=hero_kind,
+            customer_photos=customer_photos,
+            fetched=fetched,
+        )
+        logger.info(
+            "[automation] PDF images: hero=%s (%s bytes) views=%s/%s/%s floor_plan=%s photos=%d",
+            images.get("front_view_kind"),
+            len(images.get("front_view") or b""),
+            "y" if images.get("view_1") else "n",
+            "y" if images.get("view_2") else "n",
+            "y" if images.get("view_3") else "n",
+            "y" if images.get("floor_plan") else "n",
+            len(customer_photos),
+        )
 
         pdf_bytes = build_pdf(lead=lead, deliverable=deliverable_doc, images=images)
         logger.info("[automation] PDF built: %d bytes", len(pdf_bytes))

@@ -3,10 +3,12 @@ import io
 import json
 from pathlib import Path
 
+from PIL import Image
 from pypdf import PdfReader
 
 from blueprint_layers import ryan_answers
 from pdf_generator import build_pdf, plan_title, space_label
+from pdf_images import HERO_PLACEHOLDER_LABEL
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bakeoff" / "garage_org_space.json"
 
@@ -53,6 +55,18 @@ DELIVERABLE = {
 def _text(pdf_bytes: bytes) -> str:
     reader = PdfReader(io.BytesIO(pdf_bytes))
     return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
+def _jpeg_bytes(color=(16, 92, 64), size=(480, 320)) -> bytes:
+    img = Image.new("RGB", size, color)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return buf.getvalue()
+
+
+def _page_image_count(pdf_bytes: bytes, page: int = 0) -> int:
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return len(reader.pages[page].images)
 
 
 def test_plan_titles_are_space_aware_not_bedroom_generic():
@@ -129,6 +143,67 @@ def test_pdf_handles_empty_deliverable():
     assert "95%" in text
     assert "observation" in text.lower()
     assert pdf[:5] == b"%PDF-"
+
+
+def test_pdf_placeholder_when_images_missing():
+    pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
+    text = _text(pdf)
+    assert HERO_PLACEHOLDER_LABEL in text
+    assert _page_image_count(pdf, 0) == 0
+
+
+def test_pdf_embeds_front_view_bytes_in_hero():
+    organized = _jpeg_bytes((20, 110, 70), (640, 420))
+    empty = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"front_view": organized, "front_view_kind": "organized"},
+    )
+    text = _text(pdf)
+    assert HERO_PLACEHOLDER_LABEL not in text
+    assert "ORGANIZED VIEW" in text
+    assert "YOUR PHOTO" not in text or "RE-ZONED" in text
+    assert _page_image_count(pdf, 0) >= 1
+    assert len(pdf) > len(empty) + 800
+
+
+def test_pdf_embeds_detail_card_views_when_provided():
+    hero = _jpeg_bytes((20, 110, 70), (400, 280))
+    v1 = _jpeg_bytes((40, 80, 50), (200, 140))
+    v2 = _jpeg_bytes((50, 90, 60), (200, 140))
+    v3 = _jpeg_bytes((30, 70, 40), (200, 140))
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3},
+    )
+    assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
+    assert _page_image_count(pdf, 0) >= 4
+
+
+def test_pdf_labels_original_photo_as_interim_hero():
+    original = _jpeg_bytes((90, 80, 60), (400, 280))
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"front_view": original, "front_view_kind": "original"},
+    )
+    text = _text(pdf)
+    assert HERO_PLACEHOLDER_LABEL not in text
+    assert "YOUR PHOTO" in text
+    assert "ORGANIZED VIEW UNAVAILABLE" in text
+    assert _page_image_count(pdf, 0) >= 1
+
+
+def test_pdf_ignores_non_bytes_front_view():
+    pdf = build_pdf(
+        lead=LEAD,
+        deliverable=DELIVERABLE,
+        images={"front_view": "/api/uploads/photo/not-bytes"},
+    )
+    assert HERO_PLACEHOLDER_LABEL in _text(pdf)
+    assert _page_image_count(pdf, 0) == 0
 
 
 def test_bakeoff_fixture_pdf_answers_ryan_questions():

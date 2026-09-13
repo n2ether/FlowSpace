@@ -44,6 +44,14 @@ from reportlab.platypus import (
 )
 
 from blueprint_layers import layer_card_copy, resolve_layers
+from pdf_images import (
+    HERO_BANNER_ORGANIZED,
+    HERO_BANNER_ORIGINAL,
+    HERO_PLACEHOLDER_LABEL,
+    HERO_PLACEHOLDER_SUB,
+    coerce_image_bytes,
+    normalize_pdf_images,
+)
 
 # ──────────────────────────── Palette (site design system) ─────────────────────────────
 # Matches frontend/src/index.css — emerald / mint / slate / white
@@ -281,10 +289,11 @@ def _styles():
 
 # ──────────────────────────── Primitives ─────────────────────────────
 def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
-    if not src:
+    data = coerce_image_bytes(src)
+    if not data:
         return _placeholder(width, height, "Image not provided")
     try:
-        bio = io.BytesIO(src)
+        bio = io.BytesIO(data)
         bio.seek(0)
         img = PlatypusImage(bio, width=width, height=height, kind="proportional")
         img.hAlign = "CENTER"
@@ -293,21 +302,27 @@ def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
         return _placeholder(width, height, "Image unavailable")
 
 
-def _cover_image(src: Optional[bytes], width: float, height: float) -> Any:
-    """Crop-to-fill a box so the hero reads like a magazine photo."""
-    if not src:
-        return _placeholder(
-            width, height, "Organized view coming soon", "Your photo, re-zoned — visual arrives with the plan"
-        )
+def _cover_image(
+    src: Optional[bytes],
+    width: float,
+    height: float,
+    *,
+    missing_label: str = "Image not provided",
+    missing_sublabel: str = "",
+) -> Any:
+    """Letterbox a photo into a box so the hero reads like a magazine image."""
+    data = coerce_image_bytes(src)
+    if not data:
+        return _placeholder(width, height, missing_label, missing_sublabel)
     try:
-        ir = ImageReader(io.BytesIO(src))
+        ir = ImageReader(io.BytesIO(data))
         iw, ih = ir.getSize()
         if iw <= 0 or ih <= 0:
             raise ValueError("empty")
         scale = max(width / iw, height / ih)
         draw_w, draw_h = iw * scale, ih * scale
         # ReportLab Image doesn't crop; we letterbox on white instead of inventing pixels.
-        img = PlatypusImage(io.BytesIO(src), width=min(draw_w, width), height=min(draw_h, height))
+        img = PlatypusImage(io.BytesIO(data), width=min(draw_w, width), height=min(draw_h, height))
         img.hAlign = "CENTER"
         return img
     except Exception:
@@ -682,11 +697,24 @@ def _hero_block(
     zones: List[Dict[str, str]],
     width: float,
     height: float,
+    kind: str = "organized",
 ) -> Table:
     s = _styles()
-    photo = _cover_image(img_bytes, width, height - 14)
+    data = coerce_image_bytes(img_bytes)
+    if data:
+        photo = _cover_image(data, width, height - 14)
+        banner_text = HERO_BANNER_ORIGINAL if kind == "original" else HERO_BANNER_ORGANIZED
+    else:
+        photo = _cover_image(
+            None,
+            width,
+            height - 14,
+            missing_label=HERO_PLACEHOLDER_LABEL,
+            missing_sublabel=HERO_PLACEHOLDER_SUB,
+        )
+        banner_text = HERO_BANNER_ORGANIZED
     banner = Table(
-        [[Paragraph("ORGANIZED VIEW — YOUR REAL SPACE, RE-ZONED", s["banner"])]],
+        [[Paragraph(banner_text, s["banner"])]],
         colWidths=[width],
         rowHeights=[14],
     )
@@ -1273,9 +1301,11 @@ def build_pdf(
 
     `lead` — questionnaire/lead document
     `deliverable` — zones, needs, shopping_list, strategy, action_plan, …
-    `images` — front_view, floor_plan, view_1/2/3, customer_photos
+    `images` — see ``pdf_images``: front_view (+ front_view_kind), floor_plan,
+    view_1/2/3, customer_photos. Values must be image bytes, not URLs.
     """
     _register_fonts()
+    images = normalize_pdf_images(images)
     buf = io.BytesIO()
     s = _styles()
     space_key = lead.get("space_type") or "space"
@@ -1376,7 +1406,13 @@ def build_pdf(
     # ── 01 Hero + 02/03 story already above + What's new
     left_w = content_w * 0.56
     right_w = content_w * 0.42
-    hero = _hero_block(images.get("front_view"), zones, left_w, 1.72 * inch)
+    hero = _hero_block(
+        images.get("front_view"),
+        zones,
+        left_w,
+        1.72 * inch,
+        kind=str(images.get("front_view_kind") or "organized"),
+    )
     right = [
         _section_head("01", "Project story", right_w),
         Paragraph(
