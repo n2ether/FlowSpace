@@ -23,15 +23,15 @@ view_1, view_2, view_3 : bytes | None
     Optional detail-card photos (admin extra renders). Unused slots stay
     as labeled zone cards — we do not duplicate the hero into every card.
 customer_photos : list[bytes]
-    Original customer uploads for later reference pages (photos after the
-    first still get their own pages). The first upload is also ``before``.
+    Original customer uploads. The first upload is also ``before``. Extra
+    photos are not given their own magazine pages.
 before : bytes | None
-    Last-page **Before** panel — the customer's original uploaded photo.
+    Compact **Before** panel on the DIY page — the customer's original photo.
     Derived from this key, else the first ``customer_photos`` item, else
     ``front_view`` when ``front_view_kind="original"``.
 after : bytes | None
-    Last-page **After** panel — the FLUX organized render. Derived from
-    this key, else ``front_view`` when ``front_view_kind="organized"``.
+    Compact **After** panel on the DIY page — the FLUX organized render.
+    Derived from this key, else ``front_view`` when ``front_view_kind="organized"``.
     Never invented. If FLUX failed, the panel is an honest empty state.
 
 UX when FLUX fails
@@ -39,7 +39,7 @@ UX when FLUX fails
 Show the customer's original photo as the hero, banner-labeled so it is
 not mistaken for the organized render. If no original exists, keep the
 branded mint placeholder. Either path is a soft fail — the PDF and
-email still go out. The last page still shows Before | After: the
+email still go out. The DIY page still shows Before | After: the
 available photo plus a labeled unavailable panel (no fake after).
 """
 from __future__ import annotations
@@ -139,8 +139,8 @@ def assemble_pdf_images(
 
     In-memory hero bytes win over a GridFS re-fetch (``fetched['front_view']``).
     Detail / floor-plan slots use the explicit args, then ``fetched``.
-    ``before`` / ``after`` feed the last-page comparison; they are derived
-    from the hero + first customer photo when omitted.
+    ``before`` / ``after`` feed the compact DIY-page comparison; they are
+    derived from the hero + first customer photo when omitted.
     """
     fetched = dict(fetched or {})
     kind = (hero_kind or "placeholder").strip().lower()

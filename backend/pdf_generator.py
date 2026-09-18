@@ -1,9 +1,15 @@
 """
-FlowSpace Blueprint PDF — magazine-style organization plan.
+FlowSpace Blueprint PDF — dashboard organization plan.
 
-Visual template (layout only): numbered sections, site emerald/slate palette,
-Fraunces display + Inter body. Content is always an organization plan for closets, garages,
-laundry rooms, pantries, mudrooms, and storage — never a bedroom redesign.
+Layout (Letter):
+  Page 1 — dense dashboard inspired by the FlowSpace “design plan” sheet
+            (hero, needs, optional paint, zones, extra views, strategy).
+  Page 2 — consumer DIY instructions + full shopping list / budget.
+  Page 3 — Before | After when a real photo exists.
+
+Visual template only: site emerald/slate palette, Fraunces display + Inter body.
+Content is always an organization plan for closets, garages, laundry rooms,
+pantries, mudrooms, and storage — never a bedroom redesign.
 
 Hard rules:
   - Windows and room proportions stay ~95% true to the customer photo.
@@ -17,6 +23,7 @@ Public API is unchanged: build_pdf(lead=, deliverable=, images=) -> bytes
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -33,8 +40,7 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Flowable,
     Frame,
-    Image as PlatypusImage,
-    KeepTogether,
+    NextPageTemplate,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -43,7 +49,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from blueprint_layers import layer_card_copy, resolve_layers
+from blueprint_layers import BUDGET_LABELS, STORAGE, resolve_layers
 from pdf_images import (
     COMPARE_AFTER_BANNER,
     COMPARE_AFTER_EMPTY,
@@ -60,7 +66,6 @@ from pdf_images import (
 )
 
 # ──────────────────────────── Palette (site design system) ─────────────────────────────
-# Matches frontend/src/index.css — emerald / mint / slate / white
 EMERALD = HexColor("#059669")
 EMERALD_DEEP = HexColor("#047857")
 MINT = HexColor("#34d399")
@@ -72,21 +77,16 @@ SURFACE = HexColor("#ffffff")
 SOFT = HexColor("#f8fafc")
 BORDER = HexColor("#e2e8f0")
 WHITE = colors.white
-# Legacy aliases so remaining helpers can be migrated incrementally
-FOREST = EMERALD
-FOREST_DEEP = EMERALD_DEEP
 SAGE = HexColor("#10b981")
-SAGE_SOFT = HexColor("#a7f3d0")
-CREAM = SURFACE
-CREAM_CARD = SURFACE
-WOOD = HexColor("#A67C52")
 INK = SLATE
 MUTED = SLATE_MUTED
 LINE = BORDER
-SOFT_BG = SOFT
 TAGLINE = "Clear space. Create flow. Live better."
-VALUES_LINE = "BOUTIQUE  ·  FUNCTIONAL  ·  INTENTIONAL  ·  AFFORDABLE"
-RADIUS = 8  # ~0.75rem at 72dpi
+RADIUS = 8
+CALLOUT_LINES = (
+    "Smart choices. Everything in its place.",
+    "Less stress. More time. More you.",
+)
 
 SPACE_LABELS = {
     "living_room": "Living room",
@@ -112,22 +112,50 @@ OPTIONAL_PAINT_NOTE = (
     "Optional paint — consider if it helps. Not applied in the visual. "
     "Consider this color only if it helps your organization goal."
 )
+FOOTER_NOTE = (
+    "Note: Measurements are approximate. Adjust to your space as needed. "
+    "Windows and proportions stay ~95% true to your photo."
+)
 
-DEFAULT_PRINCIPLES = [
-    "One home per item",
-    "Hide visual noise",
-    "Match the bins",
-    "Keep the floor clear",
-    "Zones, not piles",
-    "Leave a path",
+DEFAULT_STRATEGY = [
+    "Keep the layout balanced and clutter-free",
+    "Use matching bins for visual harmony",
+    "Layer soft textures for warmth and comfort",
+    "Use hidden storage to reduce visual noise",
+]
+DEFAULT_ACTIONS = [
+    "Declutter and keep only what you need",
+    "Add matching bins and wall storage",
+    "Refresh lighting with a task lamp",
+    "Label homes so everything returns",
+]
+DEFAULT_BENEFITS = [
+    "More restful and relaxing environment",
+    "Easy to keep tidy and organized",
+    "Feels brighter, softer and more open",
+    "Better daily routine and less hunting",
+]
+DEFAULT_NEEDS = [
+    ("Storage", "Hidden homes for daily items", "box"),
+    ("Clear path", "Floor stays a destination, not a dump", "car"),
+    ("Landing zone", "Drop-and-go at the door you already use", "bag"),
+    ("Lighting", "See what you own without hunting", "bulb"),
 ]
 
-DEFAULT_RESET = [
-    "Return items to their labeled bin",
-    "Clear the landing zone / floor path",
-    "Recycle empty packaging",
-    "Wipe one work surface",
-]
+NEED_ICON_RULES: Sequence[Tuple[Tuple[str, ...], str]] = (
+    (("tool", "hardware", "workbench", "peg"), "wrench"),
+    (("sport", "bag", "gear", "bike"), "ball"),
+    (("cloth", "closet", "hanger", "apparel", "coat"), "hanger"),
+    (("shoe",), "hanger"),
+    (("bed", "linen", "sheet", "towel", "laundry"), "layers"),
+    (("paper", "file", "document", "pdf"), "file"),
+    (("decor", "accent", "art"), "leaf"),
+    (("light", "lamp"), "bulb"),
+    (("park", "car", "stall", "floor", "path", "circul"), "car"),
+    (("stor", "bin", "basket", "hidden", "shelf"), "box"),
+    (("personal", "book", "med", "daily"), "person"),
+    (("cable", "tech", "office"), "file"),
+)
 
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 _FONT_FILES = {
@@ -191,9 +219,10 @@ def plan_title(space_type: Optional[str]) -> str:
 
 
 PAGE_W, PAGE_H = LETTER
-MARGIN = 0.42 * inch
-HEADER_H = 0.62 * inch
-FOOTER_H = 0.38 * inch
+MARGIN = 0.40 * inch
+DASH_HEADER_H = 0.90 * inch
+INT_HEADER_H = 0.46 * inch
+FOOTER_H = 0.36 * inch
 
 
 # ──────────────────────────── Styles ─────────────────────────────
@@ -203,20 +232,17 @@ def _styles():
     return {
         "h1": ParagraphStyle(
             "h1", parent=base["Title"], fontName=_font("FSSerif-Bold"),
-            fontSize=20, leading=23, textColor=SLATE, alignment=TA_LEFT,
-            spaceAfter=0,
-        ),
-        "values": ParagraphStyle(
-            "values", parent=base["BodyText"], fontName=_font("FSSans-Medium"),
-            fontSize=6.5, leading=9, textColor=EMERALD_DEEP, alignment=TA_LEFT,
+            fontSize=18, leading=21, textColor=SLATE, alignment=TA_CENTER, spaceAfter=0,
         ),
         "kicker": ParagraphStyle(
             "kicker", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=7, leading=9, textColor=EMERALD_DEEP, alignment=TA_LEFT,
+            fontSize=7.2, leading=9, textColor=EMERALD_DEEP, alignment=TA_LEFT,
+            spaceBefore=0, spaceAfter=2,
         ),
-        "h2": ParagraphStyle(
-            "h2", parent=base["Heading2"], fontName=_font("FSSerif-Bold"),
-            fontSize=12, leading=14, textColor=SLATE, spaceBefore=0, spaceAfter=3,
+        "section": ParagraphStyle(
+            "section", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
+            fontSize=7.4, leading=9.5, textColor=SLATE, alignment=TA_LEFT,
+            spaceBefore=0, spaceAfter=3,
         ),
         "h3": ParagraphStyle(
             "h3", parent=base["Heading3"], fontName=_font("FSSans-Semi"),
@@ -224,27 +250,31 @@ def _styles():
         ),
         "body": ParagraphStyle(
             "body", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=8, leading=10.5, textColor=INK,
+            fontSize=8, leading=10.4, textColor=INK,
         ),
         "bodySmall": ParagraphStyle(
             "bodySmall", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=7.2, leading=9.4, textColor=INK,
+            fontSize=7.1, leading=9.2, textColor=INK,
         ),
         "muted": ParagraphStyle(
             "muted", parent=base["BodyText"], fontName=_font("FSSans-Italic"),
-            fontSize=7.2, leading=9.4, textColor=MUTED,
-        ),
-        "bullet": ParagraphStyle(
-            "bullet", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=7.6, leading=10, leftIndent=8, textColor=INK,
+            fontSize=6.8, leading=8.8, textColor=MUTED,
         ),
         "label": ParagraphStyle(
             "label", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=8, leading=10, textColor=SLATE,
+            fontSize=7.6, leading=9.6, textColor=SLATE,
+        ),
+        "needTitle": ParagraphStyle(
+            "needTitle", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=7.3, leading=9.2, textColor=SLATE,
+        ),
+        "needSub": ParagraphStyle(
+            "needSub", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=6.5, leading=8.2, textColor=SLATE_MUTED,
         ),
         "cardCat": ParagraphStyle(
             "cardCat", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=6, leading=8, textColor=EMERALD_DEEP, alignment=TA_LEFT,
+            fontSize=6.2, leading=8, textColor=EMERALD_DEEP, alignment=TA_LEFT,
         ),
         "cardTitle": ParagraphStyle(
             "cardTitle", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
@@ -252,60 +282,74 @@ def _styles():
         ),
         "cardMeta": ParagraphStyle(
             "cardMeta", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.8, leading=8.6, textColor=MUTED,
+            fontSize=6.6, leading=8.4, textColor=MUTED,
         ),
         "banner": ParagraphStyle(
             "banner", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_CENTER,
-        ),
-        "badge": ParagraphStyle(
-            "badge", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
-            fontSize=6.2, leading=8, textColor=WHITE, alignment=TA_CENTER,
-        ),
-        "scoreBig": ParagraphStyle(
-            "scoreBig", parent=base["Title"], fontName=_font("FSSerif-Bold"),
-            fontSize=16, leading=18, textColor=EMERALD, alignment=TA_CENTER,
-        ),
-        "scoreLabel": ParagraphStyle(
-            "scoreLabel", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.2, leading=8, textColor=MUTED, alignment=TA_CENTER,
-        ),
-        "footerSeg": ParagraphStyle(
-            "footerSeg", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.2, leading=8, textColor=HexColor("#e2e8f0"), alignment=TA_CENTER,
+            fontSize=6.4, leading=8, textColor=WHITE, alignment=TA_CENTER,
         ),
         "whiteTiny": ParagraphStyle(
             "whiteTiny", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=6.4, leading=8.2, textColor=HexColor("#ecfdf5"),
+            fontSize=6.2, leading=7.8, textColor=HexColor("#d1fae5"), alignment=TA_CENTER,
+        ),
+        "budgetHead": ParagraphStyle(
+            "budgetHead", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
+            fontSize=8.2, leading=10.4, textColor=WHITE, alignment=TA_CENTER,
         ),
         "th": ParagraphStyle(
             "th", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=6.4, leading=8, textColor=WHITE,
+            fontSize=6.3, leading=8, textColor=WHITE,
         ),
-        "signoff": ParagraphStyle(
-            "signoff", parent=base["BodyText"], fontName=_font("FSSerif-Italic"),
-            fontSize=8.5, leading=11, textColor=SLATE,
+        "thRight": ParagraphStyle(
+            "thRight", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=6.3, leading=8, textColor=WHITE, alignment=TA_RIGHT,
+        ),
+        "td": ParagraphStyle(
+            "td", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=7.0, leading=9.0, textColor=INK,
+        ),
+        "tdRight": ParagraphStyle(
+            "tdRight", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=7.0, leading=9.0, textColor=INK, alignment=TA_RIGHT,
+        ),
+        "tdBold": ParagraphStyle(
+            "tdBold", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=7.2, leading=9.2, textColor=SLATE,
+        ),
+        "tdBoldRight": ParagraphStyle(
+            "tdBoldRight", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=7.2, leading=9.2, textColor=SLATE, alignment=TA_RIGHT,
+        ),
+        "check": ParagraphStyle(
+            "check", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=7.1, leading=9.6, textColor=INK, leftIndent=0,
         ),
         "price": ParagraphStyle(
             "price", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
             fontSize=7.2, leading=9, textColor=EMERALD_DEEP,
         ),
+        "intro": ParagraphStyle(
+            "intro", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=7.4, leading=9.6, textColor=SLATE_MUTED, alignment=TA_CENTER,
+        ),
     }
 
 
 # ──────────────────────────── Primitives ─────────────────────────────
-def _safe_image(src: Optional[bytes], width: float, height: float) -> Any:
-    data = coerce_image_bytes(src)
-    if not data:
-        return _placeholder(width, height, "Image not provided")
-    try:
-        bio = io.BytesIO(data)
-        bio.seek(0)
-        img = PlatypusImage(bio, width=width, height=height, kind="proportional")
-        img.hAlign = "CENTER"
-        return img
-    except Exception:
-        return _placeholder(width, height, "Image unavailable")
+def _clip(text: str, n: int = 220) -> str:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) <= n:
+        return cleaned
+    return cleaned[: n - 1].rstrip() + "…"
+
+
+def _esc(text: str) -> str:
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def _cover_image(
@@ -315,24 +359,53 @@ def _cover_image(
     *,
     missing_label: str = "Image not provided",
     missing_sublabel: str = "",
+    fill: bool = True,
 ) -> Any:
-    """Letterbox a photo into a box so the hero reads like a magazine image."""
+    """Fit a photo into a box. ``fill=True`` covers and clips; missing stays a labeled panel."""
     data = coerce_image_bytes(src)
     if not data:
         return _placeholder(width, height, missing_label, missing_sublabel)
     try:
-        ir = ImageReader(io.BytesIO(data))
-        iw, ih = ir.getSize()
-        if iw <= 0 or ih <= 0:
-            raise ValueError("empty")
-        scale = max(width / iw, height / ih)
-        draw_w, draw_h = iw * scale, ih * scale
-        # ReportLab Image doesn't crop; we letterbox on white instead of inventing pixels.
-        img = PlatypusImage(io.BytesIO(data), width=min(draw_w, width), height=min(draw_h, height))
-        img.hAlign = "CENTER"
-        return img
+        return ClippedPhoto(data, width, height, fill=fill)
     except Exception:
         return _placeholder(width, height, "Image unavailable")
+
+
+class ClippedPhoto(Flowable):
+    """Draw an image covering (or contained in) a rounded box without a white letterbox."""
+
+    def __init__(self, data: bytes, width: float, height: float, fill: bool = True):
+        super().__init__()
+        self.data = data
+        self.width = width
+        self.height = max(height, 24)
+        self.fill = fill
+        self._ir = ImageReader(io.BytesIO(data))
+        iw, ih = self._ir.getSize()
+        if iw <= 0 or ih <= 0:
+            raise ValueError("empty")
+        self._iw, self._ih = iw, ih
+
+    def wrap(self, availWidth, availHeight):
+        return (self.width, self.height)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        c.setFillColor(SOFT)
+        c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+        path = c.beginPath()
+        path.rect(0, 0, self.width, self.height)
+        c.clipPath(path, stroke=0, fill=0)
+        if self.fill:
+            scale = max(self.width / self._iw, self.height / self._ih)
+        else:
+            scale = min(self.width / self._iw, self.height / self._ih)
+        dw, dh = self._iw * scale, self._ih * scale
+        x = (self.width - dw) / 2.0
+        y = (self.height - dh) / 2.0
+        c.drawImage(self._ir, x, y, width=dw, height=dh, mask="auto")
+        c.restoreState()
 
 
 class BrandedPlaceholder(Flowable):
@@ -378,82 +451,96 @@ def _placeholder(w: float, h: float, label: str, sublabel: str = ""):
     return BrandedPlaceholder(w, h, label, sublabel)
 
 
-class CategoryChip(Flowable):
-    """Small mint thumbnail for shopping cards."""
+def _draw_need_glyph(c, kind: str, cx: float, cy: float, s: float) -> None:
+    c.setStrokeColor(EMERALD_DEEP)
+    c.setFillColor(EMERALD)
+    c.setLineWidth(1.15)
+    c.setLineCap(1)
+    c.setLineJoin(1)
+    k = (kind or "box").lower()
+    if k == "hanger":
+        c.circle(cx, cy + s * 0.28, s * 0.12, fill=0, stroke=1)
+        p = c.beginPath()
+        p.moveTo(cx, cy + s * 0.16)
+        p.lineTo(cx, cy + s * 0.02)
+        p.lineTo(cx - s * 0.38, cy - s * 0.18)
+        p.lineTo(cx + s * 0.38, cy - s * 0.18)
+        p.lineTo(cx, cy + s * 0.02)
+        c.drawPath(p, stroke=1, fill=0)
+    elif k == "layers":
+        for i, dy in enumerate((-0.22, 0.0, 0.22)):
+            c.roundRect(cx - s * 0.34, cy + dy * s - 2.2, s * 0.68, 4.2, 1.2, fill=0, stroke=1)
+    elif k == "person":
+        c.circle(cx, cy + s * 0.22, s * 0.16, fill=0, stroke=1)
+        p = c.beginPath()
+        p.moveTo(cx - s * 0.32, cy - s * 0.32)
+        p.curveTo(cx - s * 0.32, cy + s * 0.02, cx + s * 0.32, cy + s * 0.02, cx + s * 0.32, cy - s * 0.32)
+        c.drawPath(p, stroke=1, fill=0)
+    elif k == "leaf":
+        p = c.beginPath()
+        p.moveTo(cx, cy - s * 0.32)
+        p.curveTo(cx + s * 0.42, cy - s * 0.05, cx + s * 0.18, cy + s * 0.38, cx, cy + s * 0.34)
+        p.curveTo(cx - s * 0.18, cy + s * 0.38, cx - s * 0.42, cy - s * 0.05, cx, cy - s * 0.32)
+        c.drawPath(p, stroke=1, fill=0)
+        c.line(cx, cy - s * 0.28, cx, cy + s * 0.22)
+    elif k == "bulb":
+        c.circle(cx, cy + s * 0.08, s * 0.26, fill=0, stroke=1)
+        c.roundRect(cx - s * 0.12, cy - s * 0.32, s * 0.24, s * 0.16, 1.2, fill=0, stroke=1)
+    elif k == "wrench":
+        c.setLineWidth(1.4)
+        c.roundRect(cx - s * 0.36, cy + s * 0.04, s * 0.28, s * 0.28, 1.4, fill=0, stroke=1)
+        c.line(cx - s * 0.10, cy + s * 0.10, cx + s * 0.34, cy - s * 0.28)
+        c.setLineWidth(2.2)
+        c.line(cx + s * 0.16, cy - s * 0.12, cx + s * 0.32, cy - s * 0.28)
+        c.line(cx + s * 0.22, cy - s * 0.34, cx + s * 0.38, cy - s * 0.18)
+    elif k == "ball":
+        c.circle(cx, cy, s * 0.32, fill=0, stroke=1)
+        c.arc(cx - s * 0.32, cy - s * 0.12, cx + s * 0.32, cy + s * 0.32, 200, 140)
+    elif k == "car":
+        c.roundRect(cx - s * 0.36, cy - s * 0.08, s * 0.72, s * 0.28, 2, fill=0, stroke=1)
+        p = c.beginPath()
+        p.moveTo(cx - s * 0.22, cy + s * 0.20)
+        p.lineTo(cx - s * 0.08, cy + s * 0.34)
+        p.lineTo(cx + s * 0.14, cy + s * 0.34)
+        p.lineTo(cx + s * 0.28, cy + s * 0.20)
+        c.drawPath(p, stroke=1, fill=0)
+        c.circle(cx - s * 0.20, cy - s * 0.16, s * 0.09, fill=0, stroke=1)
+        c.circle(cx + s * 0.20, cy - s * 0.16, s * 0.09, fill=0, stroke=1)
+    elif k == "file":
+        c.rect(cx - s * 0.26, cy - s * 0.32, s * 0.52, s * 0.64, fill=0, stroke=1)
+        c.line(cx - s * 0.14, cy + s * 0.12, cx + s * 0.14, cy + s * 0.12)
+        c.line(cx - s * 0.14, cy - s * 0.02, cx + s * 0.14, cy - s * 0.02)
+        c.line(cx - s * 0.14, cy - s * 0.16, cx + s * 0.08, cy - s * 0.16)
+    elif k == "bag":
+        c.roundRect(cx - s * 0.28, cy - s * 0.28, s * 0.56, s * 0.42, 2, fill=0, stroke=1)
+        p = c.beginPath()
+        p.moveTo(cx - s * 0.14, cy + s * 0.12)
+        p.curveTo(cx - s * 0.14, cy + s * 0.36, cx + s * 0.14, cy + s * 0.36, cx + s * 0.14, cy + s * 0.12)
+        c.drawPath(p, stroke=1, fill=0)
+    else:
+        c.roundRect(cx - s * 0.30, cy - s * 0.28, s * 0.60, s * 0.48, 2, fill=0, stroke=1)
+        c.rect(cx - s * 0.36, cy + s * 0.12, s * 0.72, s * 0.14, fill=0, stroke=1)
 
-    def __init__(self, label: str, width: float, height: float = 26):
+
+class IconBadge(Flowable):
+    """Circular mint badge with a simple storage-need glyph."""
+
+    def __init__(self, kind: str, size: float = 22):
         super().__init__()
-        self.label = (label or "ORG")[:10]
-        self.width = width
-        self.height = height
+        self.kind = kind
+        self.size = size
+        self.width = size
+        self.height = size
 
     def draw(self):
         c = self.canv
+        r = self.size / 2.0
         c.setFillColor(MINT_BG)
-        c.roundRect(0, 0, self.width, self.height, 5, fill=1, stroke=0)
+        c.circle(r, r, r, fill=1, stroke=0)
         c.setStrokeColor(MINT)
-        c.setLineWidth(0.7)
-        c.roundRect(0.3, 0.3, self.width - 0.6, self.height - 0.6, 5, fill=0, stroke=1)
-        c.setFillColor(EMERALD_DEEP)
-        c.setFont(_font("FSSans-Semi"), 6.4)
-        c.drawCentredString(self.width / 2.0, self.height / 2.0 - 2.2, self.label)
-
-
-class ZoneMosaic(Flowable):
-    """Abstract zone tiles — not a measured floor plan."""
-
-    def __init__(self, zones: Sequence[Dict[str, str]], width: float, height: float):
-        super().__init__()
-        self.zones = list(zones or [])[:6]
-        self.width = width
-        self.height = max(height, 72)
-
-    def draw(self):
-        c = self.canv
-        c.setFillColor(SOFT)
-        c.roundRect(0, 0, self.width, self.height, RADIUS, fill=1, stroke=0)
-        c.setStrokeColor(BORDER)
-        c.setLineWidth(0.7)
-        c.roundRect(0.4, 0.4, self.width - 0.8, self.height - 0.8, RADIUS, fill=0, stroke=1)
-
-        n = max(len(self.zones), 1)
-        cols = 3 if n >= 5 else (2 if n >= 4 else min(n, 3) or 1)
-        rows = (n + cols - 1) // cols
-        pad = 7
-        gap = 5
-        inner_w = self.width - pad * 2
-        inner_h = self.height - pad * 2
-        tw = (inner_w - gap * (cols - 1)) / cols
-        th = (inner_h - gap * (rows - 1)) / rows
-        fills = (WHITE, MINT_BG)
-
-        for i in range(n):
-            z = self.zones[i] if i < len(self.zones) else {}
-            r, col = divmod(i, cols)
-            x = pad + col * (tw + gap)
-            y = self.height - pad - (r + 1) * th - r * gap
-            c.setFillColor(fills[i % 2])
-            c.roundRect(x, y, tw, th, 5, fill=1, stroke=0)
-            c.setStrokeColor(MINT)
-            c.setLineWidth(0.8)
-            c.roundRect(x, y, tw, th, 5, fill=0, stroke=1)
-            badge_r = 6
-            c.setFillColor(EMERALD if i % 2 == 0 else EMERALD_DEEP)
-            c.circle(x + 10, y + th - 11, badge_r, fill=1, stroke=0)
-            c.setFillColor(WHITE)
-            c.setFont(_font("FSSans-Bold"), 7)
-            c.drawCentredString(x + 10, y + th - 13.4, str(i + 1))
-            max_chars = max(10, int((tw - 24) / 4.0))
-            title = (z.get("title") or f"Zone {i + 1}").upper()
-            c.setFillColor(SLATE)
-            c.setFont(_font("FSSans-Semi"), 6.2)
-            c.drawString(x + 20, y + th - 14, title[:max_chars])
-            if th > 30:
-                desc_chars = max(12, int((tw - 12) / 3.6))
-                desc = (z.get("desc") or "Keep the existing shell.")[:desc_chars]
-                c.setFillColor(SLATE_MUTED)
-                c.setFont(_font("FSSans"), 5.6)
-                c.drawString(x + 8, y + 8, desc)
+        c.setLineWidth(0.8)
+        c.circle(r, r, r - 0.4, fill=0, stroke=1)
+        _draw_need_glyph(c, self.kind, r, r, r * 0.78)
 
 
 class NumberBadge(Flowable):
@@ -472,577 +559,80 @@ class NumberBadge(Flowable):
         c.circle(r, r, r, fill=1, stroke=0)
         c.setFillColor(WHITE)
         c.setFont(_font("FSSans-Bold"), max(6, self.size * 0.55))
-        label = str(self.n)
-        c.drawCentredString(r, r - self.size * 0.18, label)
+        c.drawCentredString(r, r - self.size * 0.18, str(self.n))
 
 
-def _section_head(number: str, title: str, width: float) -> Table:
-    s = _styles()
-    badge = NumberBadge(int(number) if str(number).isdigit() else 0, size=11)
-    # number may be like "01"
-    try:
-        badge = NumberBadge(int(str(number).lstrip("0") or "0") or int(number), size=12)
-    except Exception:
-        badge = NumberBadge(1, size=12)
-    title_p = Paragraph(title.upper(), s["kicker"])
-    rule = Table([[""]], colWidths=[18], rowHeights=[1.1])
-    rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), MINT)]))
-    head = Table([[badge, title_p, rule]], colWidths=[16, max(width - 40, 40), 22])
-    head.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ("TOPPADDING", (0, 0), (-1, -1), 1),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]
-        )
-    )
-    return head
+class ZonePlan(Flowable):
+    """Schematic top-view zones — conceptual, never measured."""
+
+    def __init__(self, zones: Sequence[Dict[str, str]], width: float, height: float):
+        super().__init__()
+        self.zones = list(zones or [])[:6]
+        self.width = width
+        self.height = max(height, 88)
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(SOFT)
+        c.roundRect(0, 0, self.width, self.height, RADIUS, fill=1, stroke=0)
+        c.setStrokeColor(BORDER)
+        c.setLineWidth(0.8)
+        c.roundRect(0.5, 0.5, self.width - 1, self.height - 1, RADIUS, fill=0, stroke=1)
+
+        pad = 8
+        inner_x, inner_y = pad, pad
+        inner_w = self.width - pad * 2
+        inner_h = self.height - pad * 2
+        c.setFillColor(WHITE)
+        c.roundRect(inner_x, inner_y, inner_w, inner_h, 5, fill=1, stroke=0)
+        c.setStrokeColor(SLATE)
+        c.setLineWidth(1.15)
+        c.roundRect(inner_x, inner_y, inner_w, inner_h, 5, fill=0, stroke=1)
+
+        n = max(len(self.zones), 1)
+        fills = (MINT_BG, WHITE, HexColor("#f0fdf4"), WHITE)
+        # Split into a 2-column schematic so it reads as a plan, not a scorecard.
+        cols = 2 if n >= 2 else 1
+        rows = (n + cols - 1) // cols
+        gap = 4
+        tw = (inner_w - gap * (cols + 1)) / cols
+        th = (inner_h - gap * (rows + 1)) / rows
+
+        for i in range(n):
+            z = self.zones[i] if i < len(self.zones) else {}
+            r, col = divmod(i, cols)
+            x = inner_x + gap + col * (tw + gap)
+            y = inner_y + inner_h - gap - (r + 1) * th - r * gap
+            c.setFillColor(fills[i % len(fills)])
+            c.roundRect(x, y, tw, th, 3, fill=1, stroke=0)
+            c.setStrokeColor(MINT)
+            c.setLineWidth(0.7)
+            c.roundRect(x, y, tw, th, 3, fill=0, stroke=1)
+            c.setFillColor(EMERALD if i % 2 == 0 else EMERALD_DEEP)
+            c.circle(x + 9, y + th - 10, 6, fill=1, stroke=0)
+            c.setFillColor(WHITE)
+            c.setFont(_font("FSSans-Bold"), 6.5)
+            c.drawCentredString(x + 9, y + th - 12.2, str(i + 1))
+            title = (z.get("title") or f"Zone {i + 1}")
+            c.setFillColor(SLATE)
+            c.setFont(_font("FSSans-Semi"), 6.0)
+            max_chars = max(8, int((tw - 22) / 3.7))
+            c.drawString(x + 18, y + th - 13, title[:max_chars])
 
 
-def _hairline(width: float) -> Table:
-    t = Table([[""]], colWidths=[width], rowHeights=[0.6])
-    t.setStyle(TableStyle([("LINEABOVE", (0, 0), (-1, -1), 0.5, LINE)]))
-    return t
-
-
-def _card(inner, width: float, pad: float = 6) -> Table:
+def _card(inner, width: float, pad: float = 6, *, fill: Color = WHITE, box: Color = BORDER) -> Table:
     t = Table([[inner]], colWidths=[width])
     t.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-                ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+                ("BACKGROUND", (0, 0), (-1, -1), fill),
+                ("BOX", (0, 0), (-1, -1), 0.6, box),
                 ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
                 ("LEFTPADDING", (0, 0), (-1, -1), pad),
                 ("RIGHTPADDING", (0, 0), (-1, -1), pad),
                 ("TOPPADDING", (0, 0), (-1, -1), pad),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ]
-        )
-    )
-    return t
-
-
-# ──────────────────────────── Content helpers ─────────────────────────────
-def _keyword_line(lead: Dict[str, Any]) -> str:
-    bits: List[str] = []
-    for raw in (lead.get("style_prefs") or [])[:2]:
-        bits.append(str(raw).replace("_", " ").strip())
-    for raw in (lead.get("desired_feeling") or lead.get("color_prefs") or [])[:2]:
-        label = str(raw).replace("_", " ").strip()
-        if label and label.lower() not in {b.lower() for b in bits}:
-            bits.append(label)
-    if not bits:
-        bits = ["Practical", "Calming", "Organized"]
-    return "  ·  ".join(b.upper() for b in bits[:4])
-
-
-def _item_category(name: str) -> str:
-    n = (name or "").lower()
-    rules = (
-        (("bin", "tote", "box"), "BINS"),
-        (("basket",), "BASKETS"),
-        (("shelf", "shelves", "shelving", "rack"), "SHELVING"),
-        (("hook", "peg"), "HOOKS"),
-        (("label", "sticker"), "LABELS"),
-        (("light", "lamp"), "LIGHTING"),
-        (("rug", "mat"), "FLOOR"),
-        (("hamper", "laundry"), "LAUNDRY"),
-        (("hanger", "rod"), "HANGING"),
-        (("divider", "insert"), "DIVIDERS"),
-        (("vacuum", "broom"), "TOOLS"),
-    )
-    for keys, cat in rules:
-        if any(k in n for k in keys):
-            return cat
-    return "ORGANIZER"
-
-
-def _price_label(item: Dict[str, Any]) -> str:
-    try:
-        price = float(item.get("price", 0) or 0)
-        qty = float(item.get("qty", 1) or 1)
-    except (TypeError, ValueError):
-        return "Typical retail"
-    if price <= 0:
-        return "Typical retail"
-    # Honest unit price from the plan; qty noted when it matters.
-    unit = f"${price:,.0f}" if price >= 10 else f"${price:,.2f}"
-    if qty and qty != 1:
-        q = int(qty) if float(qty).is_integer() else qty
-        return f"{unit} ea · qty {q}"
-    return f"{unit} ea"
-
-
-def _materials(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Tuple[str, str, Optional[str]]]:
-    """(label, kind, hex_or_none) — organization materials, not a bedroom palette."""
-    out: List[Tuple[str, str, Optional[str]]] = []
-    colors_pref = [str(c).replace("_", " ").title() for c in (lead.get("color_prefs") or [])[:2]]
-    styles = [str(c).replace("_", " ").title() for c in (lead.get("style_prefs") or [])[:2]]
-    if "Sage" in " ".join(colors_pref) or "Green" in " ".join(colors_pref):
-        out.append(("Sage bins", "tone", "#10b981"))
-    if any("wood" in s.lower() or "natural" in s.lower() for s in styles + colors_pref):
-        out.append(("Natural wood", "material", "#A67C52"))
-    if any("white" in s.lower() or "light" in s.lower() for s in colors_pref):
-        out.append(("Soft white", "tone", "#f8fafc"))
-    out.append(("Clear / labeled", "material", "#e2e8f0"))
-    out.append(("Woven / linen", "material", "#d6d3d1"))
-    # de-dupe by label
-    seen = set()
-    unique = []
-    for item in out:
-        if item[0] not in seen:
-            seen.add(item[0])
-            unique.append(item)
-    return unique[:5]
-
-
-def _assessment(deliverable: Dict[str, Any]) -> Dict[str, Any]:
-    """Plan-completeness scores — never room measurements."""
-    zones = len(deliverable.get("zones") or [])
-    needs = len(deliverable.get("needs") or [])
-    shop = len(deliverable.get("shopping_list") or [])
-    actions = len(deliverable.get("action_plan") or [])
-    strategy = len(deliverable.get("strategy") or [])
-
-    def clamp(n: float) -> float:
-        return round(min(9.6, max(6.8, n)), 1)
-
-    scores = [
-        ("Storage", clamp(6.6 + zones * 0.55)),
-        ("Function", clamp(6.6 + needs * 0.5)),
-        ("Daily flow", clamp(6.8 + actions * 0.45)),
-        ("Maintenance", clamp(7.2 + (0.4 if actions else 0))),
-        ("Visual calm", clamp(7.0 + strategy * 0.4)),
-        ("Shop-ready", clamp(6.5 + shop * 0.35)),
-    ]
-    overall = round(sum(v for _, v in scores) / len(scores), 1)
-    return {"scores": scores, "overall": overall}
-
-
-# ──────────────────────────── Page chrome ─────────────────────────────
-def _draw_logo(canvas, x: float, y: float, size: float = 16) -> None:
-    canvas.saveState()
-    canvas.setStrokeColor(WHITE)
-    canvas.setLineWidth(1.4)
-    s = size
-    p = canvas.beginPath()
-    p.moveTo(x, y)
-    p.lineTo(x + s * 0.5, y + s * 0.55)
-    p.lineTo(x + s, y)
-    p.lineTo(x + s, y - s * 0.55)
-    p.lineTo(x, y - s * 0.55)
-    p.close()
-    canvas.drawPath(p, stroke=1, fill=0)
-    p2 = canvas.beginPath()
-    p2.moveTo(x + 2, y - s * 0.22)
-    p2.curveTo(x + s * 0.28, y - s * 0.42, x + s * 0.5, y - s * 0.08, x + s * 0.72, y - s * 0.28)
-    p2.curveTo(x + s * 0.85, y - s * 0.38, x + s * 0.92, y - s * 0.22, x + s - 1, y - s * 0.22)
-    canvas.drawPath(p2, stroke=1, fill=0)
-    canvas.restoreState()
-
-
-def _draw_chrome(canvas, doc, customer_name: str = "") -> None:
-    canvas.saveState()
-    canvas.setFillColor(WHITE)
-    canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-
-    # Header bar — emerald, matching site CTAs
-    canvas.setFillColor(EMERALD)
-    canvas.rect(0, PAGE_H - HEADER_H, PAGE_W, HEADER_H, fill=1, stroke=0)
-    canvas.setFillColor(MINT)
-    canvas.rect(0, PAGE_H - HEADER_H - 2.2, PAGE_W, 2.2, fill=1, stroke=0)
-    _draw_logo(canvas, MARGIN, PAGE_H - HEADER_H / 2 + 1, 15)
-    canvas.setFillColor(WHITE)
-    canvas.setFont(_font("FSSerif-Bold"), 13.5)
-    canvas.drawString(MARGIN + 22, PAGE_H - HEADER_H / 2 + 2, "FlowSpace")
-    canvas.setFont(_font("FSSans"), 7)
-    canvas.setFillColor(HexColor("#d1fae5"))
-    canvas.drawString(MARGIN + 22 + 72, PAGE_H - HEADER_H / 2 + 3.5, TAGLINE.upper())
-
-    # Blueprint badge
-    badge_w, badge_h = 136, 24
-    bx = PAGE_W - MARGIN - badge_w
-    by = PAGE_H - HEADER_H / 2 - badge_h / 2 + 1
-    canvas.setFillColor(EMERALD_DEEP)
-    canvas.roundRect(bx, by, badge_w, badge_h, 6, fill=1, stroke=0)
-    canvas.setFillColor(WHITE)
-    canvas.setFont(_font("FSSans-Bold"), 6.3)
-    canvas.drawCentredString(bx + badge_w / 2, by + 13, "FLOWSPACE BLUEPRINT™")
-    canvas.setFont(_font("FSSans"), 5.6)
-    canvas.setFillColor(HexColor("#a7f3d0"))
-    canvas.drawCentredString(bx + badge_w / 2, by + 5, "Your space. Your flow. Your life.")
-
-    # Footer bar
-    canvas.setFillColor(SLATE)
-    canvas.rect(0, 0, PAGE_W, FOOTER_H, fill=1, stroke=0)
-    canvas.setFillColor(MINT)
-    canvas.rect(0, FOOTER_H, PAGE_W, 2, fill=1, stroke=0)
-    segs = [
-        "The FlowSpace Design Team",
-        "Functional design",
-        "Quality materials",
-        "Thoughtful solutions",
-        "Lasting value",
-    ]
-    canvas.setFillColor(HexColor("#e2e8f0"))
-    canvas.setFont(_font("FSSans"), 6.2)
-    gap = (PAGE_W - 2 * MARGIN) / len(segs)
-    for i, seg in enumerate(segs):
-        canvas.drawCentredString(MARGIN + gap * i + gap / 2, FOOTER_H / 2 - 2, seg)
-    canvas.restoreState()
-
-
-# ──────────────────────────── Sections ─────────────────────────────
-def _hero_block(
-    img_bytes: Optional[bytes],
-    zones: List[Dict[str, str]],
-    width: float,
-    height: float,
-    kind: str = "organized",
-) -> Table:
-    s = _styles()
-    data = coerce_image_bytes(img_bytes)
-    if data:
-        photo = _cover_image(data, width, height - 14)
-        banner_text = HERO_BANNER_ORIGINAL if kind == "original" else HERO_BANNER_ORGANIZED
-    else:
-        photo = _cover_image(
-            None,
-            width,
-            height - 14,
-            missing_label=HERO_PLACEHOLDER_LABEL,
-            missing_sublabel=HERO_PLACEHOLDER_SUB,
-        )
-        banner_text = HERO_BANNER_ORGANIZED
-    banner = Table(
-        [[Paragraph(banner_text, s["banner"])]],
-        colWidths=[width],
-        rowHeights=[14],
-    )
-    banner.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-    # Compact numbered chips — organization systems, never invented dimensions.
-    chips = []
-    for i, z in enumerate((zones or [])[:5], 1):
-        chips.append(Paragraph(f"<b>{i}</b>  {z.get('title') or f'Zone {i}'}", s["bodySmall"]))
-    chip_row = None
-    if chips:
-        chip_row = Table([chips], colWidths=[width / len(chips)] * len(chips))
-        chip_row.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), MINT_BG),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ]
-            )
-        )
-        stack = Table([[banner], [photo], [chip_row]], colWidths=[width])
-    else:
-        stack = Table([[banner], [photo]], colWidths=[width])
-    stack.setStyle(
-        TableStyle(
-            [
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
-                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ]
-        )
-    )
-    return stack
-
-
-def _compare_panel(
-    img_bytes: Optional[bytes],
-    width: float,
-    height: float,
-    banner: str,
-    empty_label: str,
-    empty_sub: str,
-) -> Table:
-    s = _styles()
-    data = coerce_image_bytes(img_bytes)
-    if data:
-        photo = _cover_image(data, width, height)
-    else:
-        photo = _cover_image(
-            None,
-            width,
-            height,
-            missing_label=empty_label,
-            missing_sublabel=empty_sub,
-        )
-    head = Table(
-        [[Paragraph(banner, s["banner"])]],
-        colWidths=[width],
-        rowHeights=[16],
-    )
-    head.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-    stack = Table([[head], [photo]], colWidths=[width])
-    stack.setStyle(
-        TableStyle(
-            [
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
-                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("BACKGROUND", (0, 1), (0, 1), WHITE),
-            ]
-        )
-    )
-    return stack
-
-
-def _before_after_section(
-    before: Optional[bytes],
-    after: Optional[bytes],
-    width: float,
-) -> Table:
-    gap = 10
-    col_w = (width - gap) / 2
-    photo_h = 4.55 * inch
-    left = _compare_panel(
-        before, col_w, photo_h,
-        COMPARE_BEFORE_BANNER, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
-    )
-    right = _compare_panel(
-        after, col_w, photo_h,
-        COMPARE_AFTER_BANNER, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
-    )
-    t = Table([[left, right]], colWidths=[col_w, col_w])
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (0, 0), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), gap),
-                ("LEFTPADDING", (1, 0), (1, 0), 0),
-                ("RIGHTPADDING", (1, 0), (1, 0), 0),
-            ]
-        )
-    )
-    return t
-
-
-def _whats_new(needs: List[str], zones: List[Dict[str, str]], width: float) -> List[Any]:
-    s = _styles()
-    rows = []
-    items: List[Tuple[str, str]] = []
-    for z in (zones or [])[:5]:
-        items.append((z.get("title") or "Zone", z.get("desc") or "A clearer home for what you use."))
-    if not items:
-        for n in (needs or [])[:5]:
-            items.append((n, "Keeps the physical shell; changes only the org system."))
-    if not items:
-        items = [
-            ("Labeled bins", "Same footprint, less visual noise."),
-            ("A clear path", "Circulation stays where the room already allows it."),
-            ("A landing zone", "One place for drop-and-go items."),
-        ]
-    for i, (title, desc) in enumerate(items, 1):
-        rows.append(
-            [
-                NumberBadge(i, size=12, fill=EMERALD),
-                [
-                    Paragraph(title, s["label"]),
-                    Paragraph(desc, s["bodySmall"]),
-                ],
-            ]
-        )
-    t = Table(rows, colWidths=[16, max(width - 16, 40)])
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ("LINEBELOW", (0, 0), (-1, -2), 0.3, LINE),
-            ]
-        )
-    )
-    return t
-
-
-def _zone_flow(zones: List[Dict[str, str]], floor_plan: Optional[bytes], width: float) -> Table:
-    s = _styles()
-    left_w = width * 0.42
-    right_w = width - left_w - 8
-    if floor_plan:
-        visual = _cover_image(floor_plan, left_w, 1.12 * inch)
-        caption = Paragraph("Room flow from your photo — no invented dimensions.", s["muted"])
-        left = [visual, Spacer(1, 3), caption]
-    else:
-        left = [
-            ZoneMosaic(zones or [], left_w, 1.12 * inch),
-            Spacer(1, 3),
-            Paragraph("Conceptual zone map — not a measured floor plan. We do not invent room dimensions.", s["muted"]),
-        ]
-
-    titles = [z.get("title") or f"Zone {i}" for i, z in enumerate((zones or [])[:6], 1)]
-    path = "  →  ".join(titles) if titles else "Zones will follow your real layout."
-    move_rows = [
-        Paragraph("HOW YOU MOVE", s["cardCat"]),
-        Spacer(1, 3),
-        Paragraph(path, s["label"]),
-        Spacer(1, 4),
-        Paragraph(
-            "Enter, drop, walk the path the photo already shows, then store on existing walls. "
-            "The stall / floor stays a destination — not a dump.",
-            s["bodySmall"],
-        ),
-        Spacer(1, 5),
-        Paragraph("Floor plan not included — we do not invent room dimensions.", s["muted"]),
-    ]
-    legend = _card(move_rows, right_w + 4, pad=7)
-    t = Table([[left, legend]], colWidths=[left_w, right_w + 8])
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 8),
-            ]
-        )
-    )
-    return t
-
-
-def _detail_cards(
-    zones: List[Dict[str, str]],
-    views: Sequence[Optional[bytes]],
-    width: float,
-) -> Table:
-    s = _styles()
-    cards = []
-    provided = [b for b in views if b]
-    count = min(5, max(len(zones or []), len(provided), 3))
-    card_w = (width - 8) / count
-    for i in range(count):
-        z = (zones or [None] * count)[i] if i < len(zones or []) else None
-        title = (z or {}).get("title") if z else f"Detail {i + 1}"
-        desc = (z or {}).get("desc") if z else "A storage move that keeps the shell intact."
-        bullets = [p.strip() for p in (desc or "").split(".") if p.strip()][:3] or [
-            "Keep the existing footprint",
-            "Contain clutter in matching bins",
-        ]
-        img = provided[i] if i < len(provided) else None
-        zone_label = (title or f"Zone {i + 1}").upper()
-        body = [
-            _cover_image(img, card_w - 10, 0.52 * inch)
-            if img
-            else _placeholder(card_w - 10, 0.42 * inch, zone_label, "Existing shell"),
-            Spacer(1, 3),
-            Paragraph(f"0{i + 1}  {zone_label}", s["cardCat"]),
-            Paragraph(title or "Storage detail", s["cardTitle"]),
-        ]
-        for b in bullets[:2]:
-            body.append(Paragraph(f"· {b}", s["cardMeta"]))
-        cards.append(_card(body, card_w, pad=5))
-    t = Table([cards], colWidths=[card_w] * count)
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    return t
-
-
-def _item_value(name: str) -> str:
-    return {
-        "BINS": "Contain · label · return",
-        "BASKETS": "Corral loose daily items",
-        "SHELVING": "Mount on existing walls",
-        "HOOKS": "Hang daily, clear the floor",
-        "LABELS": "Name every home",
-        "LIGHTING": "See what you own",
-        "FLOOR": "Mark the parking stall",
-        "LAUNDRY": "Sort dirty from done",
-        "HANGING": "Use the rod you have",
-        "DIVIDERS": "Stop the pile-up",
-        "TOOLS": "Park tools on the wall",
-    }.get(_item_category(name), "Contain · label · return")
-
-
-def _shopping_cards(items: List[Dict[str, Any]], width: float) -> Any:
-    s = _styles()
-    if not items:
-        return Paragraph("Shopping list will follow your plan.", s["muted"])
-    show = items[:8]
-    cols = min(5, len(show))
-    card_w = (width - 6) / cols
-    row: List[Any] = []
-    rows: List[List[Any]] = []
-    for it in show:
-        name = str(it.get("name") or "Organizer")
-        cat = _item_category(name)
-        body = [
-            CategoryChip(cat, card_w - 10, 22),
-            Spacer(1, 4),
-            Paragraph(cat, s["cardCat"]),
-            Paragraph(name, s["cardTitle"]),
-            Paragraph(_price_label(it), s["price"]),
-            Paragraph(_item_value(name), s["muted"]),
-        ]
-        row.append(_card(body, card_w, pad=5))
-        if len(row) == cols:
-            rows.append(row)
-            row = []
-    if row:
-        row += [""] * (cols - len(row))
-        rows.append(row)
-    t = Table(rows, colWidths=[card_w] * cols)
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
@@ -1067,319 +657,777 @@ def _swatch(hex_color: str, size: float = 22) -> Table:
     return t
 
 
-def _palette_row(
-    lead: Dict[str, Any],
-    deliverable: Dict[str, Any],
-    width: float,
-) -> Table:
-    s = _styles()
-    cells: List[Any] = []
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    if wall_name or wall_hex:
-        paint = [
-            _swatch(wall_hex or "#CFD7D3", 26),
-            Spacer(1, 2),
-            Paragraph("OPTIONAL PAINT", s["cardCat"]),
-            Paragraph(wall_name or "Consider only if it helps", s["cardTitle"]),
-            Paragraph(deliverable.get("wall_color_code") or OPTIONAL_PAINT_HEADING, s["cardMeta"]),
-        ]
-        cells.append(_card(paint, width * 0.22, pad=5))
-    mats = _materials(lead, deliverable)
-    remain = width - (width * 0.22 + 6 if cells else 0)
-    n = max(len(mats), 1)
-    mw = remain / n
-    for label, _kind, hx in mats:
-        cells.append(
-            _card(
-                [
-                    _swatch(hx or "#C4B49A", 22),
-                    Spacer(1, 2),
-                    Paragraph("MATERIAL", s["cardCat"]),
-                    Paragraph(label, s["cardTitle"]),
-                ],
-                mw,
-                pad=5,
-            )
-        )
-    t = Table([cells], colWidths=[c._argW[0] if hasattr(c, "_argW") else width / len(cells) for c in cells])
-    # colWidths from card wrappers:
-    widths = []
-    if wall_name or wall_hex:
-        widths.append(width * 0.22)
-        widths.extend([remain / max(len(mats), 1)] * len(mats))
+# ──────────────────────────── Content helpers ─────────────────────────────
+def _keyword_line(lead: Dict[str, Any]) -> str:
+    bits: List[str] = []
+    for raw in (lead.get("style_prefs") or [])[:2]:
+        bits.append(str(raw).replace("_", " ").strip())
+    for raw in (lead.get("desired_feeling") or lead.get("color_prefs") or [])[:2]:
+        label = str(raw).replace("_", " ").strip()
+        if label and label.lower() not in {b.lower() for b in bits}:
+            bits.append(label)
+    if not bits:
+        bits = ["Practical", "Calming", "Organized"]
+    return "  ·  ".join(b.upper() for b in bits[:4])
+
+
+def _need_icon(text: str) -> str:
+    blob = (text or "").lower()
+    for keys, kind in NEED_ICON_RULES:
+        if any(k in blob for k in keys):
+            return kind
+    return "box"
+
+
+def _need_title(text: str) -> str:
+    raw = (text or "").strip()
+    if " — " in raw:
+        return raw.split(" — ", 1)[0].strip()
+    if ":" in raw and len(raw.split(":", 1)[0]) <= 36:
+        return raw.split(":", 1)[0].strip()
+    if len(raw) <= 52:
+        return raw
+    return raw[:50].rsplit(" ", 1)[0]
+
+
+def _space_needs(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """(title, detail, icon) — organization needs, not bedroom décor categories."""
+    out: List[Tuple[str, str, str]] = []
+    seen = set()
+
+    def add(title: str, detail: str, icon: str) -> None:
+        key = title.strip().lower()
+        if not title or key in seen:
+            return
+        seen.add(key)
+        out.append((title.strip(), (detail or "").strip(), icon))
+
+    for raw in (deliverable.get("needs") or []):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        add(_need_title(text), text, _need_icon(text))
+        if len(out) >= 5:
+            return out
+
+    blob = " ".join(f"{t} {d}" for t, d, _ in out).lower()
+    for key in (lead.get("storage_needs") or []):
+        label = STORAGE.get(str(key), str(key).replace("_", " ").title())
+        token = str(key).replace("_", " ").split()[0].lower()
+        if token and token in blob:
+            continue
+        add(label, f"{label} get a labeled home on the existing shell.", _need_icon(label))
+        if len(out) >= 5:
+            return out
+
+    if not out:
+        for title, detail, icon in DEFAULT_NEEDS:
+            add(title, detail, icon)
+    return out[:5]
+
+
+def _item_category(name: str) -> str:
+    n = (name or "").lower()
+    rules = (
+        (("bin", "tote", "box"), "BINS"),
+        (("basket",), "BASKETS"),
+        (("shelf", "shelves", "shelving", "rack"), "SHELVING"),
+        (("hook", "peg"), "HOOKS"),
+        (("label", "sticker"), "LABELS"),
+        (("light", "lamp"), "LIGHTING"),
+        (("rug", "mat"), "FLOOR"),
+        (("hamper", "laundry"), "LAUNDRY"),
+        (("hanger", "rod"), "HANGING"),
+        (("divider", "insert"), "DIVIDERS"),
+        (("vacuum", "broom"), "TOOLS"),
+        (("desk", "work"), "ORGANIZER"),
+    )
+    for keys, cat in rules:
+        if any(k in n for k in keys):
+            return cat
+    return "ORGANIZER"
+
+
+def _money(value: float) -> str:
+    if value <= 0:
+        return "—"
+    if abs(value - round(value)) < 0.009:
+        return f"${value:,.0f}"
+    return f"${value:,.2f}"
+
+
+def _line_total(item: Dict[str, Any]) -> Tuple[float, float, float]:
+    try:
+        qty = float(item.get("qty", 1) or 1)
+    except (TypeError, ValueError):
+        qty = 1.0
+    try:
+        price = float(item.get("price", 0) or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    return qty, price, qty * price
+
+
+def _budget_range(lead: Dict[str, Any], deliverable: Dict[str, Any], layers: Dict[str, Any]) -> str:
+    key = str(lead.get("budget") or "").strip()
+    if key in BUDGET_LABELS:
+        return BUDGET_LABELS[key]
+    candidates = [
+        ((layers.get("validation") or {}).get("budget_band") or {}).get("band"),
+        deliverable.get("budget_note"),
+    ]
+    for raw in candidates:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        found = re.search(r"\$?\d[\d,]*\s*[–\-to]+\s*\$?\d[\d,]*", text)
+        if found:
+            return found.group(0).replace("to", "–")
+        if text:
+            return text
+    return "Typical retail range"
+
+
+# ──────────────────────────── Page chrome ─────────────────────────────
+def _draw_logo(canvas, x: float, y: float, size: float = 16, stroke: Color = EMERALD) -> None:
+    canvas.saveState()
+    canvas.setStrokeColor(stroke)
+    canvas.setLineWidth(1.4)
+    s = size
+    p = canvas.beginPath()
+    p.moveTo(x, y)
+    p.lineTo(x + s * 0.5, y + s * 0.55)
+    p.lineTo(x + s, y)
+    p.lineTo(x + s, y - s * 0.55)
+    p.lineTo(x, y - s * 0.55)
+    p.close()
+    canvas.drawPath(p, stroke=1, fill=0)
+    p2 = canvas.beginPath()
+    p2.moveTo(x + 2, y - s * 0.22)
+    p2.curveTo(x + s * 0.28, y - s * 0.42, x + s * 0.5, y - s * 0.08, x + s * 0.72, y - s * 0.28)
+    p2.curveTo(x + s * 0.85, y - s * 0.38, x + s * 0.92, y - s * 0.22, x + s - 1, y - s * 0.22)
+    canvas.drawPath(p2, stroke=1, fill=0)
+    canvas.restoreState()
+
+
+def _draw_footer(canvas, page: int) -> None:
+    canvas.saveState()
+    y = FOOTER_H
+    canvas.setStrokeColor(MINT)
+    canvas.setLineWidth(1.6)
+    canvas.line(0, y, PAGE_W, y)
+    canvas.setFillColor(SOFT)
+    canvas.rect(0, 0, PAGE_W, y, fill=1, stroke=0)
+    canvas.setFillColor(SLATE_SOFT)
+    canvas.setFont(_font("FSSans"), 6.1)
+    if page == 1:
+        canvas.drawString(MARGIN, 14, FOOTER_NOTE)
+        canvas.drawRightString(PAGE_W - MARGIN, 14, "The FlowSpace Design Team")
     else:
-        widths = [width / len(cells)] * len(cells)
-    t = Table([cells], colWidths=widths)
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    return t
+        canvas.drawString(MARGIN, 14, "The FlowSpace Design Team  ·  Functional design  ·  Lasting value")
+        canvas.drawRightString(PAGE_W - MARGIN, 14, f"Page {page}")
+    canvas.restoreState()
 
 
-def _roadmap(steps: List[str], width: float) -> Table:
-    s = _styles()
-    items = [x for x in (steps or []) if x][:5] or [
-        "Declutter what does not belong",
-        "Install the storage system",
-        "Sort into labeled homes",
-        "Reset the daily path",
-    ]
-    n = len(items)
-    col_w = (width - 4) / n
-    cols = []
-    for i, step in enumerate(items, 1):
-        cols.append(
-            _card(
-                [
-                    Paragraph(f"STEP {i}", s["cardCat"]),
-                    Paragraph(step, s["cardTitle"]),
-                    Paragraph("Typical org session — no construction.", s["cardMeta"]),
-                ],
-                col_w,
-                pad=5,
-            )
-        )
-    t = Table([cols], colWidths=[col_w] * n)
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    return t
+def _draw_dashboard_header(canvas, title: str, vibe: str) -> None:
+    canvas.saveState()
+    canvas.setFillColor(WHITE)
+    canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    canvas.setFillColor(EMERALD)
+    canvas.rect(0, PAGE_H - 4, PAGE_W, 4, fill=1, stroke=0)
+
+    top = PAGE_H - 0.38 * inch
+    _draw_logo(canvas, MARGIN, top, 15, EMERALD)
+    canvas.setFillColor(SLATE)
+    canvas.setFont(_font("FSSerif-Bold"), 12.5)
+    canvas.drawString(MARGIN + 22, top - 2, "FlowSpace")
+    canvas.setFillColor(SLATE_SOFT)
+    canvas.setFont(_font("FSSans"), 5.8)
+    canvas.drawString(MARGIN + 22, top - 12, TAGLINE)
+
+    badge_w, badge_h = 142, 52
+    bx = PAGE_W - MARGIN - badge_w
+    by = PAGE_H - DASH_HEADER_H + 10
+    canvas.setFillColor(EMERALD_DEEP)
+    canvas.roundRect(bx, by, badge_w, badge_h, 7, fill=1, stroke=0)
+    canvas.setFillColor(HexColor("#a7f3d0"))
+    canvas.setFont(_font("FSSans-Semi"), 5.8)
+    canvas.drawCentredString(bx + badge_w / 2, by + 38, "DESIGNED FOR")
+    canvas.setFillColor(WHITE)
+    canvas.setFont(_font("FSSans-Bold"), 8.0)
+    canvas.drawCentredString(bx + badge_w / 2, by + 26, "HOW YOU LIVE")
+    canvas.setFillColor(HexColor("#d1fae5"))
+    canvas.setFont(_font("FSSans"), 5.3)
+    canvas.drawCentredString(bx + badge_w / 2, by + 14, CALLOUT_LINES[0])
+    canvas.drawCentredString(bx + badge_w / 2, by + 6, CALLOUT_LINES[1])
+
+    left_bound = MARGIN + 108
+    right_bound = bx - 10
+    cx = (left_bound + right_bound) / 2.0
+    label = title.upper()
+    font_name = _font("FSSerif-Bold")
+    size = 15.0
+    while size > 10.0 and canvas.stringWidth(label, font_name, size) > (right_bound - left_bound):
+        size -= 0.4
+    canvas.setFillColor(SLATE)
+    canvas.setFont(font_name, size)
+    canvas.drawCentredString(cx, top - 1, label)
+    canvas.setFillColor(EMERALD_DEEP)
+    canvas.setFont(_font("FSSans-Semi"), 6.8)
+    canvas.drawCentredString(cx, top - 16, vibe or "PRACTICAL  ·  CALMING  ·  ORGANIZED")
+    canvas.restoreState()
 
 
-def _principles_and_reset(
-    strategy: List[str],
-    benefits: List[str],
+def _draw_interior_header(canvas, title: str, kind: str = "interior") -> None:
+    canvas.saveState()
+    canvas.setFillColor(WHITE)
+    canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    canvas.setFillColor(EMERALD)
+    canvas.rect(0, PAGE_H - 4, PAGE_W, 4, fill=1, stroke=0)
+    top = PAGE_H - 0.28 * inch
+    _draw_logo(canvas, MARGIN, top, 13, EMERALD)
+    canvas.setFillColor(SLATE)
+    canvas.setFont(_font("FSSerif-Bold"), 11.5)
+    canvas.drawString(MARGIN + 20, top - 2, "FlowSpace")
+    canvas.setFillColor(SLATE_SOFT)
+    canvas.setFont(_font("FSSans"), 6.2)
+    canvas.drawString(MARGIN + 92, top, title)
+    canvas.setFillColor(EMERALD_DEEP)
+    canvas.setFont(_font("FSSans-Semi"), 6.4)
+    right = "BEFORE & AFTER" if kind == "compare" else "SHOPPING LIST  ·  DIY THIS WEEK"
+    canvas.drawRightString(PAGE_W - MARGIN, top, right)
+    canvas.setStrokeColor(BORDER)
+    canvas.setLineWidth(0.5)
+    canvas.line(MARGIN, PAGE_H - INT_HEADER_H + 4, PAGE_W - MARGIN, PAGE_H - INT_HEADER_H + 4)
+    canvas.restoreState()
+
+
+def _make_on_page(kind: str, title: str, vibe: str):
+    def _on_page(canvas, doc):
+        if kind == "dashboard":
+            _draw_dashboard_header(canvas, title, vibe)
+        else:
+            _draw_interior_header(canvas, title, kind)
+        _draw_footer(canvas, canvas.getPageNumber())
+
+    return _on_page
+
+
+# ──────────────────────────── Sections ─────────────────────────────
+def _hero_block(
+    img_bytes: Optional[bytes],
     width: float,
+    height: float,
+    kind: str = "organized",
 ) -> Table:
     s = _styles()
-    rules = [x for x in (strategy or []) if x][:6] or DEFAULT_PRINCIPLES
-    reset = DEFAULT_RESET[:]
-    if benefits:
-        extra = str(benefits[0]).strip()
-        if extra and extra not in reset:
-            reset.append(extra)
-
-    left_items = []
-    for i, rule in enumerate(rules[:6], 1):
-        left_items.append(Paragraph(f"<b>{i:02d}</b>  {rule}", s["bodySmall"]))
-    left = _card(
-        [Paragraph("GUIDING PRINCIPLES", s["cardCat"]), Spacer(1, 3), *left_items],
-        width * 0.52,
-        pad=7,
-    )
-    right_items = [Paragraph(f"☐  {r}", s["bodySmall"]) for r in reset[:5]]
-    right = _card(
-        [
-            Paragraph("10-MINUTE WEEKLY RESET", s["cardCat"]),
-            Spacer(1, 3),
-            *right_items,
-            Spacer(1, 4),
-            Paragraph("A short reset keeps the system — not a remodel.", s["muted"]),
-        ],
-        width * 0.46,
-        pad=7,
-    )
-    t = Table([[left, right]], colWidths=[width * 0.53, width * 0.47])
-    t.setStyle(
+    data = coerce_image_bytes(img_bytes)
+    if data:
+        photo = _cover_image(data, width, height - 15)
+        banner_text = HERO_BANNER_ORIGINAL if kind == "original" else HERO_BANNER_ORGANIZED
+    else:
+        photo = _cover_image(
+            None,
+            width,
+            height - 15,
+            missing_label=HERO_PLACEHOLDER_LABEL,
+            missing_sublabel=HERO_PLACEHOLDER_SUB,
+        )
+        banner_text = HERO_BANNER_ORGANIZED
+    banner = Table([[Paragraph(banner_text, s["banner"])]], colWidths=[width], rowHeights=[15])
+    banner.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
             ]
         )
     )
-    return t
+    photo_h = height - 15
+    stack = Table([[banner], [photo]], colWidths=[width], rowHeights=[15, photo_h])
+    stack.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 1), (0, 1), WHITE),
+            ]
+        )
+    )
+    return stack
 
 
-def _layers_strip(layers: Dict[str, Any], width: float) -> Table:
-    """Customer-visible six Brain layers — compact 2×3 magazine cards."""
+def _needs_stack(needs: List[Tuple[str, str, str]], width: float) -> Table:
     s = _styles()
-    cards = layer_card_copy(layers)
-    col_w = (width - 8) / 3
     rows: List[List[Any]] = []
-    row: List[Any] = []
-    for num, title, body in cards:
-        inner = [
-            Paragraph(f"L{num}  {title}", s["label"]),
-            Spacer(1, 2),
-            Paragraph(body, s["bodySmall"]),
-        ]
-        row.append(_card(inner, col_w, pad=5))
-        if len(row) == 3:
-            rows.append(row)
-            row = []
-    if row:
-        row += [""] * (3 - len(row))
-        rows.append(row)
-    t = Table(rows, colWidths=[col_w] * 3)
+    for title, detail, icon in needs:
+        copy = detail if detail.lower() != title.lower() else ""
+        cell = [Paragraph(_esc(title), s["needTitle"])]
+        if copy:
+            cell.append(Paragraph(_esc(_clip(copy, 90)), s["needSub"]))
+        rows.append([IconBadge(icon, 20), cell])
+    t = Table(rows, colWidths=[24, max(width - 24, 40)])
     t.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-                ("TOPPADDING", (0, 0), (-1, -1), 1),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    return t
-
-
-def _validation_checks(layers: Dict[str, Any], width: float) -> Table:
-    """Real validation — fit, flow, budget band, possession respect — not fluff scores."""
-    s = _styles()
-    val = (layers or {}).get("validation") or {}
-    items = [
-        ("Fit", val.get("fit") or {}),
-        ("Flow", val.get("flow") or {}),
-        ("Budget", val.get("budget_band") or {}),
-        ("Possessions", val.get("possession_respect") or {}),
-    ]
-    col_w = (width - 6) / 2
-    cards = []
-    for label, check in items:
-        status = str(check.get("status") or "watch").upper()
-        note = check.get("note") or ""
-        band = check.get("band") or ""
-        body = [
-            Paragraph(label.upper(), s["cardCat"]),
-            Paragraph(status, s["cardTitle"]),
-        ]
-        if band:
-            body.append(Paragraph(band, s["price"]))
-        if note:
-            body.append(Paragraph(note, s["cardMeta"]))
-        cards.append(_card(body, col_w, pad=5))
-    rows = [cards[0:2], cards[2:4]]
-    checks = Table(rows, colWidths=[col_w, col_w])
-    checks.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 2),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
                 ("TOPPADDING", (0, 0), (-1, -1), 2),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )
-    extras: List[Any] = [checks]
-    conflicts = [c for c in (val.get("conflicts") or []) if c]
-    assumptions = [c for c in (val.get("assumptions") or []) if c]
-    if conflicts:
-        extras.append(Paragraph("Conflicts: " + "; ".join(conflicts[:3]), s["muted"]))
-    if assumptions:
-        extras.append(Paragraph("Assumptions: " + "; ".join(assumptions[:3]), s["muted"]))
-    wrap = Table([[e] for e in extras], colWidths=[width])
-    wrap.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    return wrap
+    return t
 
 
-def _assessment_row(deliverable: Dict[str, Any], width: float) -> Table:
+def _paint_block(deliverable: Dict[str, Any], width: float) -> Optional[Table]:
     s = _styles()
-    data = _assessment(deliverable)
-    score_w = (width * 0.72) / 6
-    cells = []
-    for label, value in data["scores"]:
-        cells.append(
-            [
-                Paragraph(f"{value:.1f}", s["scoreBig"]),
-                Paragraph(label, s["scoreLabel"]),
-            ]
-        )
-    meters = Table([cells], colWidths=[score_w] * 6)
-    meters.setStyle(
-        TableStyle(
-            [
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("BACKGROUND", (0, 0), (-1, -1), SOFT),
-                ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
-                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ]
-        )
-    )
-    overall_inner = [
-        Paragraph(f"{data['overall']:.1f}", s["scoreBig"]),
-        Paragraph("OVERALL POTENTIAL", s["scoreLabel"]),
-        Paragraph("Plan completeness — not a room measurement.", s["muted"]),
+    name = (deliverable.get("wall_color_name") or "").strip()
+    code = (deliverable.get("wall_color_code") or "").strip()
+    hex_color = (deliverable.get("wall_color_hex") or "").strip()
+    if not (name or hex_color or code):
+        return None
+    note = (deliverable.get("wall_color_note") or OPTIONAL_PAINT_NOTE).strip()
+    copy = [
+        Paragraph("WALL COLOR SUGGESTION", s["kicker"]),
+        Paragraph(_esc(name or OPTIONAL_PAINT_HEADING), s["label"]),
+        Paragraph(_esc(code or "Optional"), s["needSub"]),
+        Paragraph(_esc(_clip(note, 110)), s["muted"]),
     ]
-    overall = Table([[overall_inner]], colWidths=[width * 0.26])
-    overall.setStyle(
+    inner = Table([[copy, _swatch(hex_color or "#cfd7d3", 28)]], colWidths=[width - 40, 34])
+    inner.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), MINT_BG),
-                ("BOX", (0, 0), (-1, -1), 0.7, MINT),
-                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
             ]
         )
     )
-    t = Table([[meters, overall]], colWidths=[width * 0.73, width * 0.27])
+    return inner
+
+
+def _budget_callout(range_label: str, width: float, *, compact: bool = True) -> Table:
+    s = _styles()
+    body = [
+        Paragraph(f"BUDGET RANGE:  {_esc(range_label)}", s["budgetHead"]),
+        Paragraph(
+            "Full shopping list and DIY steps on page 2."
+            if compact
+            else "Items chosen to bring the biggest impact for your budget.",
+            s["whiteTiny"],
+        ),
+    ]
+    t = Table([[body]], colWidths=[width])
     t.setStyle(
         TableStyle(
             [
+                ("BACKGROUND", (0, 0), (-1, -1), EMERALD_DEEP),
+                ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ]
         )
     )
     return t
 
 
-def _links_table(links: List[Dict[str, str]], width: float) -> Table:
+def _sidebar(
+    lead: Dict[str, Any],
+    deliverable: Dict[str, Any],
+    layers: Dict[str, Any],
+    width: float,
+    space_name: str,
+) -> List[Any]:
     s = _styles()
-    rows = [[Paragraph("ITEM", s["th"]), Paragraph("LINK", s["th"])]]
-    for link in links or []:
-        name = link.get("name", "") or ""
-        url = link.get("url", "") or ""
-        html = f'<link href="{url}" color="#047857"><u>{url}</u></link>' if url else ""
-        rows.append([Paragraph(name, s["bodySmall"]), Paragraph(html, s["bodySmall"])])
-    table = Table(rows, colWidths=[width * 0.28, width * 0.72])
-    table.setStyle(
+    bits: List[Any] = [Paragraph(f"{space_name.upper()} NEEDS", s["section"])]
+    bits.append(_needs_stack(_space_needs(lead, deliverable), width))
+    paint = _paint_block(deliverable, width)
+    if paint:
+        bits += [Spacer(1, 6), paint]
+    bits += [Spacer(1, 7), _budget_callout(_budget_range(lead, deliverable, layers), width)]
+    return bits
+
+
+def _zone_copy(z: Dict[str, str]) -> str:
+    return (z.get("desc") or z.get("why") or "Keep the existing shell; change only the org system.").strip()
+
+
+def _zones_row(
+    zones: List[Dict[str, str]],
+    floor_plan: Optional[bytes],
+    width: float,
+) -> Table:
+    s = _styles()
+    left_w = width * 0.38
+    right_w = width - left_w - 10
+    if floor_plan:
+        visual = [
+            Paragraph("ZONE PLAN (TOP VIEW)", s["section"]),
+            _cover_image(floor_plan, left_w, 1.55 * inch),
+            Spacer(1, 3),
+            Paragraph("From your photo — no invented dimensions.", s["muted"]),
+        ]
+    else:
+        visual = [
+            Paragraph("ZONE PLAN (TOP VIEW)", s["section"]),
+            ZonePlan(zones or [], left_w, 1.55 * inch),
+            Spacer(1, 3),
+            Paragraph("Conceptual zone map — not a measured floor plan.", s["muted"]),
+        ]
+
+    items: List[List[Any]] = []
+    use = (zones or [])[:5] or [
+        {"title": "Landing Zone", "desc": "Drop daily items at the existing door path."},
+        {"title": "Storage Zone", "desc": "Matching bins on the walls you already have."},
+        {"title": "Circulation Zone", "desc": "Keep the walk path the photo already shows."},
+    ]
+    for i, z in enumerate(use, 1):
+        items.append(
+            [
+                NumberBadge(i, size=12),
+                [
+                    Paragraph(_esc(z.get("title") or f"Zone {i}"), s["label"]),
+                    Paragraph(_esc(_clip(_zone_copy(z), 140)), s["bodySmall"]),
+                ],
+            ]
+        )
+    listed = Table(items, colWidths=[16, max(right_w - 16, 40)])
+    listed.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), EMERALD),
-                ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SOFT]),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.3, LINE),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 1),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
+    right = [Paragraph("ROOM LAYOUT & ZONES", s["section"]), listed]
+    t = Table([[visual, right]], colWidths=[left_w, right_w + 10])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 10),
+            ]
+        )
+    )
+    return t
+
+
+def _additional_views(
+    views: Sequence[Optional[bytes]],
+    zones: List[Dict[str, str]],
+    width: float,
+) -> Optional[Table]:
+    s = _styles()
+    provided: List[Tuple[int, bytes]] = []
+    for i, raw in enumerate(views[:3]):
+        data = coerce_image_bytes(raw)
+        if data:
+            provided.append((i, data))
+    if not provided:
+        return None
+    n = len(provided)
+    gap = 8
+    card_w = (width - gap * (n - 1)) / n
+    cells = []
+    for idx, data in provided:
+        z = zones[idx] if idx < len(zones) else {}
+        label = (z.get("title") or f"View {idx + 1}").upper()
+        body = [
+            Paragraph(f"VIEW {idx + 1}  —  {_esc(label)}", s["cardCat"]),
+            Spacer(1, 3),
+            _cover_image(data, card_w - 8, 0.92 * inch),
+        ]
+        cells.append(_card(body, card_w, pad=5))
+    widths = [card_w] * n
+    t = Table([cells], colWidths=widths)
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -2), gap / 2),
+                ("LEFTPADDING", (1, 0), (-1, -1), gap / 2),
+                ("RIGHTPADDING", (-1, 0), (-1, 0), 0),
+            ]
+        )
+    )
+    s_head = Paragraph("ADDITIONAL VIEWS", _styles()["section"])
+    wrap = Table([[s_head], [t]], colWidths=[width])
+    wrap.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    return wrap
+
+
+def _check_items(
+    items: Sequence[str],
+    *,
+    numbered: bool = False,
+    limit: int = 4,
+    mark: str = "✓",
+) -> List[Any]:
+    s = _styles()
+    use = [str(x).strip() for x in items if str(x).strip()][:limit]
+    out: List[Any] = []
+    for i, item in enumerate(use, 1):
+        prefix = f"<b>{i}</b>" if numbered else mark
+        out.append(Paragraph(f'<font color="#059669">{prefix}</font>  {_esc(item)}', s["check"]))
+    return out
+
+
+def _bottom_cards(
+    strategy: List[str],
+    actions: List[str],
+    benefits: List[str],
+    width: float,
+) -> Table:
+    s = _styles()
+    gap = 8
+    col_w = (width - gap * 2) / 3
+    left = _card(
+        [Paragraph("DESIGN STRATEGY", s["section"]), *_check_items(strategy or DEFAULT_STRATEGY)],
+        col_w,
+        pad=7,
+    )
+    mid = _card(
+        [Paragraph("SIMPLE ACTION PLAN", s["section"]), *_check_items(actions or DEFAULT_ACTIONS, numbered=True)],
+        col_w,
+        pad=7,
+    )
+    right = _card(
+        [Paragraph("BENEFITS", s["section"]), *_check_items(benefits or DEFAULT_BENEFITS)],
+        col_w,
+        pad=7,
+        fill=MINT_BG,
+        box=MINT,
+    )
+    t = Table([[left, mid, right]], colWidths=[col_w, col_w, col_w])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (1, 0), gap),
+                ("LEFTPADDING", (1, 0), (2, 0), 0),
+            ]
+        )
+    )
+    return t
+
+
+def _compare_panel(
+    img_bytes: Optional[bytes],
+    width: float,
+    height: float,
+    banner: str,
+    empty_label: str,
+    empty_sub: str,
+) -> Table:
+    s = _styles()
+    data = coerce_image_bytes(img_bytes)
+    if data:
+        photo = _cover_image(data, width, height)
+    else:
+        photo = _cover_image(
+            None, width, height, missing_label=empty_label, missing_sublabel=empty_sub
+        )
+    head = Table([[Paragraph(banner, s["banner"])]], colWidths=[width], rowHeights=[15])
+    head.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), EMERALD),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    stack = Table([[head], [photo]], colWidths=[width], rowHeights=[15, height])
+    stack.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("BOX", (0, 0), (-1, -1), 0.7, EMERALD),
+                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 1), (0, 1), WHITE),
+            ]
+        )
+    )
+    return stack
+
+
+def _before_after_section(before: Optional[bytes], after: Optional[bytes], width: float, *, compact: bool = True) -> Table:
+    gap = 8
+    col_w = (width - gap) / 2
+    photo_h = 2.05 * inch if compact else 6.55 * inch
+    left = _compare_panel(
+        before, col_w, photo_h,
+        COMPARE_BEFORE_BANNER, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
+    )
+    right = _compare_panel(
+        after, col_w, photo_h,
+        COMPARE_AFTER_BANNER, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
+    )
+    t = Table([[left, right]], colWidths=[col_w, col_w])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), gap),
+                ("LEFTPADDING", (1, 0), (1, 0), 0),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+            ]
+        )
+    )
+    return t
+
+
+def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
+    s = _styles()
+    rows = [[
+        Paragraph("ITEM", s["th"]),
+        Paragraph("QTY", s["thRight"]),
+        Paragraph("EST. PRICE", s["thRight"]),
+        Paragraph("SUBTOTAL", s["thRight"]),
+    ]]
+    total = 0.0
+    for it in (items or [])[:12]:
+        qty, price, sub = _line_total(it)
+        total += sub
+        name = str(it.get("name") or "Organizer")
+        cat = _item_category(name)
+        rows.append([
+            Paragraph(f"<b>{_esc(name)}</b><br/><font size='6.2' color='#64748b'>{_esc(cat.title())}</font>", s["td"]),
+            Paragraph(str(int(qty) if qty.is_integer() else qty), s["tdRight"]),
+            Paragraph(_money(price) if price else "Typical", s["tdRight"]),
+            Paragraph(_money(sub) if sub else "—", s["tdRight"]),
+        ])
+    if len(rows) == 1:
+        rows.append([
+            Paragraph("Shopping list will follow your plan.", s["muted"]),
+            Paragraph("", s["td"]),
+            Paragraph("", s["td"]),
+            Paragraph("", s["td"]),
+        ])
+    rows.append([
+        Paragraph("ESTIMATED TOTAL  ·  typical retail range", s["tdBold"]),
+        "",
+        "",
+        Paragraph(_money(total) if total else "—", s["tdBoldRight"]),
+    ])
+    col_w = [width * 0.48, width * 0.12, width * 0.20, width * 0.20]
+    table = Table(rows, colWidths=col_w)
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), EMERALD),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, SOFT]),
+        ("BACKGROUND", (0, -1), (-1, -1), MINT_BG),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.3, LINE),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("SPAN", (0, -1), (2, -1)),
+    ]
+    table.setStyle(TableStyle(style_cmds))
     return table
 
 
-def _needs_line(needs: List[str]) -> str:
-    clean = [n for n in (needs or []) if n]
-    if not clean:
-        return ""
-    return "Needs: " + " · ".join(clean[:5])
+def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -> Table:
+    s = _styles()
+    inst = layers.get("customer_instruction") or {}
+    steps = [x for x in (inst.get("do_this_week") or action_plan or DEFAULT_ACTIONS) if x][:4]
+    dont = [x for x in (inst.get("do_not") or []) if x][:4] or [
+        "Do not add walls, windows, or doors.",
+        "Do not invent room dimensions.",
+        "Paint is optional — skip it unless it helps.",
+    ]
+    reset = [x.strip() for x in str(inst.get("weekly_reset") or "").split(",") if x.strip()]
+    if len(reset) <= 1:
+        blob = str(inst.get("weekly_reset") or "")
+        reset = [p.strip() for p in re.split(r"[.;]", blob) if p.strip()]
+    reset = [(r[:1].upper() + r[1:]) if r else r for r in reset]
+    if not reset:
+        reset = [
+            "Return items to their labeled bin",
+            "Clear the landing zone / floor path",
+            "Wipe one work surface",
+        ]
+    start = inst.get("start_here") or (steps[0] if steps else "Start with the floor path, then label homes.")
+    gap = 8
+    col_w = (width - gap * 2) / 3
+    week = _card(
+        [
+            Paragraph("THIS WEEK — DIY STEPS", s["section"]),
+            Paragraph(_esc(_clip(str(start), 140)), s["muted"]),
+            Spacer(1, 3),
+            *_check_items(steps, numbered=True, limit=5),
+            Spacer(1, 3),
+            Paragraph("Typical org session — no construction.", s["cardMeta"]),
+        ],
+        col_w,
+        pad=7,
+    )
+    avoid = _card(
+        [
+            Paragraph("DO NOT", s["section"]),
+            *_check_items(dont, limit=4, mark="–"),
+        ],
+        col_w,
+        pad=7,
+    )
+    weekly = _card(
+        [
+            Paragraph("10-MINUTE WEEKLY RESET", s["section"]),
+            *_check_items(reset, limit=5),
+            Spacer(1, 3),
+            Paragraph("A short reset keeps the system — not a remodel.", s["muted"]),
+        ],
+        col_w,
+        pad=7,
+        fill=MINT_BG,
+        box=MINT,
+    )
+    t = Table([[week, avoid, weekly]], colWidths=[col_w, col_w, col_w])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (1, 0), gap),
+            ]
+        )
+    )
+    return t
 
 
 # ──────────────────────────── Build ─────────────────────────────
@@ -1405,41 +1453,51 @@ def build_pdf(
     space_name = space_label(space_key)
     title_text = plan_title(space_key)
     customer_name = lead.get("name") or "there"
+    vibe = _keyword_line(lead)
     content_w = PAGE_W - 2 * MARGIN
 
-    frame = Frame(
+    dash_frame = Frame(
         MARGIN,
-        FOOTER_H + 0.08 * inch,
+        FOOTER_H + 0.06 * inch,
         content_w,
-        PAGE_H - HEADER_H - FOOTER_H - 0.16 * inch,
+        PAGE_H - DASH_HEADER_H - FOOTER_H - 0.12 * inch,
+        leftPadding=0,
+        rightPadding=0,
+        topPadding=2,
+        bottomPadding=2,
+        showBoundary=0,
+    )
+    int_frame = Frame(
+        MARGIN,
+        FOOTER_H + 0.06 * inch,
+        content_w,
+        PAGE_H - INT_HEADER_H - FOOTER_H - 0.12 * inch,
         leftPadding=0,
         rightPadding=0,
         topPadding=4,
-        bottomPadding=4,
+        bottomPadding=2,
         showBoundary=0,
-    )
-    template = PageTemplate(
-        id="blueprint",
-        frames=[frame],
-        onPage=lambda c, d: _draw_chrome(c, d, customer_name),
     )
     doc = BaseDocTemplate(
         buf,
         pagesize=LETTER,
-        pageTemplates=[template],
+        pageTemplates=[
+            PageTemplate(id="dashboard", frames=[dash_frame], onPage=_make_on_page("dashboard", title_text, vibe)),
+            PageTemplate(id="interior", frames=[int_frame], onPage=_make_on_page("interior", title_text, vibe)),
+            PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe)),
+        ],
         title=f"{title_text} — FlowSpace Blueprint",
         author="FlowSpace",
     )
 
     layers = resolve_layers(lead, deliverable)
     zones = deliverable.get("zones") or []
-    needs = deliverable.get("needs") or []
     shopping = deliverable.get("shopping_list") or []
     strategy = deliverable.get("strategy") or []
-    action_plan = deliverable.get("action_plan") or []
+    action_plan = list(deliverable.get("action_plan") or [])
     inst = layers.get("customer_instruction") or {}
     if inst.get("do_this_week"):
-        action_plan = inst["do_this_week"]
+        action_plan = list(inst["do_this_week"])
     benefits = deliverable.get("benefits") or []
     intro = (
         deliverable.get("intro")
@@ -1447,248 +1505,99 @@ def build_pdf(
     )
     story: List[Any] = []
 
-    # ── Title band
-    eyebrow = Table(
-        [[Paragraph("ORGANIZATION PLAN", s["kicker"])]],
-        colWidths=[content_w * 0.46],
-    )
-    eyebrow.setStyle(
-        TableStyle(
-            [
-                ("LINEBEFORE", (0, 0), (0, 0), 1.4, MINT),
-                ("LEFTPADDING", (0, 0), (0, 0), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ]
-        )
-    )
-    title_left = [
-        eyebrow,
-        Paragraph(title_text, s["h1"]),
-        Paragraph(VALUES_LINE, s["values"]),
-        Paragraph(_keyword_line(lead) + "  ·  SAME WALLS  ·  SAME WINDOWS", s["muted"]),
-    ]
-    story_blk = [
-        Paragraph(f"Hi {customer_name} — this plan is designed for how you live.", s["bodySmall"]),
-        Spacer(1, 2),
-        Paragraph(intro, s["body"]),
-    ]
-    needs_line = _needs_line(needs)
-    if needs_line:
-        story_blk += [Spacer(1, 3), Paragraph(needs_line, s["muted"])]
-    band = Table([[title_left, story_blk]], colWidths=[content_w * 0.46, content_w * 0.54])
-    band.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    story.append(band)
+    # ── Page 1: dashboard ────────────────────────────────────────────
+    story.append(Paragraph(_esc(_clip(intro, 160)), s["intro"]))
+    story.append(Spacer(1, 6))
 
-    # ── Six Brain layers (customer-visible structured reasoning)
-    story.append(Paragraph("SIX-LAYER REASONING  ·  OBSERVATION → INSTRUCTION", s["kicker"]))
-    story.append(Spacer(1, 2))
-    story.append(_layers_strip(layers, content_w))
-    story.append(Spacer(1, 3))
+    left_w = content_w * 0.62
+    right_w = content_w * 0.36
+    hero_h = 3.22 * inch
+    extra_views = [images.get("view_1"), images.get("view_2"), images.get("view_3")]
+    if not any(coerce_image_bytes(v) for v in extra_views):
+        hero_h = 3.72 * inch
 
-    # ── 01 Hero + 02/03 story already above + What's new
-    left_w = content_w * 0.56
-    right_w = content_w * 0.42
     hero = _hero_block(
         images.get("front_view"),
-        zones,
         left_w,
-        1.72 * inch,
+        hero_h,
         kind=str(images.get("front_view_kind") or "organized"),
     )
-    right = [
-        _section_head("01", "Project story", right_w),
-        Paragraph(
-            deliverable.get("summary")
-            or intro,
-            s["bodySmall"],
-        ),
-        Spacer(1, 6),
-        _section_head("02", "What's new & why", right_w),
-        _whats_new(needs, zones, right_w),
-    ]
-    top = Table([[hero, right]], colWidths=[left_w + 6, right_w])
+    side = _sidebar(lead, deliverable, layers, right_w, space_name)
+    top = Table([[hero, side]], colWidths=[left_w + 8, right_w])
     top.setStyle(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 8),
+                ("RIGHTPADDING", (0, 0), (0, 0), 10),
             ]
         )
     )
     story.append(top)
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 8))
+    story.append(_zones_row(zones, images.get("floor_plan"), content_w))
 
-    # ── 03 Room flow
-    story.append(_section_head("03", f"{space_name} flow guide — Room layout & zones", content_w))
-    story.append(_zone_flow(zones, images.get("floor_plan"), content_w))
-    story.append(Spacer(1, 4))
+    views = _additional_views(extra_views, zones, content_w)
+    if views:
+        story.append(Spacer(1, 7))
+        story.append(views)
 
-    # ── 04 Detail cards
-    story.append(_section_head("04", "System details", content_w))
+    story.append(Spacer(1, 8))
+    story.append(_bottom_cards(strategy, action_plan, benefits, content_w))
+
+    # ── Page 2: shopping + DIY ───────────────────────────────────────
+    story.append(NextPageTemplate("interior"))
+    story.append(PageBreak())
+
+    story.append(Paragraph("CURATED SELECTIONS — SHOPPING LIST", s["section"]))
     story.append(
-        _detail_cards(
-            zones,
-            [images.get("view_1"), images.get("view_2"), images.get("view_3")],
-            content_w,
+        Paragraph(
+            f"Hi { _esc(customer_name) } — shop this kit, then follow this week's DIY. "
+            f"{_esc(_clip(str(deliverable.get('budget_note') or ''), 120))}".strip(),
+            s["muted"],
         )
     )
     story.append(Spacer(1, 4))
-
-    # ── 05 Curated selections
-    shop_head = Table(
-        [[
-            _section_head("05", "Curated selections — Shopping list", content_w * 0.72),
-            Paragraph(deliverable.get("budget_note") or "Estimated retail · confirm before you buy.", s["muted"]),
-        ]],
-        colWidths=[content_w * 0.72, content_w * 0.28],
-    )
-    shop_head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    shop_bits: List[Any] = [shop_head, Spacer(1, 2), _shopping_cards(shopping, content_w)]
-    if shopping:
-        total = 0.0
-        for it in shopping:
-            try:
-                total += float(it.get("qty", 1) or 1) * float(it.get("price", 0) or 0)
-            except (TypeError, ValueError):
-                pass
-        shop_bits += [
-            Spacer(1, 3),
-            Paragraph(f"<b>Estimated total</b>  ${total:,.2f}  ·  Budget is a typical retail range.", s["muted"]),
-        ]
-    early_links = deliverable.get("shopping_links") or []
-    if early_links:
-        shop_bits.append(Spacer(1, 3))
-        shop_bits.append(Paragraph("Shopping Links", s["h3"]))
+    story.append(_shopping_table(shopping, content_w))
+    links = deliverable.get("shopping_links") or []
+    if links:
+        story.append(Spacer(1, 2))
         link_line = "   ·   ".join(
-            f'<link href="{lnk.get("url") or ""}" color="#047857"><u>{lnk.get("name") or lnk.get("url")}</u></link>'
-            for lnk in early_links[:6]
+            f'<link href="{_esc(lnk.get("url") or "")}" color="#047857"><u>{_esc(lnk.get("name") or lnk.get("url") or "")}</u></link>'
+            for lnk in links[:6]
             if lnk.get("name") or lnk.get("url")
         )
         if link_line:
-            shop_bits.append(Paragraph(link_line, s["bodySmall"]))
-    story.append(KeepTogether(shop_bits))
-    story.append(Spacer(1, 3))
-
-    # ── 06 Palette
-    story.append(_section_head("06", "Color & material palette", content_w))
-    story.append(_palette_row(lead, deliverable, content_w))
-    wall_name = (deliverable.get("wall_color_name") or "").strip()
-    wall_hex = (deliverable.get("wall_color_hex") or "").strip()
-    if wall_name or wall_hex:
-        story.append(Spacer(1, 2))
-        story.append(Paragraph(OPTIONAL_PAINT_NOTE, s["muted"]))
-    story.append(Spacer(1, 3))
-
-    # ── 07 Roadmap
-    story.append(_section_head("07", "Implementation roadmap — Simple action plan", content_w))
-    story.append(_roadmap(action_plan, content_w))
-    story.append(Spacer(1, 3))
-
-    # ── 08 / 09 Principles + reset
-    story.append(_section_head("08", "Styling rules & weekly reset", content_w))
-    story.append(_principles_and_reset(strategy, benefits, content_w))
-    story.append(Spacer(1, 3))
-
-    # ── 09 Notes
-    notes = deliverable.get("notes") or DEFAULT_NOTES
-    story.append(_section_head("09", "Notes & tips", content_w))
-    notes_card = Table([[Paragraph(notes, s["bodySmall"])]], colWidths=[content_w])
-    notes_card.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), SOFT),
-                ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
-                ("LINEBEFORE", (0, 0), (0, 0), 3, MINT),
-                ("ROUNDEDCORNERS", [RADIUS, RADIUS, RADIUS, RADIUS]),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 7),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-            ]
-        )
-    )
-    story.append(notes_card)
-    story.append(Spacer(1, 3))
-
-    # ── 10 Assessment + real validation (fit / flow / budget / possessions)
-    story.append(
-        KeepTogether(
-            [
-                _section_head("10", "Designer assessment", content_w),
-                _assessment_row(deliverable, content_w),
-            ]
-        )
-    )
+            story.append(Paragraph(f"<b>Shopping Links</b>  {link_line}", s["bodySmall"]))
     story.append(Spacer(1, 4))
-    story.append(Paragraph("Validation — real checks, not room measurements.", s["muted"]))
-    story.append(Spacer(1, 2))
-    story.append(_validation_checks(layers, content_w))
+    story.append(
+        _budget_callout(
+            _budget_range(lead, deliverable, layers),
+            content_w,
+            compact=False,
+        )
+    )
 
-    # ── Extra pages: additional customer photos (first upload is the Before panel)
-    customer_photos: List[Optional[bytes]] = images.get("customer_photos") or []
+    story.append(Spacer(1, 7))
+    story.append(Paragraph("IMPLEMENTATION ROADMAP — SIMPLE ACTION PLAN", s["section"]))
+    story.append(_diy_columns(layers, action_plan, content_w))
+
+    notes = str(deliverable.get("notes") or "").strip()
+    if notes and notes != DEFAULT_NOTES:
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("NOTES &amp; TIPS", s["section"]))
+        story.append(Paragraph(_esc(notes), s["muted"]))
+    attachment_note = deliverable.get("attachment_note") or ""
+    if attachment_note:
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(_esc(attachment_note), s["bodySmall"]))
+
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
-    included_photos = 0
-    for idx, b in enumerate(customer_photos, 1):
-        if not b:
-            continue
-        if before_bytes and idx == 1:
-            continue
-        included_photos += 1
-        story.append(PageBreak())
-        story.append(Paragraph(f"Reference Photo {idx}", s["h3"]))
-        story.append(Paragraph("Customer photo — the physical shell we organize, not a redesign.", s["muted"]))
-        story.append(Spacer(1, 4))
-        max_w = content_w
-        max_h = PAGE_H - HEADER_H - FOOTER_H - 1.1 * inch
-        try:
-            bio = io.BytesIO(b)
-            ir = ImageReader(bio)
-            iw, ih = ir.getSize()
-            ratio = min(max_w / iw, max_h / ih)
-            bio.seek(0)
-            img = PlatypusImage(bio, width=iw * ratio, height=ih * ratio)
-            img.hAlign = "CENTER"
-            story.append(img)
-        except Exception:
-            story.append(_placeholder(max_w, max_h, "Photo unavailable"))
-
-    links = deliverable.get("shopping_links") or []
-    attachment_note = deliverable.get("attachment_note") or ""
-    # Compact links already sit under curated selections. Only add a full table
-    # when there are reference photos or a fulfillment attachment note.
-    if included_photos or attachment_note:
-        link_bits: List[Any] = []
-        if included_photos:
-            story.append(PageBreak())
-        else:
-            link_bits.append(Spacer(1, 6))
-        if attachment_note or (links and included_photos):
-            link_bits.append(Paragraph("Shopping Links", s["h3"]))
-        if attachment_note:
-            link_bits.append(Paragraph(attachment_note, s["bodySmall"]))
-            link_bits.append(Spacer(1, 3))
-        if links and included_photos:
-            link_bits.append(_links_table(links, content_w))
-        if link_bits:
-            story.append(KeepTogether(link_bits))
-
-    # ── Last page: Before | After (Ryan) — only when at least one real photo exists
     if before_bytes or after_bytes:
+        story.append(NextPageTemplate("compare"))
         story.append(PageBreak())
-        story.append(_section_head("11", "Before & after — your space, re-zoned", content_w))
+        story.append(Paragraph("BEFORE &amp; AFTER — YOUR SPACE, RE-ZONED", s["section"]))
         story.append(
             Paragraph(
                 "Your original photo on the left. The organized view on the right — "
@@ -1697,8 +1606,8 @@ def build_pdf(
                 s["muted"],
             )
         )
-        story.append(Spacer(1, 8))
-        story.append(_before_after_section(before_bytes, after_bytes, content_w))
+        story.append(Spacer(1, 10))
+        story.append(_before_after_section(before_bytes, after_bytes, content_w, compact=False))
 
     doc.build(story)
     return buf.getvalue()
