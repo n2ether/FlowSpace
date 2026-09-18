@@ -9,7 +9,8 @@ Uses the bake-off garage fixture so the six Brain layers are customer-visible.
 Writes:
     backend/samples/flowspace-blueprint-sample.pdf
         Synthetic original (``before``) + organized FLUX stand-in (``after`` /
-        ``front_view``). Last page is the Before | After comparison.
+        ``front_view``) + three extra views. Page 1 is the dashboard; page 2 is
+        DIY + shopping with a compact Before | After strip.
     backend/samples/flowspace-blueprint-sample-placeholders.pdf
         Same plan with ``images={}`` — mint “Organized view coming soon” hero.
     backend/samples/flowspace-blueprint-sample-pageN.png
@@ -115,6 +116,8 @@ def main() -> None:
         before=original,
         after=organized,
         view_1=_synthetic_organized_jpeg(480, 320),
+        view_2=_synthetic_organized_jpeg(420, 300),
+        view_3=_synthetic_original_jpeg(420, 300),
         customer_photos=[original],
     )
     filled = build_pdf(lead=lead, deliverable=deliverable, images=images)

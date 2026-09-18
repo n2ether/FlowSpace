@@ -62,6 +62,10 @@ def _text(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+def _page_text(pdf_bytes: bytes, page: int) -> str:
+    return PdfReader(io.BytesIO(pdf_bytes)).pages[page].extract_text() or ""
+
+
 def _jpeg_bytes(color=(16, 92, 64), size=(480, 320)) -> bytes:
     img = Image.new("RGB", size, color)
     buf = io.BytesIO()
@@ -87,25 +91,39 @@ def test_plan_titles_are_space_aware_not_bedroom_generic():
 def test_pdf_matches_template_sections_without_fake_dimensions():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     assert pdf[:5] == b"%PDF-"
+    reader = PdfReader(io.BytesIO(pdf))
+    assert len(reader.pages) == 2
     text = _text(pdf)
+    p1 = _page_text(pdf, 0)
+    p2 = _page_text(pdf, 1)
 
     assert "FlowSpace" in text
     assert "Ada Lovelace" in text
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
     low = text.lower()
-    assert "organized view" in low
-    assert "room layout" in low or "flow guide" in low
-    assert "Storage Zone" in text
-    assert "curated selections" in low or "shopping list" in low
-    assert "estimated total" in low
-    assert "budget" in low or "retail" in low
-    assert "implementation roadmap" in low or "simple action plan" in low
-    assert "guiding principles" in low or "styling rules" in low
-    assert "designer assessment" in low
-    assert "Shopping Links" in text
+    p1_low = p1.lower()
+    p2_low = p2.lower()
+
+    # Page 1 — dashboard
+    assert "designed for" in p1_low and "how you live" in p1_low
+    assert "organized view" in p1_low
+    assert "garage needs" in p1_low or "space needs" in p1_low
+    assert "room layout" in p1_low or "zones" in p1_low
+    assert "Parking Zone" in p1
+    assert "design strategy" in p1_low
+    assert "simple action plan" in p1_low
+    assert "benefits" in p1_low
+    assert "budget range" in p1_low
+
+    # Page 2 — shopping + DIY (not crammed onto the dashboard)
+    assert "shopping list" in p2_low
+    assert "estimated total" in p2_low
+    assert "budget" in p2_low or "retail" in p2_low
+    assert "diy" in p2_low or "this week" in p2_low
+    assert "Shopping Links" in p2
     assert "The FlowSpace Design Team" in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
+
     for layer_name in (
         "Observation",
         "Human need",
@@ -117,7 +135,6 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
         assert layer_name.lower() in low
     assert "routine" in low or "park" in low
     assert "workbench" in low or "possessions" in low
-    assert "plan completeness" in low
     assert "measurement" in low
     assert "15 ft" not in text
     assert "15ft" not in text
@@ -129,7 +146,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
 def test_optional_paint_is_framed_not_required():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     text = _text(pdf)
-    assert "Optional paint" in text
+    assert "Optional paint" in text or "WALL COLOR" in text
     assert "consider if it helps" in text.lower() or "Consider this color" in text or "consider if it helps" in text
 
 
@@ -148,6 +165,7 @@ def test_pdf_handles_empty_deliverable():
     assert "95%" in text
     assert "observation" in text.lower()
     assert pdf[:5] == b"%PDF-"
+    assert len(PdfReader(io.BytesIO(pdf)).pages) == 2
 
 
 def test_pdf_placeholder_when_images_missing():
@@ -186,7 +204,13 @@ def test_pdf_embeds_detail_card_views_when_provided():
         images={"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3},
     )
     assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
+    assert "ADDITIONAL VIEWS" in _text(pdf)
     assert _page_image_count(pdf, 0) >= 4
+
+
+def test_pdf_omits_additional_views_when_missing():
+    pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
+    assert "ADDITIONAL VIEWS" not in _text(pdf)
 
 
 def test_pdf_labels_original_photo_as_interim_hero():
@@ -203,7 +227,7 @@ def test_pdf_labels_original_photo_as_interim_hero():
     assert _page_image_count(pdf, 0) >= 1
 
 
-def test_pdf_last_page_before_after_when_both_present():
+def test_pdf_before_after_when_both_present_stays_compact():
     before = _jpeg_bytes((140, 110, 70), (640, 420))
     after = _jpeg_bytes((20, 110, 70), (640, 420))
     pdf = build_pdf(
@@ -217,45 +241,47 @@ def test_pdf_last_page_before_after_when_both_present():
         },
     )
     reader = PdfReader(io.BytesIO(pdf))
-    assert len(reader.pages) >= 4
-    last = reader.pages[-1]
-    last_text = last.extract_text() or ""
-    assert "Before & after" in last_text or "BEFORE" in last_text
-    assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in last_text
-    assert "YOUR PHOTO" in last_text
-    assert "ORGANIZED VIEW" in last_text
-    assert COMPARE_BEFORE_EMPTY not in last_text
-    assert COMPARE_AFTER_EMPTY not in last_text
-    assert len(last.images) >= 2
-    # Page 1 hero still shows the organized render
-    assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
+    assert 2 <= len(reader.pages) <= 3
+    text = _text(pdf)
+    assert "Before & after" in text or "BEFORE" in text
+    assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in text
+    assert "YOUR PHOTO" in text
+    assert "ORGANIZED VIEW" in text
+    assert COMPARE_BEFORE_EMPTY not in text
+    assert COMPARE_AFTER_EMPTY not in text
+    # Comparison photos are on page 2 (or a short page 3), not a 5-page magazine
+    compare_page = reader.pages[-1] if len(reader.pages) == 3 else reader.pages[1]
+    assert len(compare_page.images) >= 2
+    assert HERO_PLACEHOLDER_LABEL not in text
     assert _page_image_count(pdf, 0) >= 1
 
 
-def test_pdf_last_page_honest_empty_when_only_after():
+def test_pdf_honest_empty_when_only_after():
     after = _jpeg_bytes((20, 110, 70), (400, 280))
     pdf = build_pdf(
         lead=LEAD,
         deliverable=DELIVERABLE,
         images={"front_view": after, "front_view_kind": "organized"},
     )
-    last_text = PdfReader(io.BytesIO(pdf)).pages[-1].extract_text() or ""
-    assert COMPARE_BEFORE_EMPTY in last_text
-    assert COMPARE_AFTER_EMPTY not in last_text
-    assert "ORGANIZED VIEW" in last_text
+    text = _text(pdf)
+    assert COMPARE_BEFORE_EMPTY in text
+    assert COMPARE_AFTER_EMPTY not in text
+    assert "ORGANIZED VIEW" in text
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
 
 
-def test_pdf_last_page_honest_empty_when_only_before():
+def test_pdf_honest_empty_when_only_before():
     original = _jpeg_bytes((140, 110, 70), (400, 280))
     pdf = build_pdf(
         lead=LEAD,
         deliverable=DELIVERABLE,
         images={"before": original, "front_view": original, "front_view_kind": "original"},
     )
-    last_text = PdfReader(io.BytesIO(pdf)).pages[-1].extract_text() or ""
-    assert COMPARE_AFTER_EMPTY in last_text
-    assert COMPARE_BEFORE_EMPTY not in last_text
-    assert "YOUR PHOTO" in last_text
+    text = _text(pdf)
+    assert COMPARE_AFTER_EMPTY in text
+    assert COMPARE_BEFORE_EMPTY not in text
+    assert "YOUR PHOTO" in text
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
 
 
 def test_pdf_ignores_non_bytes_front_view():
@@ -274,6 +300,7 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     text = _text(pdf)
     low = text.lower()
     answers = ryan_answers(doc["deliverable"]["blueprint_layers"])
+    reader = PdfReader(io.BytesIO(pdf))
 
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
@@ -290,5 +317,5 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "optional" in low
     assert answers["routine"]
     assert "workbench" in answers["possessions"].lower()
-    # Compact magazine plan — layers add a third page at most
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
+    assert len(reader.pages) == 2
+    assert "shopping list" in (reader.pages[1].extract_text() or "").lower()
