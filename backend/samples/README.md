@@ -14,8 +14,8 @@ Source: `backend/fixtures/bakeoff/garage_org_space.json` (six Brain layers + not
 | Page | What |
 |---|---|
 | 1 | Dashboard overview (hero, space needs, optional paint, zone plan, extra views, strategy / action / benefits) |
-| 2 | Shopping list + estimated budget, DIY this week, six-layer reasoning, compact Before \| After when a photo exists |
-| 3 | Only if Before \| After cannot share the DIY sheet |
+| 2 | Shopping list + estimated budget, DIY this week |
+| 3 | Before \| After when a real photo exists |
 
 ## Image keys (`build_pdf(..., images=)`)
 

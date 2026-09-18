@@ -5,8 +5,7 @@ Layout (Letter):
   Page 1 — dense dashboard inspired by the FlowSpace “design plan” sheet
             (hero, needs, optional paint, zones, extra views, strategy).
   Page 2 — consumer DIY instructions + full shopping list / budget.
-            Compact Before | After lives here when a real photo exists.
-  Page 3 — only if Before | After cannot fit with the DIY sheet.
+  Page 3 — Before | After when a real photo exists.
 
 Visual template only: site emerald/slate palette, Fraunces display + Inter body.
 Content is always an organization plan for closets, garages, laundry rooms,
@@ -50,7 +49,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from blueprint_layers import BUDGET_LABELS, STORAGE, layer_card_copy, resolve_layers
+from blueprint_layers import BUDGET_LABELS, STORAGE, resolve_layers
 from pdf_images import (
     COMPARE_AFTER_BANNER,
     COMPARE_AFTER_EMPTY,
@@ -1431,84 +1430,6 @@ def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -
     return t
 
 
-def _layers_strip(layers: Dict[str, Any], width: float) -> Table:
-    """Customer-visible six Brain layers — compact 3×2 cards on the DIY page."""
-    s = _styles()
-    cards = layer_card_copy(layers)
-    col_w = (width - 8) / 3
-    rows: List[List[Any]] = []
-    row: List[Any] = []
-    for num, title, body in cards:
-        inner = [
-            Paragraph(f"L{num}  {_esc(title)}", s["label"]),
-            Spacer(1, 2),
-            Paragraph(_esc(_clip(body, 120)), s["bodySmall"]),
-        ]
-        row.append(_card(inner, col_w, pad=4))
-        if len(row) == 3:
-            rows.append(row)
-            row = []
-    if row:
-        row += [""] * (3 - len(row))
-        rows.append(row)
-    t = Table(rows, colWidths=[col_w] * 3)
-    t.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-                ("TOPPADDING", (0, 0), (-1, -1), 1),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    return t
-
-
-def _validation_checks(layers: Dict[str, Any], width: float) -> Table:
-    s = _styles()
-    val = (layers or {}).get("validation") or {}
-    items = [
-        ("Fit", val.get("fit") or {}),
-        ("Flow", val.get("flow") or {}),
-        ("Budget", val.get("budget_band") or {}),
-        ("Possessions", val.get("possession_respect") or {}),
-    ]
-    col_w = (width - 9) / 4
-    cards = []
-    for label, check in items:
-        status = str(check.get("status") or "watch").upper()
-        note = check.get("note") or ""
-        band = check.get("band") or ""
-        body = [Paragraph(label.upper(), s["cardCat"]), Paragraph(status, s["cardTitle"])]
-        if band:
-            body.append(Paragraph(_esc(str(band)), s["price"]))
-        if note:
-            body.append(Paragraph(_esc(_clip(str(note), 90)), s["cardMeta"]))
-        cards.append(_card(body, col_w, pad=4))
-    checks = Table([cards], colWidths=[col_w] * 4)
-    checks.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 1),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-            ]
-        )
-    )
-    extras: List[Any] = [checks]
-    conflicts = [c for c in (val.get("conflicts") or []) if c]
-    assumptions = [c for c in (val.get("assumptions") or []) if c]
-    if conflicts:
-        extras.append(Paragraph("Conflicts: " + _esc("; ".join(conflicts[:2])), s["muted"]))
-    if assumptions:
-        extras.append(Paragraph("Assumptions: " + _esc("; ".join(assumptions[:2])), s["muted"]))
-    wrap = Table([[e] for e in extras], colWidths=[width])
-    wrap.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    return wrap
-
-
 # ──────────────────────────── Build ─────────────────────────────
 def build_pdf(
     *,
@@ -1660,16 +1581,6 @@ def build_pdf(
     story.append(Spacer(1, 7))
     story.append(Paragraph("IMPLEMENTATION ROADMAP — SIMPLE ACTION PLAN", s["section"]))
     story.append(_diy_columns(layers, action_plan, content_w))
-
-    story.append(Spacer(1, 6))
-    story.append(Paragraph("WHY THIS PLAN  ·  OBSERVATION → INSTRUCTION", s["kicker"]))
-    story.append(Spacer(1, 2))
-    story.append(_layers_strip(layers, content_w))
-
-    story.append(Spacer(1, 5))
-    story.append(Paragraph("VALIDATION — real checks, not room measurements.", s["muted"]))
-    story.append(Spacer(1, 2))
-    story.append(_validation_checks(layers, content_w))
 
     notes = str(deliverable.get("notes") or "").strip()
     if notes and notes != DEFAULT_NOTES:

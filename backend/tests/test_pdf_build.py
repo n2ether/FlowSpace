@@ -124,16 +124,13 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "Shopping Links" in p2
     assert "The FlowSpace Design Team" in text
 
-    for layer_name in (
-        "Observation",
-        "Human need",
-        "Spatial constraint",
-        "Recommendation",
-        "Validation",
-        "Customer instruction",
-    ):
-        assert layer_name.lower() in low
-    assert "routine" in low or "park" in low
+    # Six-layer reasoning stays in the backend schema — not on the customer PDF.
+    assert "why this plan" not in low
+    assert "observation → instruction" not in low
+    assert "l01" not in low.replace(" ", "")
+    assert "human need" not in low
+    assert "spatial constraint" not in low
+    assert "customer instruction" not in low
     assert "workbench" in low or "possessions" in low
     assert "measurement" in low
     assert "15 ft" not in text
@@ -163,7 +160,7 @@ def test_pdf_handles_empty_deliverable():
     assert "Closet Blueprint" in text
     assert "FlowSpace" in text
     assert "95%" in text
-    assert "observation" in text.lower()
+    assert "organized view" in text.lower() or "shopping list" in text.lower()
     assert pdf[:5] == b"%PDF-"
     assert len(PdfReader(io.BytesIO(pdf)).pages) == 2
 
@@ -304,18 +301,19 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
 
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
-    assert "observation" in low and "human need" in low
-    assert "spatial constraint" in low and "recommendation" in low
-    assert "validation" in low and "customer instruction" in low
-    assert "park both cars" in low
+    assert "why this plan" not in low
+    assert "human need" not in low
+    assert "customer instruction" not in low
+    assert "park" in low
+    assert "car" in low
     assert "workbench" in low
     assert "95%" in text
     assert "$100" in text or "100" in text
     assert "227" in text or "budget" in low
-    assert "why" in low or "should work" in low or "routine is park" in low
     assert "15 ft" not in text
     assert "optional" in low
     assert answers["routine"]
     assert "workbench" in answers["possessions"].lower()
     assert len(reader.pages) == 2
     assert "shopping list" in (reader.pages[1].extract_text() or "").lower()
+    assert "this week" in (reader.pages[1].extract_text() or "").lower() or "diy" in (reader.pages[1].extract_text() or "").lower()

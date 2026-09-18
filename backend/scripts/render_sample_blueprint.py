@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render sample FlowSpace Blueprint PDFs (no Mongo / AI / Stripe).
 
-Uses the bake-off garage fixture so the six Brain layers are customer-visible.
+Uses the bake-off garage fixture (organization plan — not a bedroom redesign).
 
   cd backend
   python scripts/render_sample_blueprint.py
@@ -10,7 +10,7 @@ Writes:
     backend/samples/flowspace-blueprint-sample.pdf
         Synthetic original (``before``) + organized FLUX stand-in (``after`` /
         ``front_view``) + three extra views. Page 1 is the dashboard; page 2 is
-        DIY + shopping with a compact Before | After strip.
+        DIY + shopping. Before | After is a short page 3 when photos exist.
     backend/samples/flowspace-blueprint-sample-placeholders.pdf
         Same plan with ``images={}`` — mint “Organized view coming soon” hero.
     backend/samples/flowspace-blueprint-sample-pageN.png
