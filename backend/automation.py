@@ -19,7 +19,7 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
-from ai_image_generator import generate_front_view
+from ai_image_generator import WALL_RETRY_CONSTRAINT, generate_front_view
 from email_service import send_blueprint
 from image_orientation import (
     UnreadableImage,
@@ -130,6 +130,14 @@ def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> 
     return original_bytes
 
 
+def _qa_retry_extra(qa: RenderQAResult) -> str:
+    bits: list[str] = []
+    if qa.walls_repainted:
+        bits.append(WALL_RETRY_CONSTRAINT)
+    bits.extend(qa.reasons[:3])
+    return " ".join(bits)
+
+
 async def _generate_organized_with_qa(
     *,
     lead: Dict[str, Any],
@@ -170,13 +178,14 @@ async def _generate_organized_with_qa(
         return organized_bytes, image_mime, qa
 
     logger.warning(
-        "[automation] Organized render failed QA (attempt 1): windows_covered=%s gravity_wrong=%s reasons=%s",
+        "[automation] Organized render failed QA (attempt 1): windows_covered=%s gravity_wrong=%s walls_repainted=%s reasons=%s",
         qa.windows_covered,
         qa.gravity_wrong,
+        qa.walls_repainted,
         qa.reasons,
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
-    extra = " ".join(qa.reasons[:3])
+    extra = _qa_retry_extra(qa)
     try:
         organized_bytes, image_mime = await generate_front_view(
             lead=lead,
@@ -192,6 +201,7 @@ async def _generate_organized_with_qa(
             ok=False,
             windows_covered=qa.windows_covered,
             gravity_wrong=qa.gravity_wrong,
+            walls_repainted=qa.walls_repainted,
             reasons=list(qa.reasons) + [f"retry generate failed: {img_err}"],
             attempt=2,
             error="retry_generate_failed",

@@ -991,11 +991,22 @@ def _needs_stack(needs: List[Tuple[str, str, str]], width: float) -> Table:
     return t
 
 
+def _is_keep_existing_paint(deliverable: Dict[str, Any]) -> bool:
+    name = (deliverable.get("wall_color_name") or "").strip().lower()
+    if "keep existing" in name or "no paint" in name:
+        return True
+    hex_color = (deliverable.get("wall_color_hex") or "").strip()
+    code = (deliverable.get("wall_color_code") or "").strip()
+    return not (name or hex_color or code)
+
+
 def _paint_block(deliverable: Dict[str, Any], width: float) -> Optional[Table]:
     s = _styles()
     name = (deliverable.get("wall_color_name") or "").strip()
     code = (deliverable.get("wall_color_code") or "").strip()
     hex_color = (deliverable.get("wall_color_hex") or "").strip()
+    if _is_keep_existing_paint(deliverable):
+        return None
     if not (name or hex_color or code):
         return None
     note = (deliverable.get("wall_color_note") or OPTIONAL_PAINT_NOTE).strip()

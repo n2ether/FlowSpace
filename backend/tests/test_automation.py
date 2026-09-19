@@ -315,6 +315,67 @@ def test_automation_retries_once_after_qa_fail(monkeypatch):
     assert qa.get("ok") is True
 
 
+def test_qa_retry_extra_includes_wall_preserve_constraint():
+    from ai_image_generator import WALL_RETRY_CONSTRAINT
+    from automation import _qa_retry_extra
+    from render_qa import RenderQAResult
+
+    extra = _qa_retry_extra(
+        RenderQAResult(
+            ok=False,
+            walls_repainted=True,
+            reasons=["Walls went from light blue to taupe"],
+        )
+    )
+    assert "original light wall color from the photo" in extra.lower()
+    assert WALL_RETRY_CONSTRAINT in extra
+    assert "taupe" in extra.lower()
+
+
+def test_automation_retries_once_after_wall_repaint_qa(monkeypatch):
+    from render_qa import RenderQAResult
+
+    original = _jpeg((160, 190, 220))  # light blue
+    first = _jpeg((200, 170, 140))  # warm taupe
+    second = _jpeg((160, 190, 220))
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return (first if len(calls) == 1 else second), "image/jpeg"
+
+    qas = [
+        RenderQAResult(
+            ok=False,
+            walls_repainted=True,
+            reasons=["Walls shifted from light blue to taupe"],
+        ),
+        RenderQAResult(ok=True),
+    ]
+
+    def fake_review(**kwargs):
+        return qas.pop(0)
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review)
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    captured: Dict[str, Any] = {}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    assert len(calls) == 2
+    assert calls[1].get("stronger_rails") is True
+    extra = (calls[1].get("extra_constraint") or "").lower()
+    assert "original light wall color from the photo" in extra
+    assert captured["images"]["after"] == second
+    qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
+    assert qa.get("ok") is True
+
+
 def test_automation_discards_after_when_qa_fails_twice(monkeypatch):
     from render_qa import RenderQAResult
 

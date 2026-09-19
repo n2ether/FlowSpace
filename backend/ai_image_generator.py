@@ -28,7 +28,19 @@ TEXT_TO_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
 from ai_drafter import BOTHERS, COLORS, FEELING, STORAGE, STYLE, _humanize
 from image_orientation import upright_bytes
 
+# Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
+SOFT_GOODS_COLOR_FALLBACK = "neutral textiles that complement the existing wall color"
+
 # Shared rails for Kontext, text-to-image, and QA retries.
+WALL_PRESERVE_RAILS = (
+    "HARD CONSTRAINT — WALL PAINT: Match the reference photo's existing wall paint "
+    "exactly — same hue and lightness (for example light blue or blue-gray if that "
+    "is what the photo shows). Do not repaint, re-tint, warm, taupe, beige, cream, "
+    "or earth-tone the walls. Do not change wall paint in this visual. Paint is not "
+    "part of the transform. Customer color preferences apply ONLY to textiles, "
+    "pillows, baskets, rugs, throws, and accessories — never to walls. "
+)
+
 ORGANIZE_RAILS = (
     "HARD CONSTRAINT: Windows and room dimensions must stay ~95% accurate to the "
     "source photo — same window count, size, and placement, same wall lengths, "
@@ -41,15 +53,29 @@ ORGANIZE_RAILS = (
     "ceiling — never mounted on a wall. "
     "Gravity must be correct: floor at the bottom of the frame, ceiling at the top. "
     "Do not rotate the room or treat a wall as the ceiling. "
-    "Do not change wall paint in this visual. Paint is not part of the transform. "
+    + WALL_PRESERVE_RAILS
 )
 
 RETRY_RAILS = (
-    "PREVIOUS RENDER FAILED QA. The last attempt covered a window/door or put a "
-    "ceiling fixture on a wall / used wrong gravity. Re-edit the source photo: "
-    "keep every window fully visible, keep fans and lights on the ceiling, "
-    "floor at the bottom. Do not repeat the failed layout."
+    "PREVIOUS RENDER FAILED QA. The last attempt covered a window/door, put a "
+    "ceiling fixture on a wall / used wrong gravity, or changed the wall paint. "
+    "Re-edit the source photo: keep every window fully visible, keep fans and lights "
+    "on the ceiling, floor at the bottom, and match the original light wall color "
+    "from the photo — do not warm, taupe, or repaint the walls. "
+    "Do not repeat the failed layout."
 )
+
+WALL_RETRY_CONSTRAINT = (
+    "Keep the original light wall color from the photo exactly. "
+    "Do not repaint or warm the walls. Color preferences apply only to textiles "
+    "and accessories."
+)
+
+
+def _soft_goods_colors(lead: Dict[str, Any]) -> str:
+    """color_prefs describe textiles/accessories only — never wall paint."""
+    prefs = _humanize(lead.get("color_prefs") or [], COLORS)
+    return ", ".join(prefs) if prefs else SOFT_GOODS_COLOR_FALLBACK
 
 
 def _build_kontext_prompt(
@@ -60,12 +86,12 @@ def _build_kontext_prompt(
     extra_constraint: str = "",
 ) -> str:
     """Prompt for image-EDITING — keep windows/dimensions ~95% accurate.
-    Do not change wall paint. Only change furniture/storage/loose items."""
+    Match existing wall paint. Only change furniture/storage/loose items."""
     deliverable = deliverable or {}
     space = (lead.get("space_type") or "room").lower().replace("_", " ")
 
     style_str = ", ".join(_humanize(lead.get("style_prefs") or [], STYLE)) or "modern minimalist"
-    color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"
+    color_str = _soft_goods_colors(lead)
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "everyday items"
 
     rails = ORGANIZE_RAILS
@@ -76,11 +102,13 @@ def _build_kontext_prompt(
         extra = extra + " "
 
     return (
-        f"Organize this existing {space} — {style_str} styling, {color_str} textiles "
-        f"and accessories. Add tidy storage for {storage_str}: matching baskets, "
+        f"Organize this existing {space} — {style_str} styling. "
+        f"Apply these colors ONLY to textiles and accessories (never walls): {color_str}. "
+        f"Add tidy storage for {storage_str}: matching baskets, "
         f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
         f"{rails}{extra}"
-        "Only change furniture, storage, and loose items. Photorealistic, natural lighting, "
+        "Only change furniture, storage, and loose items. Keep the photo's existing "
+        "wall paint exactly. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -97,7 +125,7 @@ def _build_text_to_image_prompt(
     space = (lead.get("space_type") or "closet").lower().replace("_", " ")
 
     style_str = ", ".join(_humanize(lead.get("style_prefs") or [], STYLE)) or "modern minimalist"
-    color_str = ", ".join(_humanize(lead.get("color_prefs") or [], COLORS)) or "warm neutrals with soft sage accents"
+    color_str = _soft_goods_colors(lead)
     feeling_str = ", ".join(_humanize(lead.get("desired_feeling") or [], FEELING)) or "calm and functional"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "general storage"
 
@@ -107,6 +135,8 @@ def _build_text_to_image_prompt(
         "Keep ceiling fans, lights, and fixtures on the ceiling, never on a wall. "
         "Gravity correct: floor at the bottom, ceiling at the top. "
         "Do not feature a painted-wall makeover — keep existing wall color. "
+        "Match existing wall paint exactly; apply color preferences only to "
+        "textiles and accessories, never walls. "
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
@@ -116,7 +146,8 @@ def _build_text_to_image_prompt(
 
     return (
         f"Photorealistic photograph of a beautifully organized residential {space}. "
-        f"Aesthetic style: {style_str}. Textile and accessory colors: {color_str}. "
+        f"Aesthetic style: {style_str}. "
+        f"Textile and accessory colors only (never wall paint): {color_str}. "
         f"Atmosphere: {feeling_str}, mentally calming. "
         f"Smart storage for {storage_str} — modular shelving, labeled bins, baskets, hooks. "
         f"{rails}{extra}"
