@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import anthropic
 
 from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
+from image_orientation import jpeg_for_vision, upright_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ Always weave in the mental-health angle: clutter causes stress, organization cre
 Hard rules:
 - Windows and room dimensions must stay ~95% faithful to the customer's real space. Never invent footage, window counts, openings, or measured callouts.
 - Do not propose new walls, windows, doors, or construction. Organize with bins, furniture, and layout.
+- Never place shelves, cabinets, racks, or storage over or in front of windows or doors. Openings stay fully visible and in their photo location.
+- Ceiling fans, lights, vents, and fixtures stay on the ceiling. Do not relocate them onto walls.
+- Treat the attached photo as gravity-correct: floor at the bottom, ceiling at the top. Do not describe the room as rotated.
 - Wall paint/color is OPTIONAL. If you include a suggestion, wall_color_note must say it is optional — consider it only if it helps the goal. Never put "paint the walls" in action_plan. The visual transform will not apply paint.
 - notes must mention ~95% window/dimension accuracy and that paint is optional.
 
@@ -227,8 +231,16 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
     return coerced
 
 
-async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
-    """Call Claude and return a normalized deliverable dict."""
+async def draft_deliverable(
+    lead: Dict[str, Any],
+    *,
+    reference_photo_bytes: Optional[bytes] = None,
+) -> Dict[str, Any]:
+    """Call Claude and return a normalized deliverable dict.
+
+    When a gravity-corrected customer photo is available, attach it so
+    observation / spatial layers can name real windows and fixtures.
+    """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not configured")
@@ -239,14 +251,41 @@ async def draft_deliverable(lead: Dict[str, Any]) -> Dict[str, Any]:
         + _summarize_lead(lead)
         + "\n\nFill blueprint_layers completely so a reviewer can answer: "
         "routine, possessions, physical fit, budget, and why it should work. "
+        "Never recommend storage over windows/doors or fixtures on walls. "
         "Return ONLY the JSON object — no markdown, no preamble."
     )
+
+    content: Any
+    photo = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
+    if photo:
+        import base64
+
+        vision_jpeg = jpeg_for_vision(photo, max_side=1280)
+        user_text = (
+            "A gravity-corrected photo of the customer's space is attached. "
+            "Floor is at the bottom; ceiling is at the top. Use it for observation "
+            "and spatial_constraint only — do not invent openings the photo does not show.\n\n"
+            + user_text
+        )
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": base64.b64encode(vision_jpeg).decode("ascii"),
+                },
+            },
+            {"type": "text", "text": user_text},
+        ]
+    else:
+        content = user_text
 
     message = client.messages.create(
         model=MODEL_NAME,
         max_tokens=4096,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_text}],
+        messages=[{"role": "user", "content": content}],
     )
 
     raw = message.content[0].text

@@ -21,8 +21,15 @@ from gridfs.errors import NoFile
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from email_service import send_blueprint
+from image_orientation import (
+    UnreadableImage,
+    normalize_photo_bytes,
+    rotate_photo_bytes,
+    upright_bytes,
+)
 from pdf_generator import build_pdf
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from render_qa import RenderQAResult, review_organized_render
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +60,163 @@ async def _fetch_gridfs_bytes(fs_bucket, url: Optional[str]) -> Optional[bytes]:
         return None
 
 
+async def _persist_upright_original(
+    *,
+    lead: Dict[str, Any],
+    db,
+    fs_bucket,
+    raw_bytes: bytes,
+) -> tuple[bytes, Optional[str]]:
+    """Gravity-correct the stored original so retries share the same upright source."""
+    try:
+        upright, info = normalize_photo_bytes(raw_bytes)
+    except UnreadableImage as exc:
+        logger.warning("[automation] Could not normalize original photo: %s", exc)
+        return raw_bytes, None
+
+    if not info.get("applied"):
+        return raw_bytes, None
+
+    lead_id = lead.get("id", "unknown")
+    try:
+        file_id = await fs_bucket.upload_from_stream(
+            f"original_upright_{lead_id}.jpg",
+            as_gridfs_source(upright),
+            metadata={
+                "content_type": "image/jpeg",
+                "uploaded_at": _iso(datetime.now(timezone.utc)),
+                "source": "orientation_normalize",
+                "lead_id": lead_id,
+                "exif_orientation": info.get("exif_orientation"),
+                "orientation_normalized": True,
+            },
+        )
+        new_url = f"/api/uploads/photo/{file_id}"
+        photos = list(lead.get("photos") or [])
+        if photos:
+            first = photos[0]
+            if isinstance(first, dict):
+                photos[0] = {**first, "url": new_url}
+            else:
+                photos[0] = new_url
+        else:
+            photos = [new_url]
+        await db.leads.update_one(
+            {"id": lead_id},
+            {"$set": {"photos": photos, "updated_at": _iso(datetime.now(timezone.utc))}},
+        )
+        lead["photos"] = photos
+        logger.info(
+            "[automation] Persisted EXIF-corrected original for lead %s (orientation=%s)",
+            lead_id,
+            info.get("exif_orientation"),
+        )
+        return upright, new_url
+    except Exception as exc:
+        logger.warning("[automation] Could not persist upright original: %s", exc)
+        return upright, None
+
+
+def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> Optional[bytes]:
+    if not original_bytes:
+        return None
+    degrees = qa.suggested_rotate_degrees if qa.gravity_wrong else 0
+    if degrees:
+        try:
+            logger.info("[automation] Retrying FLUX with source rotated %s°", degrees)
+            return rotate_photo_bytes(original_bytes, degrees)
+        except Exception as exc:
+            logger.warning("[automation] Could not rotate source for QA retry: %s", exc)
+    return original_bytes
+
+
+async def _generate_organized_with_qa(
+    *,
+    lead: Dict[str, Any],
+    plan: Dict[str, Any],
+    fs_bucket,
+    original_bytes: Optional[bytes],
+) -> tuple[Optional[bytes], str, RenderQAResult]:
+    """FLUX once, cheap vision QA, one retry with stronger rails, then give up."""
+    organized_bytes: Optional[bytes] = None
+    image_mime = "image/jpeg"
+    qa = RenderQAResult(ok=True, skipped=True, error="not_run")
+
+    try:
+        organized_bytes, image_mime = await generate_front_view(
+            lead=lead,
+            deliverable=plan,
+            fs_bucket=fs_bucket,
+            reference_photo_bytes=original_bytes,
+        )
+        logger.info(
+            "[automation] FLUX organized render ready: %d bytes (%s)",
+            len(organized_bytes or b""),
+            image_mime,
+        )
+    except Exception as img_err:
+        logger.warning(
+            "[automation] FLUX generation failed (soft-fail, PDF continues): %s",
+            img_err,
+        )
+        return None, image_mime, RenderQAResult(ok=False, reasons=[str(img_err)], error="generate_failed")
+
+    qa = review_organized_render(
+        after_bytes=organized_bytes,
+        before_bytes=original_bytes,
+        attempt=1,
+    )
+    if not qa.failed:
+        return organized_bytes, image_mime, qa
+
+    logger.warning(
+        "[automation] Organized render failed QA (attempt 1): windows_covered=%s gravity_wrong=%s reasons=%s",
+        qa.windows_covered,
+        qa.gravity_wrong,
+        qa.reasons,
+    )
+    retry_ref = _qa_retry_reference(original_bytes, qa)
+    extra = " ".join(qa.reasons[:3])
+    try:
+        organized_bytes, image_mime = await generate_front_view(
+            lead=lead,
+            deliverable=plan,
+            fs_bucket=fs_bucket,
+            reference_photo_bytes=retry_ref,
+            stronger_rails=True,
+            extra_constraint=extra,
+        )
+    except Exception as img_err:
+        logger.warning("[automation] FLUX QA retry failed: %s", img_err)
+        return None, image_mime, RenderQAResult(
+            ok=False,
+            windows_covered=qa.windows_covered,
+            gravity_wrong=qa.gravity_wrong,
+            reasons=list(qa.reasons) + [f"retry generate failed: {img_err}"],
+            attempt=2,
+            error="retry_generate_failed",
+        )
+
+    qa2 = review_organized_render(
+        after_bytes=organized_bytes,
+        before_bytes=retry_ref or original_bytes,
+        attempt=2,
+    )
+    if qa2.failed:
+        logger.error(
+            "[automation] Organized render still failed QA after retry — discarding after "
+            "(will not embed a broken organized image). reasons=%s",
+            qa2.reasons,
+        )
+        return None, image_mime, qa2
+    if qa2.skipped:
+        logger.warning(
+            "[automation] QA skipped on retry; keeping stronger-rails render. error=%s",
+            qa2.error,
+        )
+    return organized_bytes, image_mime, qa2
+
+
 async def run_automation(
     *,
     lead: Dict[str, Any],
@@ -78,9 +242,25 @@ async def run_automation(
     )
 
     try:
-        # ── Step 1: AI Draft ─────────────────────────────────────────────
+        # ── Step 0: Gravity-correct the customer photo ───────────────────
+        # EXIF must be applied before Claude vision, FLUX, or PDF embeds.
+        original_bytes: Optional[bytes] = None
+        first_photo = (lead.get("photos") or [None])[0]
+        if first_photo:
+            photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+            raw_original = await _fetch_gridfs_bytes(fs_bucket, photo_url)
+            if raw_original:
+                original_bytes, _persisted = await _persist_upright_original(
+                    lead=lead,
+                    db=db,
+                    fs_bucket=fs_bucket,
+                    raw_bytes=raw_original,
+                )
+                logger.info("[automation] Using customer's uploaded photo as render reference")
+
+        # ── Step 1: AI Draft (Claude + layers, with upright photo) ───────
         logger.info("[automation] Step 1: AI drafting plan...")
-        plan = await draft_deliverable(lead)
+        plan = await draft_deliverable(lead, reference_photo_bytes=original_bytes)
 
         # Save draft to deliverables collection
         plan["lead_id"] = lead_id
@@ -92,40 +272,24 @@ async def run_automation(
         )
         logger.info("[automation] Plan drafted and saved")
 
-        # ── Step 2: AI Image Generation ──────────────────────────────────
+        # ── Step 2: AI Image Generation + QA safety net ──────────────────
         logger.info("[automation] Step 2: Generating room rendering via Replicate...")
-        organized_bytes: Optional[bytes] = None
-        original_bytes: Optional[bytes] = None
-        image_mime: str = "image/jpeg"
-
-        # Fetch the customer's own uploaded photo (if any) so FLUX Kontext
-        # transforms their ACTUAL room — and so we can use it as a labeled
-        # interim hero if generation fails.
-        first_photo = (lead.get("photos") or [None])[0]
-        if first_photo:
-            photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
-            original_bytes = await _fetch_gridfs_bytes(fs_bucket, photo_url)
-            if original_bytes:
-                logger.info("[automation] Using customer's uploaded photo as render reference")
-
-        try:
-            organized_bytes, image_mime = await generate_front_view(
-                lead=lead,
-                deliverable=plan,
-                fs_bucket=fs_bucket,
-                reference_photo_bytes=original_bytes,
+        organized_bytes, image_mime, render_qa = await _generate_organized_with_qa(
+            lead=lead,
+            plan=plan,
+            fs_bucket=fs_bucket,
+            original_bytes=original_bytes,
+        )
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"render_qa": render_qa.as_dict(), "updated_at": _iso(datetime.now(timezone.utc))}},
+        )
+        if render_qa.failed and not organized_bytes:
+            logger.error(
+                "[automation] Discarded broken organized after for lead %s: %s",
+                lead_id,
+                render_qa.reasons,
             )
-            logger.info(
-                "[automation] FLUX organized render ready: %d bytes (%s)",
-                len(organized_bytes or b""),
-                image_mime,
-            )
-        except Exception as img_err:
-            logger.warning(
-                "[automation] FLUX generation failed (soft-fail, PDF continues): %s",
-                img_err,
-            )
-            organized_bytes = None
 
         # Persist the organized render when we have one. Upload failure must
         # NOT discard in-memory bytes — those still go into build_pdf().
@@ -168,7 +332,7 @@ async def run_automation(
         customer_photos = []
         for p in (lead.get("photos") or [])[:6]:
             url = p if isinstance(p, str) else (p.get("url") if isinstance(p, dict) else None)
-            b = await _fetch_gridfs_bytes(fs_bucket, url)
+            b = upright_bytes(await _fetch_gridfs_bytes(fs_bucket, url))
             if b:
                 customer_photos.append(b)
 

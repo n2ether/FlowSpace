@@ -9,6 +9,8 @@ import { Progress } from "./ui/progress";
 import { useLang } from "../context/LanguageContext";
 import { api, API } from "../lib/api";
 import { toast } from "sonner";
+import PhotoOrientationNudge from "./PhotoOrientationNudge";
+import { usePhotoUploadQueue } from "../lib/usePhotoUploadQueue";
 
 const MAX_PHOTOS = 8;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -57,11 +59,41 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
     const q = t.questionnaire;
     const [step, setStep] = useState(0);
     const [submitting, setSubmitting] = useState(false);
-    const [uploading, setUploading] = useState(false);
     const [done, setDone] = useState(false);
     const [form, setForm] = useState({ ...initialForm, package_id: presetPackage });
 
     const update = useCallback((k, v) => setForm((f) => ({ ...f, [k]: v })), []);
+
+    const uploadOne = async (file) => {
+        if (file.size > MAX_FILE_BYTES) {
+            toast.error(`${file.name}: ${q.tooLarge}`);
+            return;
+        }
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await api.post("/uploads/photo", fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
+        if (res.data?.url) {
+            setForm((f) => ({
+                ...f,
+                photos: [...f.photos, { id: res.data.id, url: res.data.url }],
+            }));
+        }
+    };
+
+    const { uploading, pending, handleFiles: enqueueFiles, rotatePending, confirmPending } =
+        usePhotoUploadQueue({
+            uploadFile: async (file) => {
+                try {
+                    await uploadOne(file);
+                } catch (e) {
+                    console.error(e);
+                    toast.error(q.uploadFailed);
+                }
+            },
+            remainingSlots: MAX_PHOTOS - form.photos.length,
+        });
 
     const toggleInList = (key, value, max = null) => {
         setForm((f) => {
@@ -101,10 +133,13 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
         return true;
     };
 
-    const next = () => {
+    const next = async () => {
         if (!canNext()) {
             toast.error(q.required);
             return;
+        }
+        if (pending) {
+            await confirmPending();
         }
         if (step < steps.length - 1) setStep(step + 1);
         else submit();
@@ -113,31 +148,7 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
     const back = () => step > 0 && setStep(step - 1);
 
     const handleFiles = async (files) => {
-        const arr = Array.from(files || []);
-        if (arr.length === 0) return;
-        const remaining = MAX_PHOTOS - form.photos.length;
-        const sliced = arr.slice(0, remaining);
-        setUploading(true);
-        const uploaded = [];
-        for (const f of sliced) {
-            if (f.size > MAX_FILE_BYTES) {
-                toast.error(`${f.name}: ${q.tooLarge}`);
-                continue;
-            }
-            try {
-                const fd = new FormData();
-                fd.append("file", f);
-                const res = await api.post("/uploads/photo", fd, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                });
-                if (res.data?.url) uploaded.push({ id: res.data.id, url: res.data.url });
-            } catch (e) {
-                console.error(e);
-                toast.error(q.uploadFailed);
-            }
-        }
-        if (uploaded.length) update("photos", [...form.photos, ...uploaded]);
-        setUploading(false);
+        await enqueueFiles(files);
     };
 
     const removePhoto = (idx) => {
@@ -452,6 +463,15 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
                                 onChange={(e) => handleFiles(e.target.files)}
                                 data-testid="q-photo-input"
                             />
+                            {pending && (
+                                <PhotoOrientationNudge
+                                    previewUrl={pending.previewUrl}
+                                    reason={pending.inspection.reason}
+                                    copy={q.orientation}
+                                    onRotate={rotatePending}
+                                    onConfirm={confirmPending}
+                                />
+                            )}
                             {form.photos.length > 0 && (
                                 <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4">
                                     {form.photos.map((p, i) => (
