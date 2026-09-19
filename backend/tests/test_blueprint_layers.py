@@ -77,6 +77,9 @@ def test_derive_from_garage_lead_answers_ryan_questions():
     assert answers["why_it_should_work"]
     assert "15 ft" not in json.dumps(layers)
     assert layers["spatial_constraint"]["paint_optional"] is True
+    do_not = " ".join(layers["customer_instruction"]["do_not"]).lower()
+    assert "windows" in do_not and "storage" in do_not
+    assert "ceiling" in do_not or "fixtures" in do_not
 
 
 def test_resolve_prefers_stored_then_backfills():

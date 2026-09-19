@@ -93,6 +93,7 @@ SPACE_SHELL_HINTS = {
     "garage": [
         "Keep the existing parking stall as a destination, not a dump.",
         "Use the walls and door path the photo already shows.",
+        "Do not cover windows or doors with shelves or storage.",
     ],
     "closet": [
         "Keep the existing rod / shelf run; do not invent a new footprint.",
@@ -212,6 +213,8 @@ def empty_layers() -> Dict[str, Any]:
             "do_not": [
                 "Do not add walls, windows, or doors.",
                 "Do not invent room dimensions.",
+                "Do not place shelves or storage over windows or doors.",
+                "Do not move ceiling fans, lights, or fixtures onto walls.",
                 "Paint is optional — skip it unless it helps the goal.",
             ],
             "weekly_reset": "",
@@ -414,6 +417,7 @@ def derive_layers(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str
         "windows_dims_fidelity": "~95%",
         "known_from_photo": SPACE_SHELL_HINTS.get(space, [
             "Keep the walls, windows, and openings the photo already shows.",
+            "Do not cover windows or doors with shelves or storage.",
             "Change bins, furniture, and layout only.",
         ]),
         "unknowns": [
@@ -481,6 +485,8 @@ def derive_layers(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str
         "do_not": [
             "Do not add walls, windows, or doors.",
             "Do not invent room dimensions.",
+            "Do not place shelves or storage over windows or doors.",
+            "Do not move ceiling fans, lights, or fixtures onto walls.",
             "Paint is optional — skip it unless it helps the goal.",
         ],
         "weekly_reset": "Return items to their labeled bin, clear the landing zone / floor path, wipe one surface.",

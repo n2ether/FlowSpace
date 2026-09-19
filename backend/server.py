@@ -23,6 +23,7 @@ from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
 from automation import run_automation
+from image_orientation import UnreadableImage, normalize_photo_bytes, upright_bytes
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
 from auth import (
     COOKIE_NAME,
@@ -561,12 +562,12 @@ async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional
                 stream = await fs_bucket.open_download_stream(oid)
             except NoFile:
                 return None
-            return await stream.read()
+            return upright_bytes(await stream.read())
         if url.startswith("http://") or url.startswith("https://"):
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as ac:
                 r = await ac.get(url)
                 r.raise_for_status()
-                return r.content
+                return upright_bytes(r.content)
     except Exception as e:
         logging.warning(f"image fetch failed for {url}: {e}")
     return None
@@ -691,12 +692,35 @@ async def upload_photo(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Empty file")
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    try:
+        contents, orientation = normalize_photo_bytes(contents)
+        ct = orientation.get("content_type") or "image/jpeg"
+    except UnreadableImage:
+        raise HTTPException(status_code=400, detail="Could not read image")
     file_id = await fs_bucket.upload_from_stream(
-        file.filename or "upload",
+        file.filename or "upload.jpg",
         as_gridfs_source(contents),
-        metadata={"content_type": ct, "uploaded_at": _iso(datetime.now(timezone.utc))},
+        metadata={
+            "content_type": ct,
+            "uploaded_at": _iso(datetime.now(timezone.utc)),
+            "orientation_normalized": True,
+            "exif_orientation": orientation.get("exif_orientation"),
+            "applied_exif": bool(orientation.get("applied")),
+            "width": orientation.get("width"),
+            "height": orientation.get("height"),
+        },
     )
-    return {"id": str(file_id), "url": f"/api/uploads/photo/{file_id}"}
+    return {
+        "id": str(file_id),
+        "url": f"/api/uploads/photo/{file_id}",
+        "orientation": {
+            "exif_orientation": orientation.get("exif_orientation"),
+            "applied": bool(orientation.get("applied")),
+            "width": orientation.get("width"),
+            "height": orientation.get("height"),
+            "is_landscape": bool(orientation.get("is_landscape")),
+        },
+    }
 
 
 @api_router.get("/uploads/photo/{photo_id}")
@@ -796,8 +820,13 @@ async def ai_draft_deliverable(lead_id: str, _: bool = Depends(require_admin)):
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    reference_photo_bytes = None
+    first_photo = (lead.get("photos") or [None])[0]
+    if first_photo:
+        photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
+        reference_photo_bytes = await _resolve_image_bytes(photo_url, None)
     try:
-        plan = await draft_deliverable(lead)
+        plan = await draft_deliverable(lead, reference_photo_bytes=reference_photo_bytes)
     except Exception as e:
         logging.exception("AI draft failed")
         raise HTTPException(status_code=502, detail=f"AI draft failed: {e}")
@@ -822,7 +851,7 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
             try:
                 photo_id = photo_url.rsplit("/", 1)[-1]
                 stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
-                reference_photo_bytes = await stream.read()
+                reference_photo_bytes = upright_bytes(await stream.read())
             except Exception:
                 reference_photo_bytes = None
 

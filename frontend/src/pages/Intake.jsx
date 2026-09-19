@@ -5,6 +5,8 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
+import PhotoOrientationNudge from "../components/PhotoOrientationNudge";
+import { usePhotoUploadQueue } from "../lib/usePhotoUploadQueue";
 
 const PLANS = {
     free:    { name: "Free",    price: 0,  maxPhotos: 2 },
@@ -61,9 +63,41 @@ export default function Intake() {
         problem: "",
     });
     const [photos, setPhotos] = useState([]);
-    const [uploading, setUploading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [blocked, setBlocked] = useState(false);
+
+    const uploadOne = async (file) => {
+        const fd = new FormData();
+        fd.append("file", file);
+        const backend = process.env.REACT_APP_BACKEND_URL || "";
+        const res = await fetch(`${backend}/api/uploads/photo`, {
+            method: "POST",
+            body: fd,
+        });
+        if (!res.ok) {
+            let msg = `Upload failed (${res.status})`;
+            try {
+                const errJson = await res.json();
+                if (errJson?.detail) msg = errJson.detail;
+            } catch (_) {
+                /* body wasn't JSON */
+            }
+            throw new Error(msg);
+        }
+        const data = await res.json();
+        setPhotos((prev) => [...prev, { id: data.id, url: data.url }]);
+    };
+
+    const { uploading, pending, handleFiles, rotatePending, confirmPending } = usePhotoUploadQueue({
+        uploadFile: async (file) => {
+            try {
+                await uploadOne(file);
+            } catch (err) {
+                toast.error(String(err?.message || "Photo upload failed. Please try again."));
+            }
+        },
+        remainingSlots: plan.maxPhotos - photos.length,
+    });
 
     useEffect(() => {
         refresh();
@@ -95,46 +129,9 @@ export default function Intake() {
 
     const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-    const handleFiles = async (e) => {
-        const files = Array.from(e.target.files || []).slice(0, plan.maxPhotos - photos.length);
-        if (!files.length) return;
-        setUploading(true);
-        try {
-            const uploaded = [];
-            const backend = process.env.REACT_APP_BACKEND_URL || "";
-            for (const file of files) {
-                const fd = new FormData();
-                fd.append("file", file);
-                // Native fetch — the browser will set multipart/form-data with the
-                // correct boundary automatically. Do NOT set Content-Type manually.
-                const res = await fetch(`${backend}/api/uploads/photo`, {
-                    method: "POST",
-                    body: fd,
-                });
-                if (!res.ok) {
-                    let msg = `Upload failed (${res.status})`;
-                    try {
-                        const errJson = await res.json();
-                        if (errJson?.detail) msg = errJson.detail;
-                    } catch (_) {
-                        /* body wasn't JSON */
-                    }
-                    throw new Error(msg);
-                }
-                const data = await res.json();
-                uploaded.push({ id: data.id, url: data.url });
-            }
-            setPhotos((prev) => [...prev, ...uploaded]);
-        } catch (err) {
-            const detail =
-                err?.response?.data?.detail ||
-                err?.message ||
-                "Photo upload failed. Please try again.";
-            toast.error(String(detail));
-        } finally {
-            setUploading(false);
-            e.target.value = "";
-        }
+    const onPickFiles = async (e) => {
+        await handleFiles(e.target.files);
+        e.target.value = "";
     };
 
     const removePhoto = (id) =>
@@ -142,6 +139,10 @@ export default function Intake() {
 
     const submit = async () => {
         if (!canSubmit) return;
+        if (pending) {
+            toast.message("Confirm the ceiling is up on your photo — then continue. It only takes a tap.");
+            return;
+        }
         setSubmitting(true);
         try {
             // Map the streamlined intake to the backend's Lead schema
@@ -345,14 +346,25 @@ export default function Intake() {
                                             type="file"
                                             accept="image/*"
                                             multiple
-                                            onChange={handleFiles}
+                                            onChange={onPickFiles}
                                             className="hidden"
-                                            disabled={uploading}
+                                            disabled={uploading || Boolean(pending)}
+                                            data-testid="intake-photo-input"
                                         />
-                                        {uploading ? "…uploading" : "+ Add photo"}
+                                        {uploading && !pending ? "…uploading" : "+ Add photo"}
                                     </label>
                                 )}
                             </div>
+                            {pending && (
+                                <div className="mt-3">
+                                    <PhotoOrientationNudge
+                                        previewUrl={pending.previewUrl}
+                                        reason={pending.inspection.reason}
+                                        onRotate={rotatePending}
+                                        onConfirm={confirmPending}
+                                    />
+                                </div>
+                            )}
                         </Field>
 
                         {/* Contact + account */}

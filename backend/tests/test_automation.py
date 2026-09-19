@@ -103,7 +103,8 @@ def _lead(*, with_photo: bool = False) -> Dict[str, Any]:
 def _run(monkeypatch, *, generate, send=(True, None), fs=None, lead=None, capture=None):
     from automation import run_automation
 
-    async def fake_draft(lead_doc):
+    async def fake_draft(lead_doc, **kwargs):
+        captured["draft_photo"] = kwargs.get("reference_photo_bytes")
         return dict(PLAN)
 
     async def _gen(**kwargs):
@@ -230,3 +231,122 @@ def test_automation_passes_before_and_after_when_both_exist(monkeypatch):
     assert images["after"] == flux
     assert images["front_view"] == flux
     assert images["front_view_kind"] == "organized"
+    assert captured.get("draft_photo") == original
+
+
+def _exif_jpeg(*, size=(80, 40), color=(20, 80, 200), orientation=6) -> bytes:
+    img = Image.new("RGB", size, color)
+    exif = img.getexif()
+    exif[274] = orientation
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90, exif=exif)
+    return buf.getvalue()
+
+
+def test_automation_normalizes_exif_before_draft_and_flux(monkeypatch):
+    from image_orientation import normalize_photo_bytes
+
+    raw = _exif_jpeg(orientation=6)
+    expected, info = normalize_photo_bytes(raw)
+    assert info["applied"] is True
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((10, 90, 50)), "image/jpeg"
+
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": raw})
+    captured: Dict[str, Any] = {}
+    sent, captured, db, fs_out = _run(
+        monkeypatch,
+        generate=generate,
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    assert calls and Image.open(io.BytesIO(calls[0]["reference_photo_bytes"])).size == (40, 80)
+    assert captured.get("draft_photo") == calls[0]["reference_photo_bytes"]
+    assert db.leads.docs["lead-img-1"]["photos"][0] != "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert fs_out.uploads >= 2  # upright original + organized render
+
+
+def test_automation_retries_once_after_qa_fail(monkeypatch):
+    from render_qa import RenderQAResult
+
+    original = _jpeg((110, 90, 60))
+    first = _jpeg((200, 10, 10))
+    second = _jpeg((10, 200, 10))
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return (first if len(calls) == 1 else second), "image/jpeg"
+
+    qas = [
+        RenderQAResult(
+            ok=False,
+            gravity_wrong=True,
+            reasons=["Ceiling fan on the wall"],
+            suggested_rotate_degrees=90,
+        ),
+        RenderQAResult(ok=True),
+    ]
+
+    def fake_review(**kwargs):
+        return qas.pop(0)
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review)
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    captured: Dict[str, Any] = {}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    assert len(calls) == 2
+    assert calls[1].get("stronger_rails") is True
+    assert captured["images"]["after"] == second
+    assert captured["images"]["front_view_kind"] == "organized"
+    qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
+    assert qa.get("ok") is True
+
+
+def test_automation_discards_after_when_qa_fails_twice(monkeypatch):
+    from render_qa import RenderQAResult
+
+    original = _jpeg((110, 90, 60))
+    flux = _jpeg((200, 10, 10))
+
+    def generate(**kwargs):
+        return flux, "image/jpeg"
+
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **k: RenderQAResult(
+            ok=False,
+            windows_covered=True,
+            reasons=["Shelves over the right window"],
+            attempt=k.get("attempt", 1),
+        ),
+    )
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    captured: Dict[str, Any] = {}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    images = captured["images"]
+    assert images["after"] is None
+    assert images["front_view"] == original
+    assert images["front_view_kind"] == "original"
+    qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
+    assert qa.get("ok") is False
+    assert qa.get("windows_covered") is True
