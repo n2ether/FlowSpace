@@ -28,17 +28,23 @@ TEXT_TO_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
 from ai_drafter import BOTHERS, COLORS, FEELING, STORAGE, STYLE, _humanize
 from image_orientation import upright_bytes
 
+# Replicate flux-kontext-pro has no prompt_strength / guidance_scale.
+# Keep prompt_upsampling off so the wall-paint lock is not rewritten.
+# https://replicate.com/black-forest-labs/flux-kontext-pro
+KONTEXT_PROMPT_UPSAMPLING = False
+
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
 SOFT_GOODS_COLOR_FALLBACK = "neutral textiles that complement the existing wall color"
 
 # Shared rails for Kontext, text-to-image, and QA retries.
 WALL_PRESERVE_RAILS = (
-    "HARD CONSTRAINT — WALL PAINT: Match the reference photo's existing wall paint "
-    "exactly — same hue and lightness (for example light blue or blue-gray if that "
-    "is what the photo shows). Do not repaint, re-tint, warm, taupe, beige, cream, "
-    "or earth-tone the walls. Do not change wall paint in this visual. Paint is not "
-    "part of the transform. Customer color preferences apply ONLY to textiles, "
-    "pillows, baskets, rugs, throws, and accessories — never to walls. "
+    "CRITICAL EDIT LOCK — WALL PAINT MUST MATCH THE REFERENCE PHOTO EXACTLY. "
+    "Copy the existing wall paint 1:1: same hue, same lightness — light blue / "
+    "cool gray-blue / light gray-blue if that is what the photo shows. "
+    "FORBIDDEN: warm taupe, beige, cream, sand, greige, terracotta, or earth-tone "
+    "wall makeovers. Do not repaint, re-tint, color-grade, white-balance, or restyle "
+    "the walls. Color preferences apply ONLY to textiles, pillows, baskets, rugs, "
+    "throws, and accessories — never to wall paint. "
 )
 
 ORGANIZE_RAILS = (
@@ -61,14 +67,14 @@ RETRY_RAILS = (
     "ceiling fixture on a wall / used wrong gravity, or changed the wall paint. "
     "Re-edit the source photo: keep every window fully visible, keep fans and lights "
     "on the ceiling, floor at the bottom, and match the original light wall color "
-    "from the photo — do not warm, taupe, or repaint the walls. "
+    "from the photo — light blue / cool gray-blue, not warm taupe or beige. "
     "Do not repeat the failed layout."
 )
 
 WALL_RETRY_CONSTRAINT = (
-    "Keep the original light wall color from the photo exactly. "
-    "Do not repaint or warm the walls. Color preferences apply only to textiles "
-    "and accessories."
+    "FAILED QA: walls were repainted. Keep the original light wall color from the "
+    "photo exactly — light blue / cool gray-blue, not warm taupe or beige. "
+    "Do not color-grade or restyle the walls. Color preferences are textiles only."
 )
 
 
@@ -102,13 +108,17 @@ def _build_kontext_prompt(
         extra = extra + " "
 
     return (
-        f"Organize this existing {space} — {style_str} styling. "
-        f"Apply these colors ONLY to textiles and accessories (never walls): {color_str}. "
+        f"Edit this existing {space} photo while keeping the original composition. "
+        "WALL PAINT LOCK: match the reference photo's exact wall paint — light blue / "
+        "cool gray-blue / light gray-blue stays that color. Do not warm, taupe, beige, "
+        "or earth-tone the walls. "
+        f"Change only furniture, storage, and loose items into a tidy {style_str} layout. "
+        f"Soft-goods colors only (textiles, baskets, pillows — NEVER walls): {color_str}. "
         f"Add tidy storage for {storage_str}: matching baskets, "
         f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
         f"{rails}{extra}"
-        "Only change furniture, storage, and loose items. Keep the photo's existing "
-        "wall paint exactly. Photorealistic, natural lighting, "
+        "Do not change wall paint. The walls must look like the same painted surface as "
+        "the input photo. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -135,8 +145,9 @@ def _build_text_to_image_prompt(
         "Keep ceiling fans, lights, and fixtures on the ceiling, never on a wall. "
         "Gravity correct: floor at the bottom, ceiling at the top. "
         "Do not feature a painted-wall makeover — keep existing wall color. "
-        "Match existing wall paint exactly; apply color preferences only to "
-        "textiles and accessories, never walls. "
+        "Match existing wall paint exactly — light blue / cool gray-blue if that is "
+        "the room; apply color preferences only to textiles and accessories, never walls. "
+        "FORBIDDEN: warm taupe or beige wall makeovers. "
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
@@ -175,6 +186,21 @@ def _output_to_url_or_bytes(output) -> Tuple[Optional[str], Optional[bytes]]:
             return str(first.url), None
         return str(first), None
     return str(output), None
+
+
+def _kontext_model_input(prompt: str, data_uri: str) -> Dict[str, Any]:
+    """Replicate Kontext inputs. No guidance/prompt_strength exists on this API.
+
+    prompt_upsampling stays False so the wall-paint lock is not rewritten.
+    """
+    return {
+        "prompt": prompt,
+        "input_image": data_uri,
+        "aspect_ratio": "match_input_image",
+        "output_format": "jpg",
+        "safety_tolerance": 2,
+        "prompt_upsampling": KONTEXT_PROMPT_UPSAMPLING,
+    }
 
 
 async def generate_front_view(
@@ -216,13 +242,7 @@ async def generate_front_view(
         data_uri = f"data:image/jpeg;base64,{b64}"
         output = client.run(
             KONTEXT_MODEL,
-            input={
-                "prompt": prompt,
-                "input_image": data_uri,
-                "aspect_ratio": "match_input_image",
-                "output_format": "jpg",
-                "safety_tolerance": 2,
-            },
+            input=_kontext_model_input(prompt, data_uri),
         )
     else:
         prompt = _build_text_to_image_prompt(

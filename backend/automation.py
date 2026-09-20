@@ -300,6 +300,22 @@ async def run_automation(
                 lead_id,
                 render_qa.reasons,
             )
+            # A previous regen may have left an organized GridFS URL. If we
+            # keep it, choose_hero / admin PDF will reuse the stale after.
+            await db.deliverables.update_one(
+                {"lead_id": lead_id},
+                {
+                    "$set": {
+                        "front_view_url": None,
+                        "front_view_kind": "original" if original_bytes else "placeholder",
+                        "updated_at": _iso(datetime.now(timezone.utc)),
+                    }
+                },
+            )
+            logger.info(
+                "[automation] Cleared stale organized front_view_url after QA discard for lead %s",
+                lead_id,
+            )
 
         # Persist the organized render when we have one. Upload failure must
         # NOT discard in-memory bytes — those still go into build_pdf().
@@ -346,10 +362,11 @@ async def run_automation(
             if b:
                 customer_photos.append(b)
 
-        # Prefer this-run FLUX bytes, then a previously stored organized render,
-        # then the labeled original photo — never drop a real image for a mint panel.
+        # This-run FLUX only. Never fall back to a previously stored organized
+        # render — QA-discarded afters used to leak that stale GridFS image
+        # into the PDF hero ("Hero source=organized") even after discard.
         hero_bytes, hero_kind = choose_hero(
-            organized_bytes=organized_bytes or fetched.get("front_view"),
+            organized_bytes=organized_bytes,
             original_bytes=original_bytes,
         )
         if hero_kind == "original":
