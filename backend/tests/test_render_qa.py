@@ -7,6 +7,30 @@ def test_parse_qa_json_strips_fences():
     assert data["windows_covered"] is True
 
 
+def test_qa_prompt_flags_wall_repaint():
+    from render_qa import QA_PROMPT
+
+    low = QA_PROMPT.lower()
+    assert "walls_repainted" in low
+    assert "light blue" in low or "blue-gray" in low
+    assert "do not fail for clutter style, paint" not in low
+
+
+def test_from_payload_fails_when_walls_repainted():
+    qa = _from_payload(
+        {
+            "ok": True,  # model contradiction — walls_repainted wins
+            "windows_covered": False,
+            "gravity_wrong": False,
+            "walls_repainted": True,
+            "reasons": ["Walls shifted from light blue to taupe"],
+        }
+    )
+    assert qa.failed is True
+    assert qa.walls_repainted is True
+    assert qa.ok is False
+
+
 def test_from_payload_fails_when_window_covered():
     qa = _from_payload(
         {
@@ -46,7 +70,14 @@ def test_review_skips_without_api_key(monkeypatch):
 
 
 def test_result_as_dict_roundtrip():
-    qa = RenderQAResult(ok=False, windows_covered=True, reasons=["covered"], attempt=2)
+    qa = RenderQAResult(
+        ok=False,
+        windows_covered=True,
+        walls_repainted=True,
+        reasons=["covered"],
+        attempt=2,
+    )
     dumped = qa.as_dict()
     assert dumped["windows_covered"] is True
+    assert dumped["walls_repainted"] is True
     assert dumped["attempt"] == 2

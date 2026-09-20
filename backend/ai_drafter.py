@@ -55,7 +55,8 @@ no code fences) — keep every list short and concrete (max ~5 items each):
 }
 
 Style: calm, friendly, second-person. Prices in USD (IKEA/Target ranges).
-wall_color_hex must be valid 7-char hex. shopping_list.price is per-unit number.
+wall_color_hex is empty when keeping existing paint; otherwise a valid 7-char hex.
+shopping_list.price is per-unit number.
 Always weave in the mental-health angle: clutter causes stress, organization creates calm.
 
 Hard rules:
@@ -64,8 +65,8 @@ Hard rules:
 - Never place shelves, cabinets, racks, or storage over or in front of windows or doors. Openings stay fully visible and in their photo location.
 - Ceiling fans, lights, vents, and fixtures stay on the ceiling. Do not relocate them onto walls.
 - Treat the attached photo as gravity-correct: floor at the bottom, ceiling at the top. Do not describe the room as rotated.
-- Wall paint/color is OPTIONAL. If you include a suggestion, wall_color_note must say it is optional — consider it only if it helps the goal. Never put "paint the walls" in action_plan. The visual transform will not apply paint.
-- notes must mention ~95% window/dimension accuracy and that paint is optional.
+- Wall paint is OPTIONAL and OFF by default. Default wall_color_name to "Keep existing / no paint change", wall_color_code "", wall_color_hex "", wall_color_note "No paint change — keep the existing wall color from the photo." Only fill a real paint color if the customer explicitly asked to paint or change wall color. Do not invent optional Warm Taupe / accent-wall colors that imply a makeover. Color preferences describe textiles and accessories only, never walls. Never put "paint the walls" in action_plan. The visual transform will not apply paint unless they asked.
+- notes must mention ~95% window/dimension accuracy and that wall paint stays as photographed unless the customer asked.
 
 Brain-layer rules:
 - Observation: only what the photo/answers show. Name possessions. No invented dims.
@@ -113,8 +114,51 @@ DIY = {
 }
 
 
+KEEP_EXISTING_WALL_NAME = "Keep existing / no paint change"
+KEEP_EXISTING_WALL_NOTE = (
+    "No paint change — keep the existing wall color from the photo."
+)
+PAINT_REQUEST_RE = re.compile(
+    r"\b(paint|repaint|re-paint|painted|painting|accent wall|wall colou?r|wall paint)\b",
+    re.I,
+)
+
+
 def _humanize(values: List[str], mapping: Dict[str, str]) -> List[str]:
     return [mapping.get(v, v.replace("_", " ")) for v in (values or [])]
+
+
+def customer_requested_paint(lead: Optional[Dict[str, Any]]) -> bool:
+    """True only when the customer explicitly asked to paint / change wall color.
+
+    color_prefs (earth, sage, …) are textile/accessory colors and do not count.
+    """
+    if not lead:
+        return False
+    blobs = [
+        lead.get("biggest_challenge"),
+        lead.get("goals"),
+        lead.get("bothers_other"),
+        lead.get("feeling_other"),
+        lead.get("must_stay"),
+        lead.get("daily_improvement"),
+        lead.get("notes"),
+    ]
+    text = " ".join(str(v) for v in blobs if v)
+    return bool(PAINT_REQUEST_RE.search(text))
+
+
+def is_keep_existing_wall(deliverable: Optional[Dict[str, Any]]) -> bool:
+    if not deliverable:
+        return True
+    name = (deliverable.get("wall_color_name") or "").strip().lower()
+    if "keep existing" in name or "no paint" in name:
+        return True
+    hex_color = (deliverable.get("wall_color_hex") or "").strip()
+    code = (deliverable.get("wall_color_code") or "").strip()
+    if not name and not hex_color and not code:
+        return True
+    return False
 
 
 def _summarize_lead(lead: Dict[str, Any]) -> str:
@@ -142,7 +186,21 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
     if lead.get("style_prefs"):
         parts.append("Style: " + ", ".join(_humanize(lead["style_prefs"], STYLE)))
     if lead.get("color_prefs"):
-        parts.append("Colors: " + ", ".join(_humanize(lead["color_prefs"], COLORS)))
+        parts.append(
+            "Textile/accessory colors (NOT wall paint): "
+            + ", ".join(_humanize(lead["color_prefs"], COLORS))
+        )
+    else:
+        parts.append("No color preference stated — do not invent a wall paint color.")
+    if customer_requested_paint(lead):
+        parts.append(
+            "Customer explicitly asked about paint/wall color — a paint suggestion is allowed."
+        )
+    else:
+        parts.append(
+            "Wall paint: KEEP EXISTING / no paint change. Customer did not ask to paint. "
+            "Do not invent an optional accent wall color."
+        )
     if lead.get("budget"):
         parts.append("Budget: " + BUDGET.get(lead["budget"], lead["budget"]))
     if lead.get("diy_level"):
@@ -199,17 +257,26 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
     hex_color = as_str(plan.get("wall_color_hex"))
     if hex_color and not hex_color.startswith("#"):
         hex_color = "#" + hex_color
-    if not re.fullmatch(r"#[0-9a-fA-F]{6}", hex_color or ""):
-        hex_color = "#cfd7d3"
+    if hex_color and not re.fullmatch(r"#[0-9a-fA-F]{6}", hex_color):
+        hex_color = "#cfd7d3" if customer_requested_paint(lead) else ""
+
+    wall_name = as_str(plan.get("wall_color_name"))
+    wall_code = as_str(plan.get("wall_color_code"))
+    wall_note = as_str(plan.get("wall_color_note"))
+    if not customer_requested_paint(lead):
+        wall_name = KEEP_EXISTING_WALL_NAME
+        wall_code = ""
+        hex_color = ""
+        wall_note = KEEP_EXISTING_WALL_NOTE
 
     coerced = {
         "intro": as_str(plan.get("intro")),
         "needs": as_str_list(plan.get("needs")),
         "zones": zones,
-        "wall_color_name": as_str(plan.get("wall_color_name")),
-        "wall_color_code": as_str(plan.get("wall_color_code")),
+        "wall_color_name": wall_name,
+        "wall_color_code": wall_code,
         "wall_color_hex": hex_color,
-        "wall_color_note": as_str(plan.get("wall_color_note")),
+        "wall_color_note": wall_note,
         "shopping_list": shopping_list,
         "budget_note": as_str(plan.get("budget_note")),
         "strategy": as_str_list(plan.get("strategy")),
@@ -218,7 +285,7 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
         "notes": as_str(plan.get("notes"))
         or (
             "Windows and room proportions stay ~95% true to your photo. "
-            "Paint is optional — consider it only if it helps your goal."
+            "Wall paint stays as photographed — no paint change unless you asked."
         ),
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
@@ -252,6 +319,7 @@ async def draft_deliverable(
         + "\n\nFill blueprint_layers completely so a reviewer can answer: "
         "routine, possessions, physical fit, budget, and why it should work. "
         "Never recommend storage over windows/doors or fixtures on walls. "
+        "Default wall paint to keep existing / no paint change unless they asked to paint. "
         "Return ONLY the JSON object — no markdown, no preamble."
     )
 

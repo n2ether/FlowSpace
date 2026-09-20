@@ -31,6 +31,7 @@ Return ONLY JSON (no markdown):
   "ok": true or false,
   "windows_covered": true if shelves, cabinets, racks, or storage cover, block, or sit over a window or door that should stay visible,
   "gravity_wrong": true if the room is sideways/upside-down OR a ceiling fan, light, vent, or fixture is on a wall instead of the ceiling,
+  "walls_repainted": true if AFTER walls are a clearly different paint color than BEFORE (e.g. light blue / blue-gray became taupe, beige, cream, or warm earth). Ignore small lighting or white-balance shifts. Fail on an obvious wall-color makeover,
   "reasons": ["short facts"],
   "suggested_rotate_degrees": 0, 90, 180, or 270
 }
@@ -38,9 +39,9 @@ Return ONLY JSON (no markdown):
 suggested_rotate_degrees is clockwise rotation to apply to the SOURCE photo
 before a retry when gravity looks wrong; otherwise 0.
 
-Mark ok=false if windows_covered OR gravity_wrong.
-Do not fail for clutter style, paint, or minor furniture taste.
-Be conservative: only fail on clear window-covering or gravity/fixture errors.
+Mark ok=false if windows_covered OR gravity_wrong OR walls_repainted.
+Do not fail for clutter style or minor furniture taste.
+Be conservative: only fail on clear window-covering, gravity/fixture errors, or an obvious wall repaint.
 """
 
 
@@ -49,6 +50,7 @@ class RenderQAResult:
     ok: bool = True
     windows_covered: bool = False
     gravity_wrong: bool = False
+    walls_repainted: bool = False
     reasons: List[str] = field(default_factory=list)
     suggested_rotate_degrees: int = 0
     skipped: bool = False
@@ -106,17 +108,19 @@ def _image_block(jpeg_bytes: bytes) -> Dict[str, Any]:
 def _from_payload(data: Dict[str, Any], *, skipped: bool = False, error: Optional[str] = None) -> RenderQAResult:
     windows_covered = bool(data.get("windows_covered"))
     gravity_wrong = bool(data.get("gravity_wrong"))
+    walls_repainted = bool(data.get("walls_repainted"))
     reasons = data.get("reasons") or []
     if isinstance(reasons, str):
         reasons = [reasons]
     reasons = [str(r).strip() for r in reasons if str(r).strip()]
     ok = data.get("ok")
     if ok is None:
-        ok = not (windows_covered or gravity_wrong)
+        ok = not (windows_covered or gravity_wrong or walls_repainted)
     return RenderQAResult(
-        ok=bool(ok) and not windows_covered and not gravity_wrong,
+        ok=bool(ok) and not windows_covered and not gravity_wrong and not walls_repainted,
         windows_covered=windows_covered,
         gravity_wrong=gravity_wrong,
+        walls_repainted=walls_repainted,
         reasons=reasons,
         suggested_rotate_degrees=_degrees(data.get("suggested_rotate_degrees")),
         skipped=skipped,
@@ -157,11 +161,12 @@ def review_organized_render(
         parsed = _from_payload(_parse_qa_json(raw))
         parsed.attempt = attempt
         logger.info(
-            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s rotate=%s reasons=%s",
+            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s walls_repainted=%s rotate=%s reasons=%s",
             attempt,
             parsed.ok,
             parsed.windows_covered,
             parsed.gravity_wrong,
+            parsed.walls_repainted,
             parsed.suggested_rotate_degrees,
             parsed.reasons,
         )
