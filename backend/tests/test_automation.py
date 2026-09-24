@@ -100,7 +100,16 @@ def _lead(*, with_photo: bool = False) -> Dict[str, Any]:
     return lead
 
 
-def _run(monkeypatch, *, generate, send=(True, None), fs=None, lead=None, capture=None):
+def _run(
+    monkeypatch,
+    *,
+    generate,
+    send=(True, None),
+    fs=None,
+    lead=None,
+    capture=None,
+    seed_deliverable=None,
+):
     from automation import run_automation
 
     async def fake_draft(lead_doc, **kwargs):
@@ -117,6 +126,7 @@ def _run(monkeypatch, *, generate, send=(True, None), fs=None, lead=None, captur
 
     def fake_build_pdf(*, lead, deliverable, images):
         captured["images"] = images
+        captured["deliverable"] = dict(deliverable or {})
         from pdf_generator import build_pdf as real_build
 
         return real_build(lead=lead, deliverable=deliverable, images=images)
@@ -130,6 +140,8 @@ def _run(monkeypatch, *, generate, send=(True, None), fs=None, lead=None, captur
     fs = fs or _FakeFS()
     lead = lead or _lead()
     db.leads.docs[lead["id"]] = dict(lead)
+    if seed_deliverable:
+        db.deliverables.docs[lead["id"]] = dict(seed_deliverable)
     sent = asyncio.run(run_automation(lead=lead, db=db, fs_bucket=fs))
     return sent, captured, db, fs
 
@@ -411,3 +423,59 @@ def test_automation_discards_after_when_qa_fails_twice(monkeypatch):
     qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
     assert qa.get("ok") is False
     assert qa.get("windows_covered") is True
+    assert db.deliverables.docs["lead-img-1"].get("front_view_url") is None
+
+
+def test_qa_discard_clears_stale_organized_hero(monkeypatch):
+    """A previous organized GridFS image must not become the PDF hero after QA discard."""
+    from render_qa import RenderQAResult
+
+    original = _jpeg((160, 190, 220))  # light blue photo
+    stale_organized = _jpeg((200, 170, 140), size=(320, 200))  # previous taupe after
+    flux = _jpeg((210, 175, 145), size=(280, 180))  # this-run failed after
+
+    def generate(**kwargs):
+        return flux, "image/jpeg"
+
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **k: RenderQAResult(
+            ok=False,
+            walls_repainted=True,
+            reasons=["Walls shifted from light blue to taupe"],
+            attempt=k.get("attempt", 1),
+        ),
+    )
+    stale_id = "bbbbbbbbbbbbbbbbbbbbbbbb"
+    fs = _FakeFS(
+        store={
+            "aaaaaaaaaaaaaaaaaaaaaaaa": original,
+            stale_id: stale_organized,
+        }
+    )
+    captured: Dict[str, Any] = {}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+        seed_deliverable={
+            "lead_id": "lead-img-1",
+            "front_view_url": f"/api/uploads/photo/{stale_id}",
+            "front_view_kind": "organized",
+        },
+    )
+    assert sent is True
+    images = captured["images"]
+    assert images["after"] is None
+    assert images["front_view"] == original
+    assert images["front_view_kind"] == "original"
+    assert images["front_view"] != stale_organized
+    assert images["front_view"] != flux
+    doc = db.deliverables.docs["lead-img-1"]
+    assert doc.get("front_view_url") is None
+    assert doc.get("front_view_kind") == "original"
+    qa = doc.get("render_qa") or {}
+    assert qa.get("ok") is False
+    assert qa.get("walls_repainted") is True

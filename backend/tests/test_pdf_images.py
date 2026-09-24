@@ -75,3 +75,14 @@ def test_assemble_derives_before_after_from_hero_and_photos():
     only_original = assemble_pdf_images(hero_bytes=b"photo", hero_kind="original")
     assert only_original["before"] == b"photo"
     assert only_original["after"] is None  # never invent an after
+
+
+def test_assemble_original_hero_ignores_stale_fetched_organized():
+    images = assemble_pdf_images(
+        hero_bytes=b"customer-photo",
+        hero_kind="original",
+        fetched={"front_view": b"stale-organized-gridfs"},
+    )
+    assert images["front_view"] == b"customer-photo"
+    assert images["front_view_kind"] == "original"
+    assert images["after"] is None

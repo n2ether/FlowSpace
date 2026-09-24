@@ -1,21 +1,25 @@
 """FLUX Kontext must stay the primary path when a customer photo exists."""
 from ai_image_generator import (
     KONTEXT_MODEL,
+    KONTEXT_PROMPT_UPSAMPLING,
     TEXT_TO_IMAGE_MODEL,
     WALL_PRESERVE_RAILS,
     WALL_RETRY_CONSTRAINT,
     _build_kontext_prompt,
     _build_text_to_image_prompt,
+    _kontext_model_input,
     _soft_goods_colors,
 )
 
 
 def _assert_wall_preserve_rails(prompt: str) -> None:
     low = prompt.lower()
-    assert "existing wall paint" in low or "existing wall color" in low
+    assert "existing wall paint" in low or "wall paint lock" in low or "wall paint must match" in low
     assert "never" in low and "wall" in low
     assert "textile" in low
     assert "do not change wall paint" in low or "keep existing wall color" in low
+    assert "cool gray-blue" in low or "light blue" in low
+    assert "taupe" in low
 
 
 def test_kontext_prompt_keeps_windows_and_skips_paint():
@@ -51,19 +55,22 @@ def test_kontext_prompt_applies_color_prefs_only_to_soft_goods():
     )
     low = prompt.lower()
     assert "earth" in low
-    assert "only to textiles and accessories (never walls)" in low
-    assert "light blue" in low or "blue-gray" in low
+    assert "never walls" in low
+    assert "textile" in low
+    assert "light blue" in low or "cool gray-blue" in low or "gray-blue" in low
     assert "taupe" in low  # called out as a wall color we must not shift toward
     assert "warm neutrals with soft sage accents" not in low
     # color_prefs must not be framed as a room/wall palette
     assert "earth tones textiles and accessories." not in low
+    assert low.index("wall paint") < low.index("earth") or "wall paint lock" in low
 
 
 def test_color_fallback_is_not_warm_neutrals():
     assert "warm" not in _soft_goods_colors({}).lower()
     assert "sage" not in _soft_goods_colors({}).lower()
     assert "textile" in _soft_goods_colors({}).lower()
-    assert WALL_PRESERVE_RAILS.lower().startswith("hard constraint")
+    assert "wall paint" in WALL_PRESERVE_RAILS.lower()
+    assert WALL_PRESERVE_RAILS.lower().startswith("critical") or "must match" in WALL_PRESERVE_RAILS.lower()
 
 
 def test_kontext_retry_rails_are_stronger():
@@ -102,6 +109,16 @@ def test_text_to_image_does_not_force_a_paint_makeover():
     assert TEXT_TO_IMAGE_MODEL == "black-forest-labs/flux-1.1-pro"
     assert KONTEXT_MODEL != TEXT_TO_IMAGE_MODEL
     assert "warm neutrals with soft sage accents" not in prompt
+
+
+def test_kontext_model_input_has_no_guidance_and_disables_upsampling():
+    payload = _kontext_model_input("keep the walls", "data:image/jpeg;base64,xx")
+    assert payload["prompt_upsampling"] is False
+    assert KONTEXT_PROMPT_UPSAMPLING is False
+    assert "guidance" not in payload
+    assert "guidance_scale" not in payload
+    assert "prompt_strength" not in payload
+    assert payload["aspect_ratio"] == "match_input_image"
 
 
 def test_drafter_system_prompt_includes_window_and_fixture_rails():

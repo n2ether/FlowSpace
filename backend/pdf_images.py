@@ -137,7 +137,9 @@ def assemble_pdf_images(
     """
     Build the ``images=`` dict ``build_pdf`` expects.
 
-    In-memory hero bytes win over a GridFS re-fetch (``fetched['front_view']``).
+    In-memory hero bytes win. Fetched organized GridFS is used only when
+    ``hero_kind="organized"`` and in-memory bytes are missing — never when
+    the pipeline is showing the labeled original after a QA discard.
     Detail / floor-plan slots use the explicit args, then ``fetched``.
     ``before`` / ``after`` feed the compact DIY-page comparison; they are
     derived from the hero + first customer photo when omitted.
@@ -145,9 +147,13 @@ def assemble_pdf_images(
     fetched = dict(fetched or {})
     kind = (hero_kind or "placeholder").strip().lower()
     if kind not in HERO_KINDS:
-        kind = "organized" if hero_bytes or fetched.get("front_view") else "placeholder"
+        kind = "organized" if hero_bytes else "placeholder"
 
-    front = coerce_image_bytes(hero_bytes) or coerce_image_bytes(fetched.get("front_view"))
+    # In-memory hero wins. Do not fall back to fetched organized GridFS when
+    # this run is using the labeled original (QA discarded the after).
+    front = coerce_image_bytes(hero_bytes)
+    if not front and kind == "organized":
+        front = coerce_image_bytes(fetched.get("front_view"))
     if not front:
         kind = "placeholder"
     elif kind == "placeholder":
