@@ -1,4 +1,4 @@
-"""Post-FLUX QA parsing and skip behavior — no live Anthropic calls."""
+"""Post-generation QA parsing and skip behavior — no live Anthropic calls."""
 from render_qa import RenderQAResult, _from_payload, _parse_qa_json, review_organized_render
 
 

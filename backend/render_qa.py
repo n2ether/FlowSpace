@@ -1,4 +1,4 @@
-"""Cheap post-FLUX vision QA for organized 'after' renders.
+"""Cheap post-generation vision QA for organized 'after' renders.
 
 If windows are covered by storage, or gravity/fixtures look wrong (fan on a
 wall, upside-down room), the caller retries generation once with stronger

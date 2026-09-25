@@ -1,4 +1,4 @@
-"""Automation pipeline: FLUX bytes must reach build_pdf (no live APIs)."""
+"""Automation pipeline: organized-render bytes must reach build_pdf (no live APIs)."""
 import asyncio
 import io
 from typing import Any, Dict, Optional
@@ -182,7 +182,7 @@ def test_automation_uses_labeled_original_when_flux_fails(monkeypatch):
     captured: Dict[str, Any] = {}
 
     def boom(**kwargs):
-        raise RuntimeError("replicate down")
+        raise RuntimeError("openai down")
 
     sent, captured, db, _fs = _run(
         monkeypatch,
@@ -203,7 +203,7 @@ def test_automation_placeholder_when_flux_fails_and_no_photo(monkeypatch):
     captured: Dict[str, Any] = {}
 
     def boom(**kwargs):
-        raise RuntimeError("replicate down")
+        raise RuntimeError("openai down")
 
     sent, captured, db, fs = _run(
         monkeypatch,

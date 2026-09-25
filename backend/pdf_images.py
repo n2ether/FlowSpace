@@ -1,20 +1,21 @@
 """
 Canonical image slots for ``build_pdf(lead=, deliverable=, images=)``.
 
-Live automation (Claude → FLUX → PDF → Resend) and the admin PDF route
+Live automation (Claude → OpenAI image → PDF → Resend) and the admin PDF route
 must populate these keys with raw image **bytes** (JPEG/PNG). URLs are
 resolved *before* ``build_pdf`` — the generator never fetches.
 
 Keys
 ----
 front_view : bytes | None
-    Page-1 hero. Successful FLUX (Kontext / text-to-image) organized render.
+    Page-1 hero. Successful OpenAI organized render (image edit, or
+    text-to-image when there is no customer photo).
     When this is missing, the hero is a branded mint placeholder unless
     ``front_view_kind="original"`` and bytes are the customer's photo.
 front_view_kind : str
-    ``organized`` — FLUX / admin organized render (default when bytes exist).
+    ``organized`` — OpenAI / admin organized render (default when bytes exist).
     ``original`` — customer photo used as a labeled interim hero because
-    FLUX failed. Prefer this over an empty mint panel when a photo exists.
+    image generation failed. Prefer this over an empty mint panel when a photo exists.
     ``placeholder`` — no bytes; mint “Organized view coming soon” panel.
 floor_plan : bytes | None
     Optional. Embed only a real plan the pipeline actually produced.
@@ -30,11 +31,11 @@ before : bytes | None
     Derived from this key, else the first ``customer_photos`` item, else
     ``front_view`` when ``front_view_kind="original"``.
 after : bytes | None
-    Compact **After** panel on the DIY page — the FLUX organized render.
+    Compact **After** panel on the DIY page — the OpenAI organized render.
     Derived from this key, else ``front_view`` when ``front_view_kind="organized"``.
-    Never invented. If FLUX failed, the panel is an honest empty state.
+    Never invented. If image generation failed, the panel is an honest empty state.
 
-UX when FLUX fails
+UX when image generation fails
 ------------------
 Show the customer's original photo as the hero, banner-labeled so it is
 not mistaken for the organized render. If no original exists, keep the
@@ -106,7 +107,7 @@ def choose_hero(
     organized_bytes: Optional[bytes],
     original_bytes: Optional[bytes],
 ) -> Tuple[Optional[bytes], str]:
-    """Prefer FLUX organized render; else labeled original; else placeholder."""
+    """Prefer the organized render; else labeled original; else placeholder."""
     organized = coerce_image_bytes(organized_bytes)
     if organized:
         return organized, "organized"

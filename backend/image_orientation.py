@@ -1,7 +1,7 @@
 """Gravity-correct uploaded photos before any downstream consumer sees them.
 
 Phone JPEGs often store landscape pixel buffers plus EXIF Orientation=6/8.
-Browsers apply that tag when displaying; FLUX Kontext, ReportLab, and raw
+Browsers apply that tag when displaying; OpenAI image edit, ReportLab, and raw
 vision APIs typically do not. The result is a sideways room: ceiling fan on
 a wall, shelves drawn over a window that was actually on the side.
 

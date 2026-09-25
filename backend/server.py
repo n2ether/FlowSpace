@@ -466,7 +466,7 @@ async def _start_automation_for_lead(
     force: bool = False,
 ) -> bool:
     """
-    Claim the lead and queue the Claude → FLUX → PDF → Resend pipeline.
+    Claim the lead and queue the Claude → OpenAI image → PDF → Resend pipeline.
 
     Skips if the lead is already processing/delivered unless force=True (admin retry).
     """

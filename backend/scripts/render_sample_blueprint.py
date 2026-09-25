@@ -8,7 +8,7 @@ Uses the bake-off garage fixture (organization plan — not a bedroom redesign).
 
 Writes:
     backend/samples/flowspace-blueprint-sample.pdf
-        Synthetic original (``before``) + organized FLUX stand-in (``after`` /
+        Synthetic original (``before``) + organized-render stand-in (``after`` /
         ``front_view``) + three extra views. Page 1 is the dashboard; page 2 is
         DIY + shopping. Before | After is a short page 3 when photos exist.
     backend/samples/flowspace-blueprint-sample-placeholders.pdf
@@ -61,7 +61,7 @@ def _synthetic_original_jpeg(width: int = 960, height: int = 640) -> bytes:
 
 
 def _synthetic_organized_jpeg(width: int = 960, height: int = 640) -> bytes:
-    """Stand-in for a FLUX organized render — not a customer photo."""
+    """Stand-in for an organized render — not a customer photo."""
     img = Image.new("RGB", (width, height), (236, 253, 245))
     draw = ImageDraw.Draw(img)
     # Floor / wall

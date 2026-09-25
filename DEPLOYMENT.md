@@ -17,8 +17,8 @@ Two Railway services from one GitHub repo:
 Before deploying, have these ready:
 - [ ] Railway account (railway.app) — free tier works, $5/mo Hobby for production
 - [ ] MongoDB Atlas free cluster (mongodb.com/atlas) — free M0 tier is fine
-- [ ] Anthropic API key (console.anthropic.com)
-- [ ] Replicate API token (replicate.com → Account Settings)
+- [ ] Anthropic API key (console.anthropic.com) — plan draft + vision QA only
+- [ ] OpenAI API key (platform.openai.com/api-keys) — organized after-image
 - [ ] Resend API key (resend.com → API Keys)
 - [ ] Stripe account with live keys (dashboard.stripe.com)
 - [ ] Domain `flowspace.solutions` pointed to Railway (or use Railway subdomain for now)
@@ -51,8 +51,8 @@ git push origin main
 |---|---|
 | `MONGO_URL` | Your MongoDB Atlas connection string |
 | `DB_NAME` | `flowspace` |
-| `ANTHROPIC_API_KEY` | `sk-ant-...` |
-| `REPLICATE_API_TOKEN` | `r8_...` |
+| `ANTHROPIC_API_KEY` | `sk-ant-...` (Claude plan draft + vision QA — not used for pixels) |
+| `OPENAI_API_KEY` | `sk-...` from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Required for the organized after-image. Customer photo → Images **edit**; no photo → Images **generations**. Model: `gpt-image-2.5-sunburst`. The backend raises `OPENAI_API_KEY is not configured` if this is missing, and the PDF continues with the labeled original (or a placeholder). |
 | `RESEND_API_KEY` | `re_...` (required for any PDF email — without it the PDF is built but never sent; lead status becomes `pdf_ready`) |
 | `RESEND_FROM_EMAIL` | Optional. Defaults to `FlowSpace <blueprints@flowspace.solutions>` |
 | `ADMIN_EMAIL` | Your email (receives admin copies) |
@@ -61,6 +61,16 @@ git push origin main
 | `ADMIN_PASSWORD` | Change this to a strong password |
 | `JWT_SECRET` | Long random string for member session JWTs |
 | `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` (plus the Railway frontend origin if it is different) |
+
+`REPLICATE_API_TOKEN` is no longer read by the after-image path. If it is already set on the Backend service, leave the secret in place — this deploy does not require deleting it.
+
+**Set `OPENAI_API_KEY` on the Backend service (not the frontend):**
+
+1. Open the Railway project → **Backend** service → **Variables**
+2. Add `OPENAI_API_KEY` with a key from https://platform.openai.com/api-keys (`sk-...`)
+3. Redeploy the Backend so the new variable is in the process environment
+
+Without it, organized-after generation fails closed (`OPENAI_API_KEY is not configured`). The PDF still sends, using the customer's photo as a labeled interim hero when one exists.
 
 5. Click **Deploy** — Railway builds the Docker image and starts the server
 6. Note the generated URL, e.g. `https://flowspace-backend-xyz.up.railway.app`
@@ -144,7 +154,7 @@ Background task: automation.py
           ↓
 1. AI drafts design plan (Anthropic Claude ~15s)
           ↓
-2. Generates room rendering (Replicate FLUX ~30s)
+2. Generates room rendering (OpenAI Images edit, or text-to-image if no photo)
           ↓
 3. Builds PDF (ReportLab, instant)
           ↓
@@ -164,7 +174,7 @@ From the admin panel you can:
 - See all leads and their automation status (`new` / `processing` / `delivered` / `error`)
 - Click **Design** on any lead to view/edit the AI-generated plan
 - Click **Generate PDF** to download the Blueprint
-- Click **Retry PDF email** on any lead to re-run Claude → FLUX → PDF → Resend (`POST /api/admin/leads/{id}/retry-automation`)
+- Click **Retry PDF email** on any lead to re-run Claude → OpenAI image → PDF → Resend (`POST /api/admin/leads/{id}/retry-automation`)
 - Lead status: `new` → `processing` → `delivered` (email sent) or `pdf_ready` (PDF built, Resend failed) or `error`
 
 ---

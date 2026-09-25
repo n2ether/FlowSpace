@@ -23,15 +23,15 @@ Documented in [`backend/pdf_images.py`](../pdf_images.py). Values are **image by
 
 | Key | Role |
 |---|---|
-| `front_view` | Page-1 hero. Live automation puts successful FLUX (Kontext) bytes here. |
-| `front_view_kind` | `organized` (FLUX), `original` (labeled customer photo when FLUX fails), or `placeholder`. |
+| `front_view` | Page-1 hero. Live automation puts a successful OpenAI organized render here. |
+| `front_view_kind` | `organized` (OpenAI), `original` (labeled customer photo when image generation fails), or `placeholder`. |
 | `before` | DIY-page **Before** — customer original photo. |
-| `after` | DIY-page **After** — FLUX organized render. Never invented. |
+| `after` | DIY-page **After** — OpenAI organized render. Never invented. |
 | `floor_plan` | Optional. Only a real plan — never invented. |
 | `view_1` / `view_2` / `view_3` | Optional extra views on the dashboard. Omitted when missing. |
 | `customer_photos` | Extra original uploads (first photo is also `before`). |
 
-**UX if FLUX fails:** use the customer original as a labeled interim hero (`front_view_kind="original"`). If no original exists, keep the branded mint “Organized view coming soon” panel. The pipeline does not crash.
+**UX if image generation fails:** use the customer original as a labeled interim hero (`front_view_kind="original"`). If no original exists, keep the branded mint “Organized view coming soon” panel. The pipeline does not crash.
 
 | File | What |
 |---|---|

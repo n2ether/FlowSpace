@@ -1,12 +1,16 @@
 """
 AI image generation for FlowSpace room renderings.
 
-Uses FLUX Kontext (image-to-image) when the customer has uploaded a photo of
+Uses the OpenAI Images edit API when the customer has uploaded a photo of
 their actual space — this preserves the room's real architecture, windows,
 proportions, and camera angle while restyling furniture, storage, and decor.
 
-Falls back to text-to-image (FLUX 1.1 Pro) only when no reference photo
+Falls back to OpenAI text-to-image (same model) only when no reference photo
 exists, since a text-only render can never match a specific room.
+
+Model: ``gpt-image-2.5-sunburst``. OpenAI's image guide recommends Sunburst
+when editing precision matters (wall paint, windows, room geometry). ``gpt-image-1``
+is scheduled to shut down on 2026-10-23, so new work should not target it.
 """
 from __future__ import annotations
 
@@ -15,28 +19,33 @@ import logging
 import os
 from typing import Any, Dict, Optional, Tuple
 
-import httpx
-import replicate
+from openai import AsyncOpenAI
+
+from ai_drafter import COLORS, FEELING, STORAGE, STYLE, _humanize
+from image_orientation import upright_bytes
 
 logger = logging.getLogger(__name__)
 
-# Image-to-image: edits the customer's actual photo, preserving room structure.
-KONTEXT_MODEL = "black-forest-labs/flux-kontext-pro"
-# Text-to-image fallback: used only when no customer photo is available.
-TEXT_TO_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
+# Edit + text-to-image. Sunburst is the docs-recommended model when the edit
+# must keep the source photo's structure. Do not pass input_fidelity: GPT Image
+# 2 and 2.5 always process image inputs at high fidelity.
+IMAGE_MODEL = "gpt-image-2.5-sunburst"
 
-from ai_drafter import BOTHERS, COLORS, FEELING, STORAGE, STYLE, _humanize
-from image_orientation import upright_bytes
-
-# Replicate flux-kontext-pro has no prompt_strength / guidance_scale.
-# Keep prompt_upsampling off so the wall-paint lock is not rewritten.
-# https://replicate.com/black-forest-labs/flux-kontext-pro
-KONTEXT_PROMPT_UPSAMPLING = False
+# JPEG matches the PDF/GridFS path (mime contains "jpeg" → .jpg).
+IMAGE_OUTPUT_FORMAT = "jpeg"
+IMAGE_OUTPUT_COMPRESSION = 90
+IMAGE_QUALITY = "high"
+# Match the upright source photo's aspect ratio.
+EDIT_SIZE = "auto"
+# 4:3, same framing the old text-to-image path requested. Edges are multiples
+# of 16 and the pixel count is inside the GPT Image 2.5 size limits.
+TEXT_TO_IMAGE_SIZE = "1536x1152"
+IMAGE_TIMEOUT_SECONDS = 180.0
 
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
 SOFT_GOODS_COLOR_FALLBACK = "neutral textiles that complement the existing wall color"
 
-# Shared rails for Kontext, text-to-image, and QA retries.
+# Shared rails for image edit, text-to-image, and QA retries.
 WALL_PRESERVE_RAILS = (
     "CRITICAL EDIT LOCK — WALL PAINT MUST MATCH THE REFERENCE PHOTO EXACTLY. "
     "Copy the existing wall paint 1:1: same hue, same lightness — light blue / "
@@ -91,8 +100,12 @@ def _build_kontext_prompt(
     stronger_rails: bool = False,
     extra_constraint: str = "",
 ) -> str:
-    """Prompt for image-EDITING — keep windows/dimensions ~95% accurate.
-    Match existing wall paint. Only change furniture/storage/loose items."""
+    """Prompt for image editing — keep windows/dimensions ~95% accurate.
+
+    Match existing wall paint. Only change furniture/storage/loose items.
+    The function name is historical; the text is what we send to the OpenAI
+    Images edit API.
+    """
     deliverable = deliverable or {}
     space = (lead.get("space_type") or "room").lower().replace("_", " ")
 
@@ -121,6 +134,10 @@ def _build_kontext_prompt(
         "the input photo. Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
+
+
+# Public alias for callers that think in "edit" rather than the old model name.
+_build_edit_prompt = _build_kontext_prompt
 
 
 def _build_text_to_image_prompt(
@@ -168,39 +185,78 @@ def _build_text_to_image_prompt(
     )
 
 
-async def _download(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as ac:
-        r = await ac.get(url)
-        r.raise_for_status()
-        return r.content
+def edit_api_params(prompt: str) -> Dict[str, Any]:
+    """Images edit settings. ``image`` is attached by the caller.
 
-
-def _output_to_url_or_bytes(output) -> Tuple[Optional[str], Optional[bytes]]:
-    if hasattr(output, "url"):
-        return str(output.url), None
-    if hasattr(output, "read"):
-        return None, output.read()
-    if isinstance(output, list) and output:
-        first = output[0]
-        if hasattr(first, "url"):
-            return str(first.url), None
-        return str(first), None
-    return str(output), None
-
-
-def _kontext_model_input(prompt: str, data_uri: str) -> Dict[str, Any]:
-    """Replicate Kontext inputs. No guidance/prompt_strength exists on this API.
-
-    prompt_upsampling stays False so the wall-paint lock is not rewritten.
+    ``input_fidelity`` is intentionally omitted. GPT Image 2.5 always reads
+    reference photos at high fidelity, and the API rejects the old knob.
     """
     return {
+        "model": IMAGE_MODEL,
         "prompt": prompt,
-        "input_image": data_uri,
-        "aspect_ratio": "match_input_image",
-        "output_format": "jpg",
-        "safety_tolerance": 2,
-        "prompt_upsampling": KONTEXT_PROMPT_UPSAMPLING,
+        "size": EDIT_SIZE,
+        "quality": IMAGE_QUALITY,
+        "output_format": IMAGE_OUTPUT_FORMAT,
+        "output_compression": IMAGE_OUTPUT_COMPRESSION,
     }
+
+
+def generate_api_params(prompt: str) -> Dict[str, Any]:
+    """Text-to-image settings used only when there is no customer photo."""
+    return {
+        "model": IMAGE_MODEL,
+        "prompt": prompt,
+        "size": TEXT_TO_IMAGE_SIZE,
+        "quality": IMAGE_QUALITY,
+        "output_format": IMAGE_OUTPUT_FORMAT,
+        "output_compression": IMAGE_OUTPUT_COMPRESSION,
+    }
+
+
+def _require_openai_key() -> str:
+    api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    return api_key
+
+
+def _openai_client(api_key: str) -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=api_key, timeout=IMAGE_TIMEOUT_SECONDS, max_retries=2)
+
+
+def _image_upload(data: bytes) -> Tuple[str, bytes, str]:
+    """Filename, bytes, and content type for the Images edit multipart file."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "room.png", data, "image/png"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "room.webp", data, "image/webp"
+    return "room.jpg", data, "image/jpeg"
+
+
+def _mime_from_bytes(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _bytes_from_response(result: Any) -> Tuple[bytes, str]:
+    """Decode an Images API response into the (bytes, mime) automation expects."""
+    data = getattr(result, "data", None) or []
+    if not data:
+        raise RuntimeError("OpenAI image response did not include image data")
+    first = data[0]
+    b64 = getattr(first, "b64_json", None)
+    if not b64:
+        raise RuntimeError("OpenAI image response did not include image bytes")
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as exc:
+        raise RuntimeError("OpenAI image response bytes could not be decoded") from exc
+    if not raw:
+        raise RuntimeError("OpenAI image response was empty")
+    return raw, _mime_from_bytes(raw)
 
 
 async def generate_front_view(
@@ -215,59 +271,50 @@ async def generate_front_view(
     """
     Generate a room rendering.
 
-    If `reference_photo_bytes` is provided (the customer's actual uploaded photo),
-    uses FLUX Kontext to edit that exact photo — preserving the real room.
-    Otherwise falls back to text-to-image generation.
+    If ``reference_photo_bytes`` is provided (the customer's actual uploaded photo),
+    uses the OpenAI Images edit API on that exact photo — preserving the real room.
+    Otherwise falls back to OpenAI text-to-image.
 
     Reference bytes are gravity-corrected again here so retries and admin
-    regenerations cannot feed a sideways buffer into Kontext.
+    regenerations cannot feed a sideways buffer into the edit.
+
+    Returns ``(image_bytes, mime)``. Missing ``OPENAI_API_KEY`` and API failures
+    raise ``RuntimeError`` so the automation QA loop can soft-fail the same way
+    it did for the previous image provider.
     """
-    api_token = os.environ.get("REPLICATE_API_TOKEN")
-    if not api_token:
-        raise RuntimeError("REPLICATE_API_TOKEN is not configured")
+    api_key = _require_openai_key()
+    client = _openai_client(api_key)
 
-    os.environ["REPLICATE_API_TOKEN"] = api_token
-    client = replicate.Client(api_token=api_token)
+    try:
+        if reference_photo_bytes:
+            reference_photo_bytes = upright_bytes(reference_photo_bytes) or reference_photo_bytes
+            prompt = _build_edit_prompt(
+                lead,
+                deliverable,
+                stronger_rails=stronger_rails,
+                extra_constraint=extra_constraint,
+            )
+            logger.info("OpenAI image edit prompt: %s", prompt[:200])
+            upload = _image_upload(reference_photo_bytes)
+            result = await client.images.edit(
+                image=[upload],
+                **edit_api_params(prompt),
+            )
+        else:
+            prompt = _build_text_to_image_prompt(
+                lead,
+                deliverable,
+                stronger_rails=stronger_rails,
+                extra_constraint=extra_constraint,
+            )
+            logger.info("OpenAI text-to-image (no reference photo) prompt: %s", prompt[:200])
+            result = await client.images.generate(**generate_api_params(prompt))
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.warning("OpenAI image generation failed: %s", exc)
+        raise RuntimeError(f"OpenAI image generation failed: {exc}") from exc
 
-    if reference_photo_bytes:
-        reference_photo_bytes = upright_bytes(reference_photo_bytes) or reference_photo_bytes
-        prompt = _build_kontext_prompt(
-            lead,
-            deliverable,
-            stronger_rails=stronger_rails,
-            extra_constraint=extra_constraint,
-        )
-        logger.info("FLUX Kontext (image-to-image) prompt: %s", prompt[:200])
-        b64 = base64.b64encode(reference_photo_bytes).decode("ascii")
-        data_uri = f"data:image/jpeg;base64,{b64}"
-        output = client.run(
-            KONTEXT_MODEL,
-            input=_kontext_model_input(prompt, data_uri),
-        )
-    else:
-        prompt = _build_text_to_image_prompt(
-            lead,
-            deliverable,
-            stronger_rails=stronger_rails,
-            extra_constraint=extra_constraint,
-        )
-        logger.info("FLUX text-to-image (no reference photo) prompt: %s", prompt[:200])
-        output = client.run(
-            TEXT_TO_IMAGE_MODEL,
-            input={
-                "prompt": prompt,
-                "aspect_ratio": "4:3",
-                "output_format": "jpg",
-                "output_quality": 90,
-                "safety_tolerance": 2,
-                "prompt_upsampling": True,
-            },
-        )
-
-    image_url, image_bytes = _output_to_url_or_bytes(output)
-    if image_bytes is None:
-        image_bytes = await _download(image_url)
-
-    mime = "image/png" if (image_url or "").endswith(".png") else "image/jpeg"
+    image_bytes, mime = _bytes_from_response(result)
     logger.info("Room render generated: %d bytes (%s)", len(image_bytes), mime)
     return image_bytes, mime

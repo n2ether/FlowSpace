@@ -4,7 +4,7 @@ FlowSpace Automation Pipeline
 Triggered after Stripe payment is confirmed.
 Full flow:
   1. AI draft the design plan (Claude)
-  2. Generate room rendering (Replicate FLUX)
+  2. Generate room rendering (OpenAI Images)
   3. Build the PDF (ReportLab)
   4. Email it to the customer (Resend)
   5. Update lead status in MongoDB
@@ -123,7 +123,7 @@ def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> 
     degrees = qa.suggested_rotate_degrees if qa.gravity_wrong else 0
     if degrees:
         try:
-            logger.info("[automation] Retrying FLUX with source rotated %s°", degrees)
+            logger.info("[automation] Retrying OpenAI image edit with source rotated %s°", degrees)
             return rotate_photo_bytes(original_bytes, degrees)
         except Exception as exc:
             logger.warning("[automation] Could not rotate source for QA retry: %s", exc)
@@ -145,7 +145,7 @@ async def _generate_organized_with_qa(
     fs_bucket,
     original_bytes: Optional[bytes],
 ) -> tuple[Optional[bytes], str, RenderQAResult]:
-    """FLUX once, cheap vision QA, one retry with stronger rails, then give up."""
+    """OpenAI image once, cheap vision QA, one retry with stronger rails, then give up."""
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
     qa = RenderQAResult(ok=True, skipped=True, error="not_run")
@@ -158,13 +158,13 @@ async def _generate_organized_with_qa(
             reference_photo_bytes=original_bytes,
         )
         logger.info(
-            "[automation] FLUX organized render ready: %d bytes (%s)",
+            "[automation] OpenAI organized render ready: %d bytes (%s)",
             len(organized_bytes or b""),
             image_mime,
         )
     except Exception as img_err:
         logger.warning(
-            "[automation] FLUX generation failed (soft-fail, PDF continues): %s",
+            "[automation] OpenAI image generation failed (soft-fail, PDF continues): %s",
             img_err,
         )
         return None, image_mime, RenderQAResult(ok=False, reasons=[str(img_err)], error="generate_failed")
@@ -196,7 +196,7 @@ async def _generate_organized_with_qa(
             extra_constraint=extra,
         )
     except Exception as img_err:
-        logger.warning("[automation] FLUX QA retry failed: %s", img_err)
+        logger.warning("[automation] OpenAI image QA retry failed: %s", img_err)
         return None, image_mime, RenderQAResult(
             ok=False,
             windows_covered=qa.windows_covered,
@@ -253,7 +253,7 @@ async def run_automation(
 
     try:
         # ── Step 0: Gravity-correct the customer photo ───────────────────
-        # EXIF must be applied before Claude vision, FLUX, or PDF embeds.
+        # EXIF must be applied before Claude vision, OpenAI image edit, or PDF embeds.
         original_bytes: Optional[bytes] = None
         first_photo = (lead.get("photos") or [None])[0]
         if first_photo:
@@ -283,7 +283,7 @@ async def run_automation(
         logger.info("[automation] Plan drafted and saved")
 
         # ── Step 2: AI Image Generation + QA safety net ──────────────────
-        logger.info("[automation] Step 2: Generating room rendering via Replicate...")
+        logger.info("[automation] Step 2: Generating room rendering via OpenAI...")
         organized_bytes, image_mime, render_qa = await _generate_organized_with_qa(
             lead=lead,
             plan=plan,
@@ -340,7 +340,7 @@ async def run_automation(
                 logger.info("[automation] Rendering saved: %s", front_view_url)
             except Exception as upload_err:
                 logger.warning(
-                    "[automation] GridFS upload failed; keeping in-memory FLUX bytes: %s",
+                    "[automation] GridFS upload failed; keeping in-memory organized render bytes: %s",
                     upload_err,
                 )
 
@@ -362,20 +362,20 @@ async def run_automation(
             if b:
                 customer_photos.append(b)
 
-        # This-run FLUX only. Never fall back to a previously stored organized
-        # render — QA-discarded afters used to leak that stale GridFS image
-        # into the PDF hero ("Hero source=organized") even after discard.
+        # This-run organized render only. Never fall back to a previously stored
+        # organized image — QA-discarded afters used to leak that stale GridFS
+        # image into the PDF hero ("Hero source=organized") even after discard.
         hero_bytes, hero_kind = choose_hero(
             organized_bytes=organized_bytes,
             original_bytes=original_bytes,
         )
         if hero_kind == "original":
             logger.warning(
-                "[automation] FLUX unavailable — using labeled customer original as interim hero (%d bytes)",
+                "[automation] Organized render unavailable — using labeled customer original as interim hero (%d bytes)",
                 len(hero_bytes or b""),
             )
         elif hero_kind == "placeholder":
-            logger.warning("[automation] No FLUX render and no original photo — branded placeholder hero")
+            logger.warning("[automation] No organized render and no original photo — branded placeholder hero")
         else:
             logger.info("[automation] Hero source=organized (%d bytes)", len(hero_bytes or b""))
 
