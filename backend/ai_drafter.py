@@ -20,6 +20,29 @@ from image_orientation import jpeg_for_vision, upright_bytes
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "claude-sonnet-4-5"
+# Sonnet drafts with blueprint layers run long. 4096 tokens cut Camila's
+# Kids' room plan mid-string (~16k chars) and the raw JSONDecodeError left
+# the paid lead in ERROR. 8192 finishes a normal plan; repair still covers
+# a cut-off reply.
+DRAFT_MAX_TOKENS = 8192
+_DRAFT_ATTEMPTS = 2
+_RETRY_HINT = (
+    "\n\nYour previous reply was truncated or was not valid JSON. "
+    "Return ONE compact JSON object and nothing else — no markdown fences, no commentary. "
+    "Keep every list to at most 3 short items so the object finishes."
+)
+_SUBSTANTIVE_KEYS = (
+    "intro",
+    "summary",
+    "notes",
+    "zones",
+    "needs",
+    "strategy",
+    "action_plan",
+    "shopping_list",
+    "benefits",
+    "blueprint_layers",
+)
 
 SYSTEM_PROMPT = """You are a senior home-organization designer for FlowSpace.
 We focus on storage for mental health — a calm, organized space reduces anxiety,
@@ -210,17 +233,326 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
     return "\n".join(parts) or f"Space: {space}"
 
 
-def _extract_json(raw: str) -> Dict[str, Any]:
+class DraftJSONError(ValueError):
+    """Model draft was not usable JSON. The lead can be retried."""
+
+
+def _isolate_json_text(raw: str) -> str:
+    """Pull the JSON object out of fences, including a fence the model never closed."""
     text = (raw or "").strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
+    blocks = [
+        match.group(1).strip()
+        for match in re.finditer(r"```(?:json)?\s*\n?([\s\S]*?)```", text, flags=re.I)
+    ]
+    fenced = [block for block in blocks if "{" in block]
+    if fenced:
+        return max(fenced, key=len)
+    text = re.sub(r"^```(?:json)?[^\n]*\n?", "", text, count=1, flags=re.I)
+    text = re.sub(r"\n?```\s*$", "", text)
+    return text.strip()
+
+
+def _skip_ws(text: str, index: int) -> int:
+    while index < len(text) and text[index] in " \t\r\n":
+        index += 1
+    return index
+
+
+def _parse_string(text: str, index: int) -> tuple[Optional[str], int]:
+    if index >= len(text) or text[index] != '"':
+        return None, index
+    cursor = index + 1
+    escaped = False
+    while cursor < len(text):
+        char = text[cursor]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            return text[index : cursor + 1], cursor + 1
+        cursor += 1
+    return None, index
+
+
+def _parse_number(text: str, index: int) -> Optional[tuple[str, int]]:
+    cursor = index
+    if cursor < len(text) and text[cursor] == "-":
+        cursor += 1
+    if cursor >= len(text) or not text[cursor].isdigit():
+        return None
+    if text[cursor] == "0":
+        cursor += 1
+    else:
+        while cursor < len(text) and text[cursor].isdigit():
+            cursor += 1
+    if cursor < len(text) and text[cursor] == ".":
+        fraction = cursor + 1
+        if fraction >= len(text) or not text[fraction].isdigit():
+            return None
+        cursor = fraction + 1
+        while cursor < len(text) and text[cursor].isdigit():
+            cursor += 1
+    if cursor < len(text) and text[cursor] in "eE":
+        exponent = cursor + 1
+        if exponent < len(text) and text[exponent] in "+-":
+            exponent += 1
+        if exponent >= len(text) or not text[exponent].isdigit():
+            return None
+        cursor = exponent + 1
+        while cursor < len(text) and text[cursor].isdigit():
+            cursor += 1
+    return text[index:cursor], cursor
+
+
+def _parse_literal(text: str, index: int) -> Optional[tuple[str, int]]:
+    for literal in ("true", "false", "null"):
+        if not text.startswith(literal, index):
+            continue
+        end = index + len(literal)
+        if end < len(text) and (text[end].isalnum() or text[end] == "_"):
+            return None
+        return literal, end
+    return None
+
+
+def _parse_value(text: str, index: int) -> tuple[Optional[str], int]:
+    index = _skip_ws(text, index)
+    if index >= len(text):
+        return None, index
+    char = text[index]
+    if char == '"':
+        return _parse_string(text, index)
+    if char == "{":
+        return _parse_object(text, index)
+    if char == "[":
+        return _parse_array(text, index)
+    if char in "-0123456789":
+        parsed = _parse_number(text, index)
+        return parsed if parsed is not None else (None, index)
+    if char in "tfn":
+        parsed = _parse_literal(text, index)
+        return parsed if parsed is not None else (None, index)
+    return None, index
+
+
+def _parse_object(text: str, index: int) -> tuple[Optional[str], int]:
+    """Parse an object, dropping a truncated key or value at the end."""
+    if index >= len(text) or text[index] != "{":
+        return None, index
+    index += 1
+    parts: List[str] = []
+    while True:
+        index = _skip_ws(text, index)
+        if index >= len(text):
+            break
+        if text[index] == "}":
+            return "{" + ",".join(parts) + "}", index + 1
+        key, after_key = _parse_string(text, index)
+        if key is None:
+            break
+        index = _skip_ws(text, after_key)
+        if index >= len(text) or text[index] != ":":
+            break
+        index = _skip_ws(text, index + 1)
+        if index >= len(text):
+            break
+        value, after_value = _parse_value(text, index)
+        if value is None:
+            break
+        parts.append(f"{key}:{value}")
+        index = _skip_ws(text, after_value)
+        if index >= len(text):
+            break
+        if text[index] == ",":
+            index += 1
+            continue
+        if text[index] == "}":
+            return "{" + ",".join(parts) + "}", index + 1
+        break
+    if not parts:
+        return None, index
+    return "{" + ",".join(parts) + "}", index
+
+
+def _parse_array(text: str, index: int) -> tuple[Optional[str], int]:
+    if index >= len(text) or text[index] != "[":
+        return None, index
+    index += 1
+    parts: List[str] = []
+    while True:
+        index = _skip_ws(text, index)
+        if index >= len(text):
+            break
+        if text[index] == "]":
+            return "[" + ",".join(parts) + "]", index + 1
+        value, after_value = _parse_value(text, index)
+        if value is None:
+            break
+        parts.append(value)
+        index = _skip_ws(text, after_value)
+        if index >= len(text):
+            break
+        if text[index] == ",":
+            index += 1
+            continue
+        if text[index] == "]":
+            return "[" + ",".join(parts) + "]", index + 1
+        break
+    if not parts:
+        return None, index
+    return "[" + ",".join(parts) + "]", index
+
+
+def _escape_controls(text: str) -> str:
+    """Escape raw newlines/tabs inside strings so json.loads can accept a repair."""
+    out: List[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                out.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                out.append(char)
+                escaped = True
+                continue
+            if char == '"':
+                in_string = False
+                out.append(char)
+                continue
+            if char == "\n":
+                out.append("\\n")
+                continue
+            if char == "\r":
+                out.append("\\r")
+                continue
+            if char == "\t":
+                out.append("\\t")
+                continue
+            out.append(char)
+            continue
+        if char == '"':
+            in_string = True
+        out.append(char)
+    return "".join(out)
+
+
+def _loads_dict(text: str) -> Optional[Dict[str, Any]]:
+    for candidate in (text, _escape_controls(text)):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _loads_outer_object(text: str) -> Optional[Dict[str, Any]]:
+    """Decode a complete object, ignoring trailing prose. Truncation returns None."""
+    if not text:
+        return None
+    starts = [0]
+    brace = text.find("{")
+    if brace > 0:
+        starts.append(brace)
+    for start in starts:
+        try:
+            data, _end = json.JSONDecoder().raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _repair_truncated_object(text: str) -> Optional[Dict[str, Any]]:
+    if not text or text[0] != "{":
+        return None
+    rendered, _index = _parse_object(text, 0)
+    if not rendered:
+        return None
+    return _loads_dict(rendered)
+
+
+def _plan_usable(plan: Dict[str, Any]) -> bool:
+    for key in _SUBSTANTIVE_KEYS:
+        value = plan.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (list, dict)) and len(value) > 0:
+            return True
+    return False
+
+
+def _extract_json(raw: str) -> Dict[str, Any]:
+    """Parse a model draft. Fences and a cut-off tail are recovered.
+
+    A still-unusable reply raises DraftJSONError so callers can retry the
+    lead. JSONDecodeError is not propagated — that string used to be stored
+    as the customer-facing automation error.
+    """
+    text = _isolate_json_text(raw)
     try:
-        return json.loads(text)
-    except Exception:
-        m = re.search(r"\{[\s\S]*\}", text)
-        if not m:
-            raise
-        return json.loads(m.group(0))
+        direct = _loads_outer_object(text)
+    except json.JSONDecodeError:
+        direct = None
+    if isinstance(direct, dict) and _plan_usable(direct):
+        return direct
+
+    search_from = 0
+    while True:
+        brace = text.find("{", search_from)
+        if brace < 0:
+            break
+        try:
+            repaired = _repair_truncated_object(text[brace:])
+        except json.JSONDecodeError:
+            repaired = None
+        if isinstance(repaired, dict) and _plan_usable(repaired):
+            logger.info(
+                "Repaired AI draft JSON (%d chars, %d keys)",
+                len(text),
+                len(repaired),
+            )
+            return repaired
+        search_from = brace + 1
+
+    raise DraftJSONError(
+        "AI draft JSON was truncated or malformed and could not be repaired. "
+        "Retry this lead."
+    )
+
+
+def _message_text(message: Any) -> str:
+    parts: List[str] = []
+    for block in getattr(message, "content", None) or []:
+        if isinstance(block, dict):
+            text = block.get("text")
+        else:
+            text = getattr(block, "text", None)
+        if text:
+            parts.append(str(text))
+    return "".join(parts)
+
+
+def _user_content(user_text: str, photo_b64: Optional[str]) -> Any:
+    if not photo_b64:
+        return user_text
+    return [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": photo_b64,
+            },
+        },
+        {"type": "text", "text": user_text},
+    ]
 
 
 def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -323,40 +655,52 @@ async def draft_deliverable(
         "Return ONLY the JSON object — no markdown, no preamble."
     )
 
-    content: Any
+    photo_b64: Optional[str] = None
     photo = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
     if photo:
         import base64
 
         vision_jpeg = jpeg_for_vision(photo, max_side=1280)
+        photo_b64 = base64.b64encode(vision_jpeg).decode("ascii")
         user_text = (
             "A gravity-corrected photo of the customer's space is attached. "
             "Floor is at the bottom; ceiling is at the top. Use it for observation "
             "and spatial_constraint only — do not invent openings the photo does not show.\n\n"
             + user_text
         )
-        content = [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": base64.b64encode(vision_jpeg).decode("ascii"),
-                },
-            },
-            {"type": "text", "text": user_text},
-        ]
-    else:
-        content = user_text
 
-    message = client.messages.create(
-        model=MODEL_NAME,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": content}],
+    last_error: Optional[DraftJSONError] = None
+    for attempt in range(1, _DRAFT_ATTEMPTS + 1):
+        prompt = user_text if attempt == 1 else user_text + _RETRY_HINT
+        message = client.messages.create(
+            model=MODEL_NAME,
+            max_tokens=DRAFT_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": _user_content(prompt, photo_b64)}],
+        )
+        raw = _message_text(message)
+        stop_reason = getattr(message, "stop_reason", None)
+        logger.info(
+            "AI draft received (%d chars, stop=%s, attempt=%d)",
+            len(raw),
+            stop_reason,
+            attempt,
+        )
+        try:
+            plan = _extract_json(raw)
+        except DraftJSONError as exc:
+            last_error = exc
+            logger.warning(
+                "AI draft JSON unusable (attempt %d, stop=%s, %d chars): %s",
+                attempt,
+                stop_reason,
+                len(raw),
+                exc,
+            )
+            continue
+        return _coerce(plan, lead=lead)
+
+    raise last_error or DraftJSONError(
+        "AI draft JSON was truncated or malformed and could not be repaired. "
+        "Retry this lead."
     )
-
-    raw = message.content[0].text
-    logger.info("AI draft received (%d chars)", len(raw or ""))
-    plan = _extract_json(raw)
-    return _coerce(plan, lead=lead)
