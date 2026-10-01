@@ -5,8 +5,8 @@ Triggered after Stripe payment is confirmed.
 Full flow:
   1. AI draft the design plan (Claude)
   2. Generate room rendering (Replicate FLUX)
-  3. Build the PDF (ReportLab)
-  4. Email it to the customer (Resend)
+  3. Build the image board and the companion PDF
+  4. Email both to the customer (Resend)
   5. Update lead status in MongoDB
 """
 from __future__ import annotations
@@ -27,6 +27,7 @@ from image_orientation import (
     rotate_photo_bytes,
     upright_bytes,
 )
+from image_board import build_image_board
 from pdf_generator import build_pdf
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from render_qa import RenderQAResult, review_organized_render
@@ -344,8 +345,8 @@ async def run_automation(
                     upload_err,
                 )
 
-        # ── Step 3: Build PDF ────────────────────────────────────────────
-        logger.info("[automation] Step 3: Building PDF...")
+        # ── Step 3: Image board + companion PDF ─────────────────────────
+        logger.info("[automation] Step 3: Building image board and companion PDF...")
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
 
         fetched = {
@@ -401,7 +402,12 @@ async def run_automation(
         )
 
         pdf_bytes = build_pdf(lead=lead, deliverable=deliverable_doc, images=images)
-        logger.info("[automation] PDF built: %d bytes", len(pdf_bytes))
+        board_bytes = build_image_board(lead=lead, deliverable=deliverable_doc, images=images)
+        logger.info(
+            "[automation] Companion PDF %d bytes, image board %d bytes",
+            len(pdf_bytes),
+            len(board_bytes),
+        )
 
         # ── Step 4: Send Email ───────────────────────────────────────────
         logger.info("[automation] Step 4: Sending email to %s...", customer_email)
@@ -411,6 +417,7 @@ async def run_automation(
             space_type=space_type,
             lead_id=lead_id,
             pdf_bytes=pdf_bytes,
+            board_bytes=board_bytes,
         )
 
         # ── Step 5: Update status ────────────────────────────────────────

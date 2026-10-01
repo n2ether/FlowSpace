@@ -1,0 +1,56 @@
+{
+  "lead": {
+    "name": "Camila Sales",
+    "email": "camila@example.com",
+    "space_type": "kids_room",
+    "goals": "Nicholas is turning one. Keep the space theme and make the nursery safer and calmer.",
+    "must_stay": "Six-drawer dresser, crib, rocker, space-themed wall decor",
+    "desired_feeling": ["calm", "warm"],
+    "color_prefs": ["earth", "wood"],
+    "budget": "100_300",
+    "style_prefs": ["cozy_layered"]
+  },
+  "deliverable": {
+    "intro": "Hi Camila. Nicholas is turning one, and this refresh keeps the nursery you already have while making the floor safer and the dresser easier to use every day.",
+    "needs": [
+      "Anchor the dresser so it cannot tip",
+      "Keep a clear floor path for a newly mobile toddler",
+      "Warm the window without a portable heater"
+    ],
+    "zones": [
+      {"title": "Safe Sleep Zone", "desc": "Crib stays clear of cords and loose bedding."},
+      {"title": "Diaper & Dress Zone", "desc": "The six-drawer dresser stays. Wipes, diapers, and clothes live in the existing drawers, including the bottom drawer for bulky bedding."},
+      {"title": "Play & Movement Zone", "desc": "Clear floor path along the door."},
+      {"title": "Comfort & Feed Zone", "desc": "Rocker stays by the window. Thermal curtains cut the draft."}
+    ],
+    "wall_color_name": "Keep existing / no paint change",
+    "wall_color_hex": "",
+    "wall_color_note": "No paint change — keep the existing wall color from the photo.",
+    "shopping_list": [
+      {"name": "Furniture anchor kit (dresser + shelves)", "qty": 2, "price": 15},
+      {"name": "Blackout thermal curtain panels", "qty": 2, "price": 35},
+      {"name": "Adhesive window insulation film kit", "qty": 1, "price": 18},
+      {"name": "Under-door draft sweep", "qty": 1, "price": 12},
+      {"name": "Wall-mounted digital room thermometer", "qty": 1, "price": 20},
+      {"name": "Rug grippers", "qty": 1, "price": 10},
+      {"name": "Cord management clips", "qty": 1, "price": 8},
+      {"name": "Felt frame bumpers", "qty": 1, "price": 6},
+      {"name": "Large open cubby unit", "qty": 1, "price": 40},
+      {"name": "Basket set to replace dresser drawers", "qty": 1, "price": 22}
+    ],
+    "budget_note": "Total ~$124–$154 for safety anchors and thermal upgrades.",
+    "strategy": [
+      "Replace the dresser drawers with baskets for a cleaner look.",
+      "Add large open cubbies beside the crib for toys.",
+      "Upgrade curtains with a thermal layer and keep the ones you have."
+    ],
+    "action_plan": [
+      "Anchor the six-drawer dresser to the wall before anything else.",
+      "Strip the crib to a bare mattress with one fitted sheet.",
+      "Install the thermal curtain panels and the door sweep."
+    ],
+    "benefits": ["Safer floor", "Warmer window", "Less to reset at night"],
+    "notes": "Windows and room proportions stay ~95% true to your photo.",
+    "summary": "Same nursery, calmer floor, dresser drawers kept."
+  }
+}

@@ -27,6 +27,15 @@ TEXT_TO_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
 
 from ai_drafter import BOTHERS, COLORS, FEELING, STORAGE, STYLE, _humanize
 from image_orientation import upright_bytes
+from space_rails import nursery_storage_line
+
+
+def _with_space_rails(lead: Dict[str, Any], extra_constraint: str) -> str:
+    """Append kids-room rails. Keep this call if the image provider changes."""
+    from space_rails import image_prompt_rails
+
+    parts = [image_prompt_rails(lead), (extra_constraint or "").strip()]
+    return " ".join(part for part in parts if part)
 
 # Replicate flux-kontext-pro has no prompt_strength / guidance_scale.
 # Keep prompt_upsampling off so the wall-paint lock is not rewritten.
@@ -103,7 +112,7 @@ def _build_kontext_prompt(
     rails = ORGANIZE_RAILS
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = (extra_constraint or "").strip()
+    extra = _with_space_rails(lead, extra_constraint)
     if extra and not extra.endswith((".", " ")):
         extra = extra + " "
 
@@ -114,8 +123,7 @@ def _build_kontext_prompt(
         "or earth-tone the walls. "
         f"Change only furniture, storage, and loose items into a tidy {style_str} layout. "
         f"Soft-goods colors only (textiles, baskets, pillows — NEVER walls): {color_str}. "
-        f"Add tidy storage for {storage_str}: matching baskets, "
-        f"labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
+        f"{nursery_storage_line(lead, storage_str)}"
         f"{rails}{extra}"
         "Do not change wall paint. The walls must look like the same painted surface as "
         "the input photo. Photorealistic, natural lighting, "
@@ -151,16 +159,23 @@ def _build_text_to_image_prompt(
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = (extra_constraint or "").strip()
+    extra = _with_space_rails(lead, extra_constraint)
     if extra and not extra.endswith((".", " ")):
         extra = extra + " "
+    storage_line = nursery_storage_line(lead, storage_str)
+    if storage_line.startswith("Tidy only"):
+        storage_sentence = storage_line
+    else:
+        storage_sentence = (
+            f"Smart storage for {storage_str} — modular shelving, labeled bins, baskets, hooks. "
+        )
 
     return (
         f"Photorealistic photograph of a beautifully organized residential {space}. "
         f"Aesthetic style: {style_str}. "
         f"Textile and accessory colors only (never wall paint): {color_str}. "
         f"Atmosphere: {feeling_str}, mentally calming. "
-        f"Smart storage for {storage_str} — modular shelving, labeled bins, baskets, hooks. "
+        f"{storage_sentence}"
         f"{rails}{extra}"
         "Eye-level front view, wide angle showing the full space. "
         "Bright natural lighting, no people, no text or watermarks. "

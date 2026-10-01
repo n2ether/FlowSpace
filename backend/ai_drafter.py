@@ -14,8 +14,10 @@ from typing import Any, Dict, List, Optional
 
 import anthropic
 
+from blueprint_consistency import prepare_deliverable
 from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
 from image_orientation import jpeg_for_vision, upright_bytes
+from space_rails import NURSERY_DRAFT_RULES, nursery_draft_addon
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +99,9 @@ Brain-layer rules:
 - Spatial constraint: preserve_shell true, windows_dims_fidelity "~95%", no_invented_floor_plan true. known_from_photo is qualitative only.
 - Recommendation: one system + why_it_should_work (causal, not fluff).
 - Validation: REAL checks — fit, flow, budget_band (vs stated budget), possession_respect, plus conflicts and assumptions. status is pass, watch, or fail. Do not invent scores or room measurements.
-- Customer instruction: start_here + do_this_week the customer can do without construction."""
+- Customer instruction: start_here + do_this_week the customer can do without construction.
+- One kit total only. The budget figure you write must equal the sum of qty × price. Do not state a lower range than that sum.
+""" + NURSERY_DRAFT_RULES
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -627,7 +631,7 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
         plan.get("blueprint_layers") or {},
         derive_layers(lead or {}, coerced),
     )
-    return coerced
+    return prepare_deliverable(lead or {}, coerced)
 
 
 async def draft_deliverable(
@@ -654,6 +658,9 @@ async def draft_deliverable(
         "Default wall paint to keep existing / no paint change unless they asked to paint. "
         "Return ONLY the JSON object — no markdown, no preamble."
     )
+    nursery_addon = nursery_draft_addon(lead)
+    if nursery_addon:
+        user_text += "\n\n" + nursery_addon
 
     photo_b64: Optional[str] = None
     photo = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None

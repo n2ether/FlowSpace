@@ -30,7 +30,25 @@ def _admin_email() -> str:
     return (os.environ.get("ADMIN_EMAIL") or DEFAULT_ADMIN).strip() or DEFAULT_ADMIN
 
 
-def _customer_html(customer_name: str, space_type: str) -> str:
+def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> str:
+    if two_files:
+        attached = (
+            "Two files are attached. The <strong>image board</strong> is the visual plan — "
+            "your before and after, the room layout, and the roadmap. "
+            "The <strong>companion guide</strong> is the detail — steps, the shopping list, "
+            "safety, climate, and the weekly reset."
+        )
+        open_line = "Open the image board first, then the companion guide."
+        inside_visual = "Image board — hero, layout, palette, and roadmap"
+        inside_detail = "Companion guide — steps, shopping links, safety, and reset"
+    else:
+        attached = (
+            "Your personalized <strong>" + plan_title(space_type) + "</strong> is attached. "
+            "Inside you'll find your FlowSpace Blueprint — designed around your space."
+        )
+        open_line = "Open the attached PDF to get started."
+        inside_visual = "Organized visual of your actual space"
+        inside_detail = "Step-by-step action plan"
     space = plan_title(space_type)
     return f"""
 <!DOCTYPE html>
@@ -67,9 +85,7 @@ def _customer_html(customer_name: str, space_type: str) -> str:
                 Your Blueprint is Ready, {customer_name}! 🎉
               </h1>
               <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
-                Your personalized <strong>{space}</strong> is attached to this email.
-                Inside you'll find your complete FlowSpace Blueprint™ — designed specifically
-                around your space, your style, and your wellbeing.
+                {attached}
               </p>
 
               <!-- What's Inside Box -->
@@ -81,19 +97,16 @@ def _customer_html(customer_name: str, space_type: str) -> str:
                     </p>
                     <table width="100%" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Organized visual of your actual space</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; {inside_visual}</td>
                       </tr>
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Zones &amp; functional layout plan</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; {inside_detail}</td>
                       </tr>
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Curated shopping list with prices</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Shopping list with one total that matches the lines</td>
                       </tr>
                       <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Optional paint note (consider only if it helps)</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Step-by-step action plan</td>
+                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Safety, climate, and the weekly reset</td>
                       </tr>
                       <tr>
                         <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Design strategy for lasting calm</td>
@@ -106,7 +119,7 @@ def _customer_html(customer_name: str, space_type: str) -> str:
               <p style="margin:0 0 32px;font-size:15px;color:#475569;line-height:1.7;">
                 An organized space isn't just about aesthetics — it's about reducing the mental
                 load of daily life. Your Blueprint is designed to create a space that feels as
-                good as it looks. Open the attached PDF to get started.
+                good as it looks. {open_line}
               </p>
 
               <!-- Divider -->
@@ -151,7 +164,7 @@ def _admin_html(customer_name: str, customer_email: str, space_type: str, lead_i
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Space</td><td>{space_label(space_type)}</td></tr>
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Lead ID</td><td><code>{lead_id}</code></td></tr>
   </table>
-  <p style="margin-top:20px;color:#475569;">The Blueprint PDF has been sent to the customer automatically. You can view and edit the plan in the admin panel.</p>
+  <p style="margin-top:20px;color:#475569;">The image board and companion guide have been sent to the customer. You can view and edit the plan in the admin panel.</p>
 </body>
 </html>
 """
@@ -164,9 +177,10 @@ async def send_blueprint(
     space_type: str,
     lead_id: str,
     pdf_bytes: bytes,
+    board_bytes: Optional[bytes] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Send the PDF Blueprint to the customer and notify admin.
+    Send the companion PDF and, when present, the image board.
 
     Returns (True, None) on customer-email success. Admin notify failures are
     logged but do not fail the customer send. Returns (False, reason) if the
@@ -184,13 +198,25 @@ async def send_blueprint(
     space = plan_title(space_type)
     safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    filename = f"FlowSpace_{space.replace(' ', '_')}_{safe_name}.pdf"
+    stem = space.replace(" ", "_")
+    pdf_filename = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
     sender = _from_email()
-    attachment = {
-        "filename": filename,
-        "content": pdf_b64,
-        "content_type": "application/pdf",
-    }
+    attachments = []
+    if board_bytes:
+        attachments.append(
+            {
+                "filename": f"FlowSpace_{stem}_Image_Board_{safe_name}.png",
+                "content": base64.b64encode(board_bytes).decode("utf-8"),
+                "content_type": "image/png",
+            }
+        )
+    attachments.append(
+        {
+            "filename": pdf_filename,
+            "content": pdf_b64,
+            "content_type": "application/pdf",
+        }
+    )
 
     try:
         await asyncio.to_thread(
@@ -199,8 +225,8 @@ async def send_blueprint(
                 "from": sender,
                 "to": [customer_email.strip()],
                 "subject": f"Your FlowSpace {space} is Ready ✨",
-                "html": _customer_html(customer_name, space_type),
-                "attachments": [attachment],
+                "html": _customer_html(customer_name, space_type, two_files=bool(board_bytes)),
+                "attachments": attachments,
             },
         )
         logger.info("Blueprint email sent to %s", customer_email)
@@ -216,7 +242,7 @@ async def send_blueprint(
                 "to": [_admin_email()],
                 "subject": f"[FlowSpace] Blueprint delivered — {customer_name} ({space})",
                 "html": _admin_html(customer_name, customer_email, space_type, lead_id),
-                "attachments": [attachment],
+                "attachments": attachments,
             },
         )
         logger.info("Admin notification sent")

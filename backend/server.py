@@ -5,19 +5,22 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 from gridfs.errors import NoFile
+import io
 import os
 import logging
 import asyncio
+import zipfile
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 from datetime import datetime, timezone
 
 import stripe as stripe_sdk
 import httpx
 
-from pdf_generator import build_pdf
+from image_board import build_image_board
+from pdf_generator import build_pdf, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
@@ -880,8 +883,7 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
     return {"slot": slot, "url": url}
 
 
-@api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
-async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+async def _blueprint_render_inputs(lead_id: str, request: Request):
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -900,7 +902,6 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
             b = await _resolve_image_bytes(url, request)
             if b:
                 customer_photos.append(b)
-    # First customer photo is the Before panel even when extra reference pages are off.
     first_original = customer_photos[0] if customer_photos else None
     if not first_original:
         first_photo = (lead.get("photos") or [None])[0]
@@ -919,14 +920,59 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
         customer_photos=customer_photos,
         fetched=fetched,
     )
+    return lead, d, images
+
+
+def _blueprint_filenames(lead: Dict[str, Any]) -> Tuple[str, str, str]:
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client")
+    )
+    stem = plan_title(lead.get("space_type")).replace(" ", "_")
+    board = f"FlowSpace_{stem}_Image_Board_{safe_name}.png"
+    pdf = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
+    package = f"FlowSpace_{stem}_Blueprint_{safe_name}.zip"
+    return board, pdf, package
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
+async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
-    safe_name = (lead.get("name") or "client").replace(" ", "_")
-    space = (lead.get("space_type") or "space").capitalize()
-    filename = f"FlowSpace_{space}_Blueprint_{safe_name}.pdf"
+    _board_name, filename, _package = _blueprint_filenames(lead)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/board")
+async def render_deliverable_board(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
+    filename, _pdf_name, _package = _blueprint_filenames(lead)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/package")
+async def render_deliverable_package(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Zip of the image board and the companion guide, for a nursery revise or QA."""
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
+    png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
+    board_name, pdf_name, package_name = _blueprint_filenames(lead)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(board_name, png_bytes)
+        archive.writestr(pdf_name, pdf_bytes)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{package_name}"', "Cache-Control": "no-store"},
     )
 
 

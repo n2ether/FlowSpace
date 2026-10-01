@@ -6,16 +6,9 @@ Uses the bake-off garage fixture (organization plan — not a bedroom redesign).
   cd backend
   python scripts/render_sample_blueprint.py
 
-Writes:
-    backend/samples/flowspace-blueprint-sample.pdf
-        Synthetic original (``before``) + organized FLUX stand-in (``after`` /
-        ``front_view``) + three extra views. Page 1 is the dashboard; page 2 is
-        DIY + shopping. Before | After is a short page 3 when photos exist.
-    backend/samples/flowspace-blueprint-sample-placeholders.pdf
-        Same plan with ``images={}`` — mint “Organized view coming soon” hero.
-    backend/samples/flowspace-blueprint-sample-pageN.png
-    backend/samples/flowspace-blueprint-placeholders-pageN.png
-        Rasterized pages when PyMuPDF is installed.
+Writes the companion PDF for the garage bake-off, plus Nico's nursery
+two-file sample (image board PNG + companion PDF) from
+``fixtures/nursery_nico.json``. The board is the visual; the PDF is the guide.
 
 Image keys expected by build_pdf() are documented in backend/pdf_images.py.
 """
@@ -31,6 +24,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from image_board import build_image_board  # noqa: E402
 from pdf_generator import build_pdf  # noqa: E402
 from pdf_images import assemble_pdf_images  # noqa: E402
 
@@ -127,6 +121,30 @@ def main() -> None:
 
     _rasterize(filled, out_dir, "flowspace-blueprint-sample")
     _rasterize(empty, out_dir, "flowspace-blueprint-placeholders")
+
+    nursery = json.loads((ROOT / "fixtures" / "nursery_nico.json").read_text(encoding="utf-8"))
+    nursery_images = assemble_pdf_images(
+        hero_bytes=organized,
+        hero_kind="organized",
+        before=original,
+        after=organized,
+    )
+    board = build_image_board(
+        lead=nursery["lead"],
+        deliverable=nursery["deliverable"],
+        images=nursery_images,
+    )
+    board_path = out_dir / "nicos-nursery-image-board.png"
+    board_path.write_bytes(board)
+    print(f"wrote {board_path} ({len(board)} bytes)")
+    companion = build_pdf(
+        lead=nursery["lead"],
+        deliverable=nursery["deliverable"],
+        images=nursery_images,
+    )
+    companion_path = out_dir / "nicos-nursery-companion.pdf"
+    companion_path.write_bytes(companion)
+    print(f"wrote {companion_path} ({len(companion)} bytes)")
 
 
 if __name__ == "__main__":

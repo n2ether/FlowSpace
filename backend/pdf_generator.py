@@ -1,24 +1,25 @@
 """
-FlowSpace Blueprint PDF — dashboard organization plan.
+FlowSpace companion PDF — the long-form half of a two-file Blueprint.
 
-Layout (Letter):
-  Page 1 — dense dashboard inspired by the FlowSpace “design plan” sheet
-            (hero, needs, optional paint, zones, extra views, strategy).
-  Page 2 — consumer DIY instructions + full shopping list / budget.
-  Page 3 — Before | After when a real photo exists.
+The primary visual is ``image_board.build_image_board`` (a landscape PNG).
+This PDF is the companion guide:
 
-Visual template only: site emerald/slate palette, Fraunces display + Inter body.
-Content is always an organization plan for closets, garages, laundry rooms,
-pantries, mudrooms, and storage — never a bedroom redesign.
+  - Full zone explanations and needs (no mid-word clipping)
+  - Shopping list, retailer links, and one list total
+  - Step-by-step work, safety, climate, maintenance, and the weekly reset
+  - A before | after reference page only when a real photo exists
+
+The image board carries the hero, extra views, approximate room plan,
+what's-new callouts, palette, and roadmap. Do not cram those into this PDF.
 
 Hard rules:
   - Windows and room proportions stay ~95% true to the customer photo.
   - Never invent footage, window counts, or measured callouts.
   - Floor plans only when the pipeline actually provides one.
   - Wall paint/color is an optional recommendation, not applied in the visual.
-  - Change bins, furniture, and layout; preserve the physical shell.
+  - The list total matches the shopping lines. A lower kit range is rewritten.
 
-Public API is unchanged: build_pdf(lead=, deliverable=, images=) -> bytes
+Public API: build_pdf(lead=, deliverable=, images=) -> bytes
 """
 from __future__ import annotations
 
@@ -49,7 +50,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from blueprint_layers import BUDGET_LABELS, STORAGE, resolve_layers
+from blueprint_consistency import companion_sections
+from blueprint_layers import BUDGET_LABELS, STORAGE
 from pdf_images import (
     COMPARE_AFTER_BANNER,
     COMPARE_AFTER_EMPTY,
@@ -331,6 +333,22 @@ def _styles():
         "intro": ParagraphStyle(
             "intro", parent=base["BodyText"], fontName=_font("FSSans"),
             fontSize=7.4, leading=9.6, textColor=SLATE_MUTED, alignment=TA_CENTER,
+        ),
+        "guideKicker": ParagraphStyle(
+            "guideKicker", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=8, leading=11, textColor=EMERALD_DEEP, spaceAfter=2,
+        ),
+        "guideH": ParagraphStyle(
+            "guideH", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
+            fontSize=12, leading=15, textColor=SLATE, spaceBefore=8, spaceAfter=4,
+        ),
+        "guideH3": ParagraphStyle(
+            "guideH3", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=10.5, leading=13, textColor=EMERALD_DEEP, spaceBefore=6, spaceAfter=1,
+        ),
+        "guideBody": ParagraphStyle(
+            "guideBody", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=10, leading=13.4, textColor=INK, spaceAfter=3,
         ),
     }
 
@@ -894,7 +912,12 @@ def _draw_interior_header(canvas, title: str, kind: str = "interior") -> None:
     canvas.drawString(MARGIN + 92, top, title)
     canvas.setFillColor(EMERALD_DEEP)
     canvas.setFont(_font("FSSans-Semi"), 6.4)
-    right = "BEFORE & AFTER" if kind == "compare" else "SHOPPING LIST  ·  DIY THIS WEEK"
+    if kind == "compare":
+        right = "BEFORE & AFTER"
+    elif kind == "guide":
+        right = "COMPANION GUIDE"
+    else:
+        right = "SHOPPING LIST  ·  DIY THIS WEEK"
     canvas.drawRightString(PAGE_W - MARGIN, top, right)
     canvas.setStrokeColor(BORDER)
     canvas.setLineWidth(0.5)
@@ -1449,35 +1472,24 @@ def build_pdf(
     images: Dict[str, Optional[bytes]],
 ) -> bytes:
     """
-    Render the FlowSpace Blueprint PDF.
+    Render the companion guide PDF.
 
     `lead` — questionnaire/lead document
     `deliverable` — zones, needs, shopping_list, strategy, action_plan, …
-    `images` — see ``pdf_images``: front_view (+ front_view_kind), floor_plan,
-    view_1/2/3, before, after, customer_photos. Values must be image bytes, not URLs.
+    `images` — see ``pdf_images``. The before | after page uses real bytes only.
+    The visual board is a separate PNG from ``build_image_board``.
     """
     _register_fonts()
     images = normalize_pdf_images(images)
+    sections, deliverable = companion_sections(lead, deliverable)
     buf = io.BytesIO()
     s = _styles()
     space_key = lead.get("space_type") or "space"
-    space_name = space_label(space_key)
     title_text = plan_title(space_key)
     customer_name = lead.get("name") or "there"
     vibe = _keyword_line(lead)
     content_w = PAGE_W - 2 * MARGIN
 
-    dash_frame = Frame(
-        MARGIN,
-        FOOTER_H + 0.06 * inch,
-        content_w,
-        PAGE_H - DASH_HEADER_H - FOOTER_H - 0.12 * inch,
-        leftPadding=0,
-        rightPadding=0,
-        topPadding=2,
-        bottomPadding=2,
-        showBoundary=0,
-    )
     int_frame = Frame(
         MARGIN,
         FOOTER_H + 0.06 * inch,
@@ -1493,131 +1505,133 @@ def build_pdf(
         buf,
         pagesize=LETTER,
         pageTemplates=[
-            PageTemplate(id="dashboard", frames=[dash_frame], onPage=_make_on_page("dashboard", title_text, vibe)),
-            PageTemplate(id="interior", frames=[int_frame], onPage=_make_on_page("interior", title_text, vibe)),
+            PageTemplate(id="guide", frames=[int_frame], onPage=_make_on_page("guide", title_text, vibe)),
             PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe)),
         ],
-        title=f"{title_text} — FlowSpace Blueprint",
+        title=f"{title_text} — FlowSpace Companion Guide",
         author="FlowSpace",
     )
 
-    layers = resolve_layers(lead, deliverable)
-    zones = deliverable.get("zones") or []
-    shopping = deliverable.get("shopping_list") or []
-    strategy = deliverable.get("strategy") or []
-    action_plan = list(deliverable.get("action_plan") or [])
-    inst = layers.get("customer_instruction") or {}
-    if inst.get("do_this_week"):
-        action_plan = list(inst["do_this_week"])
-    benefits = deliverable.get("benefits") or []
-    intro = (
-        deliverable.get("intro")
-        or f"A calmer {space_name.lower()} — organized around the room you already have."
-    )
     story: List[Any] = []
-
-    # ── Page 1: dashboard ────────────────────────────────────────────
-    story.append(Paragraph(_esc(_clip(intro, 160)), s["intro"]))
-    story.append(Spacer(1, 6))
-
-    left_w = content_w * 0.62
-    right_w = content_w * 0.36
-    hero_h = 3.22 * inch
-    extra_views = [images.get("view_1"), images.get("view_2"), images.get("view_3")]
-    if not any(coerce_image_bytes(v) for v in extra_views):
-        hero_h = 3.72 * inch
-
-    hero = _hero_block(
-        images.get("front_view"),
-        left_w,
-        hero_h,
-        kind=str(images.get("front_view_kind") or "organized"),
-    )
-    side = _sidebar(lead, deliverable, layers, right_w, space_name)
-    top = Table([[hero, side]], colWidths=[left_w + 8, right_w])
-    top.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), 10),
-            ]
-        )
-    )
-    story.append(top)
-    story.append(Spacer(1, 8))
-    story.append(_zones_row(zones, images.get("floor_plan"), content_w))
-
-    views = _additional_views(extra_views, zones, content_w)
-    if views:
-        story.append(Spacer(1, 7))
-        story.append(views)
-
-    story.append(Spacer(1, 8))
-    story.append(_bottom_cards(strategy, action_plan, benefits, content_w))
-
-    # ── Page 2: shopping + DIY ───────────────────────────────────────
-    story.append(NextPageTemplate("interior"))
-    story.append(PageBreak())
-
-    story.append(Paragraph("CURATED SELECTIONS — SHOPPING LIST", s["section"]))
+    story.append(Paragraph("YOUR BLUEPRINT, IN TWO FILES", s["guideKicker"]))
     story.append(
         Paragraph(
-            f"Hi { _esc(customer_name) } — shop this kit, then follow this week's DIY. "
-            f"{_esc(_clip(str(deliverable.get('budget_note') or ''), 120))}".strip(),
-            s["muted"],
+            f"Hi {_esc(customer_name)}. The image board is the visual plan — hero, "
+            "room views, and the approximate layout. This companion guide is the detail: "
+            "full steps, the shopping list, safety, climate, and the weekly reset.",
+            s["guideBody"],
         )
     )
+    story.append(Paragraph(_esc(sections["intro"]), s["guideBody"]))
+
+    story.append(Paragraph("WHAT THIS PLAN COVERS", s["guideH"]))
+    for need in sections["needs"]:
+        story.append(Paragraph(f"• {_esc(need)}", s["guideBody"]))
+
+    if sections["zones"]:
+        story.append(Paragraph("ZONES", s["guideH"]))
+        for zone in sections["zones"]:
+            story.append(Paragraph(_esc(zone["title"]), s["guideH3"]))
+            if zone.get("desc"):
+                story.append(Paragraph(_esc(zone["desc"]), s["guideBody"]))
+
+    benefits = [str(x).strip() for x in (deliverable.get("benefits") or []) if str(x).strip()]
+    if benefits:
+        story.append(Paragraph("WHY IT HELPS", s["guideH"]))
+        for benefit in benefits:
+            story.append(Paragraph(f"• {_esc(benefit)}", s["guideBody"]))
+
+    paint = _paint_block(deliverable, content_w)
+    if paint:
+        story.append(Paragraph(OPTIONAL_PAINT_HEADING, s["guideH"]))
+        story.append(paint)
+
+    story.append(PageBreak())
+    story.append(Paragraph("SHOPPING LIST", s["guideH"]))
+    if sections["budget_note"]:
+        story.append(Paragraph(_esc(sections["budget_note"]), s["guideBody"]))
     story.append(Spacer(1, 4))
-    story.append(_shopping_table(shopping, content_w))
-    links = deliverable.get("shopping_links") or []
+    story.append(_shopping_table(deliverable.get("shopping_list") or [], content_w))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"THIS LIST TOTALS  {_esc(str(sections['list_total']))}", s["guideH"]))
+    if sections["stated_budget"]:
+        story.append(
+            Paragraph(
+                f"Your stated budget: {_esc(sections['stated_budget'])}. "
+                "That is the budget you gave us. The list total above is what this kit costs.",
+                s["guideBody"],
+            )
+        )
+    story.append(Paragraph("Shopping Links", s["guideH"]))
+    links = sections["links"]
     if links:
-        story.append(Spacer(1, 2))
-        link_line = "   ·   ".join(
-            f'<link href="{_esc(lnk.get("url") or "")}" color="#047857"><u>{_esc(lnk.get("name") or lnk.get("url") or "")}</u></link>'
-            for lnk in links[:6]
-            if lnk.get("name") or lnk.get("url")
-        )
-        if link_line:
-            story.append(Paragraph(f"<b>Shopping Links</b>  {link_line}", s["bodySmall"]))
-    story.append(Spacer(1, 4))
-    story.append(
-        _budget_callout(
-            _budget_range(lead, deliverable, layers),
-            content_w,
-            compact=False,
-        )
-    )
+        for link in links[:12]:
+            url = link.get("url") or ""
+            name = link.get("name") or url
+            if url:
+                story.append(
+                    Paragraph(
+                        f'<link href="{_esc(url)}" color="#047857"><u>{_esc(name)}</u></link>',
+                        s["guideBody"],
+                    )
+                )
+            elif name:
+                story.append(Paragraph(_esc(name), s["guideBody"]))
+        if sections["links_are_search"]:
+            story.append(
+                Paragraph(
+                    "Search links open a retailer search. Confirm the exact product before you buy.",
+                    s["guideBody"],
+                )
+            )
+    else:
+        story.append(Paragraph("Shopping links will follow once the list has items.", s["guideBody"]))
 
-    story.append(Spacer(1, 7))
-    story.append(Paragraph("IMPLEMENTATION ROADMAP — SIMPLE ACTION PLAN", s["section"]))
-    story.append(_diy_columns(layers, action_plan, content_w))
+    story.append(PageBreak())
+    story.append(Paragraph("STEP BY STEP", s["guideH"]))
+    for index, step in enumerate(sections["steps"], 1):
+        story.append(Paragraph(f"{index}. {_esc(step)}", s["guideBody"]))
 
-    notes = str(deliverable.get("notes") or "").strip()
+    story.append(Paragraph("SAFETY", s["guideH"]))
+    for line in sections["safety"]:
+        story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
+
+    story.append(Paragraph("CLIMATE", s["guideH"]))
+    for line in sections["climate"]:
+        story.append(Paragraph(_esc(line), s["guideBody"]))
+
+    story.append(Paragraph("MAINTENANCE AND WEEKLY RESET", s["guideH"]))
+    story.append(Paragraph(_esc(sections["maintenance"]), s["guideBody"]))
+
+    if sections["removed_note"]:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(_esc(sections["removed_note"]), s["guideBody"]))
+
+    notes = sections["notes"]
     if notes and notes != DEFAULT_NOTES:
-        story.append(Spacer(1, 5))
-        story.append(Paragraph("NOTES &amp; TIPS", s["section"]))
-        story.append(Paragraph(_esc(notes), s["muted"]))
+        story.append(Paragraph("NOTES", s["guideH"]))
+        story.append(Paragraph(_esc(notes), s["guideBody"]))
     attachment_note = deliverable.get("attachment_note") or ""
     if attachment_note:
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(_esc(attachment_note), s["bodySmall"]))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(_esc(str(attachment_note)), s["guideBody"]))
 
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
     if before_bytes or after_bytes:
         story.append(NextPageTemplate("compare"))
         story.append(PageBreak())
-        story.append(Paragraph("BEFORE &amp; AFTER — YOUR SPACE, RE-ZONED", s["section"]))
+        story.append(Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]))
         story.append(
             Paragraph(
-                "Your original photo on the left. The organized view on the right — "
-                "same windows and walls (~95%). Paint is optional — not applied in the visual. "
+                "The image board is the primary visual. This page repeats the photos for reference. "
+                "Your original photo is on the left. The organized view is on the right — "
+                "same windows and walls (~95%). Paint is optional and is not applied in the visual. "
                 "We do not invent an after image.",
-                s["muted"],
+                s["guideBody"],
             )
         )
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 8))
         story.append(_before_after_section(before_bytes, after_bytes, content_w, compact=False))
 
     doc.build(story)

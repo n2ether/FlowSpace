@@ -121,6 +121,28 @@ def test_kontext_model_input_has_no_guidance_and_disables_upsampling():
     assert payload["aspect_ratio"] == "match_input_image"
 
 
+def test_nursery_prompt_keeps_the_dresser_and_skips_cubbies():
+    lead = {
+        "space_type": "kids_room",
+        "must_stay": "Six-drawer dresser, crib",
+        "storage_needs": ["clothing"],
+    }
+    prompt = _build_kontext_prompt(lead).lower()
+    assert "six-drawer" in prompt or "six drawer" in prompt
+    assert "do not replace drawers with baskets" in prompt or "do not add baskets in place of drawers" in prompt
+    assert "large open cubbies" in prompt
+    assert "matching baskets, labeled bins" not in prompt
+    text_prompt = _build_text_to_image_prompt(lead).lower()
+    assert "large open cubbies" in text_prompt
+    assert "modular shelving, labeled bins, baskets" not in text_prompt
+
+
+def test_garage_prompt_still_allows_bins():
+    prompt = _build_kontext_prompt({"space_type": "garage", "storage_needs": ["tools"]}).lower()
+    assert "labeled bins" in prompt
+    assert "nursery / kids room lock" not in prompt
+
+
 def test_drafter_system_prompt_includes_window_and_fixture_rails():
     from ai_drafter import SYSTEM_PROMPT
 
@@ -130,3 +152,5 @@ def test_drafter_system_prompt_includes_window_and_fixture_rails():
     assert "gravity-correct" in prompt or "floor at the bottom" in prompt
     assert "keep existing / no paint change" in prompt
     assert "do not invent optional" in prompt or "warm taupe" in prompt
+    assert "six-drawer" in prompt
+    assert "one kit total" in prompt
