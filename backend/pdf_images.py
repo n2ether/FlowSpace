@@ -1,9 +1,12 @@
 """
-Canonical image slots for ``build_pdf(lead=, deliverable=, images=)``.
+Canonical image slots for the image board and the companion PDF.
 
-Live automation (Claude → FLUX → PDF → Resend) and the admin PDF route
-must populate these keys with raw image **bytes** (JPEG/PNG). URLs are
-resolved *before* ``build_pdf`` — the generator never fetches.
+Live automation (Claude → image edit → board + PDF → Resend) and the admin
+routes must populate these keys with raw image **bytes** (JPEG/PNG). URLs are
+resolved *before* render — the generators never fetch.
+
+The image board is the primary visual (hero, details, zone diagram).
+The companion PDF repeats before | after only as a photo reference.
 
 Keys
 ----

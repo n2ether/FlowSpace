@@ -1,41 +1,26 @@
-# Blueprint sample pages
+# Blueprint samples
 
-Regenerate (no Mongo / AI / Stripe) from the bake-off garage fixture:
+Regenerate (no Mongo / AI / Stripe):
 
 ```bash
 cd backend
 python scripts/render_sample_blueprint.py
 ```
 
-Source: `backend/fixtures/bakeoff/garage_org_space.json` (six Brain layers + notes).
-
-## Layout
-
-| Page | What |
-|---|---|
-| 1 | Dashboard overview (hero, space needs, optional paint, zone plan, extra views, strategy / action / benefits) |
-| 2 | Shopping list + estimated budget, DIY this week |
-| 3 | Before \| After when a real photo exists |
-
-## Image keys (`build_pdf(..., images=)`)
-
-Documented in [`backend/pdf_images.py`](../pdf_images.py). Values are **image bytes**, not URLs.
-
-| Key | Role |
-|---|---|
-| `front_view` | Page-1 hero. Live automation puts successful FLUX (Kontext) bytes here. |
-| `front_view_kind` | `organized` (FLUX), `original` (labeled customer photo when FLUX fails), or `placeholder`. |
-| `before` | DIY-page **Before** — customer original photo. |
-| `after` | DIY-page **After** — FLUX organized render. Never invented. |
-| `floor_plan` | Optional. Only a real plan — never invented. |
-| `view_1` / `view_2` / `view_3` | Optional extra views on the dashboard. Omitted when missing. |
-| `customer_photos` | Extra original uploads (first photo is also `before`). |
-
-**UX if FLUX fails:** use the customer original as a labeled interim hero (`front_view_kind="original"`). If no original exists, keep the branded mint “Organized view coming soon” panel. The pipeline does not crash.
+Every paid Blueprint is two files:
 
 | File | What |
 |---|---|
-| `flowspace-blueprint-sample.pdf` | Current site-palette Blueprint **with** organized hero + DIY-page Before \| After |
-| `flowspace-blueprint-sample-placeholders.pdf` | Same plan with `images={}` — mint placeholder hero |
-| `flowspace-blueprint-sample-pageN.png` | Rasterized current pages with hero image (PyMuPDF) |
-| `flowspace-blueprint-placeholders-pageN.png` | Rasterized placeholder pages (PyMuPDF) |
+| Image board (PNG) | Hero before/after, detail views, approximate room plan, what's-new callouts, palette, product references, roadmap, and one list total |
+| Companion PDF | Full steps, shopping list and links, safety, climate, maintenance, and the weekly reset |
+
+The garage bake-off still produces a companion PDF. Nico's nursery sample is the two-file pair, including the dresser / budget corrections.
+
+| File | What |
+|---|---|
+| `flowspace-blueprint-sample.pdf` | Garage companion guide with a synthetic before and after |
+| `flowspace-blueprint-sample-placeholders.pdf` | Same plan with no photos |
+| `nicos-nursery-image-board.png` | Kids' room image board after nursery rails and budget alignment |
+| `nicos-nursery-companion.pdf` | Matching companion guide |
+
+Image keys are documented in `backend/pdf_images.py`. Values are image bytes. An organized after is shown only when those bytes exist. The room plan on the board is a zone diagram, not a measured floor plan.

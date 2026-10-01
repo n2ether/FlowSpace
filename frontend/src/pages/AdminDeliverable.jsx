@@ -376,22 +376,22 @@ const AdminDeliverable = () => {
             const client = adminClient(token);
             await client.put(`/admin/leads/${leadId}/deliverable`, cleanPayload());
             const res = await client.get(
-                `/admin/leads/${leadId}/deliverable/pdf`,
+                `/admin/leads/${leadId}/deliverable/package`,
                 { responseType: "blob" },
             );
-            const blob = new Blob([res.data], { type: "application/pdf" });
+            const blob = new Blob([res.data], { type: "application/zip" });
             const url = window.URL.createObjectURL(blob);
             const safeName = (lead?.name || "client").replace(/\s+/g, "_");
             const space = (lead?.space_type || "space");
             const space_cap = space.charAt(0).toUpperCase() + space.slice(1);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `FlowSpace_${space_cap}_Plan_${safeName}.pdf`;
+            a.download = `FlowSpace_${space_cap}_Blueprint_${safeName}.zip`;
             document.body.appendChild(a);
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
-            toast.success("PDF generated");
+            toast.success("Image board and companion guide downloaded");
         } catch (e) {
             console.error(e);
             toast.error("Could not generate PDF");
@@ -464,7 +464,7 @@ const AdminDeliverable = () => {
                             data-testid="deliverable-pdf"
                         >
                             <FileDown className="mr-2 h-4 w-4" />
-                            {downloading ? "Generating…" : "Generate PDF"}
+                            {downloading ? "Preparing…" : "Download board + guide"}
                         </Button>
                     </div>
                 </div>

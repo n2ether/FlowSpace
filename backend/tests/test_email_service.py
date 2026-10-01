@@ -114,3 +114,34 @@ def test_customer_failure_is_reported(monkeypatch):
     )
     assert sent is False
     assert "domain not verified" in (err or "")
+
+
+def test_sends_image_board_and_companion(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    calls = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return {"id": "ok"}
+
+    monkeypatch.setattr("email_service.resend.Emails.send", fake_send)
+    sent, err = asyncio.run(
+        send_blueprint(
+            customer_name="Camila",
+            customer_email="camila@example.com",
+            space_type="kids_room",
+            lead_id="9dbedfba",
+            pdf_bytes=PDF,
+            board_bytes=b"\x89PNG\r\n\x1a\nboard",
+        )
+    )
+    assert sent is True
+    assert err is None
+    attachments = calls[0]["attachments"]
+    assert len(attachments) == 2
+    assert attachments[0]["content_type"] == "image/png"
+    assert attachments[0]["filename"].endswith("_Image_Board_Camila.png")
+    assert attachments[1]["content_type"] == "application/pdf"
+    assert attachments[1]["filename"].endswith("_Companion_Camila.pdf")
+    assert "image board" in calls[0]["html"].lower()
+    assert "companion" in calls[0]["html"].lower()

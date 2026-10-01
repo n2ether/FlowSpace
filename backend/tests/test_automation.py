@@ -173,7 +173,7 @@ def test_automation_passes_flux_bytes_even_when_gridfs_upload_fails(monkeypatch)
     )
     text = "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(pdf)).pages)
     assert HERO_PLACEHOLDER_LABEL not in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages[0].images) >= 1
+    assert len(PdfReader(io.BytesIO(pdf)).pages[-1].images) >= 1
 
 
 def test_automation_uses_labeled_original_when_flux_fails(monkeypatch):

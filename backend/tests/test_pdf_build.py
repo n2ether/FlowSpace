@@ -92,36 +92,27 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     assert pdf[:5] == b"%PDF-"
     reader = PdfReader(io.BytesIO(pdf))
-    assert len(reader.pages) == 2
+    assert 2 <= len(reader.pages) <= 6
     text = _text(pdf)
-    p1 = _page_text(pdf, 0)
-    p2 = _page_text(pdf, 1)
-
     assert "FlowSpace" in text
     assert "Ada Lovelace" in text
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
     low = text.lower()
-    p1_low = p1.lower()
-    p2_low = p2.lower()
 
-    # Page 1 — dashboard
-    assert "designed for" in p1_low and "how you live" in p1_low
-    assert "organized view" in p1_low
-    assert "garage needs" in p1_low or "space needs" in p1_low
-    assert "room layout" in p1_low or "zones" in p1_low
-    assert "Parking Zone" in p1
-    assert "design strategy" in p1_low
-    assert "simple action plan" in p1_low
-    assert "benefits" in p1_low
-    assert "budget range" in p1_low
-
-    # Page 2 — shopping + DIY (not crammed onto the dashboard)
-    assert "shopping list" in p2_low
-    assert "estimated total" in p2_low
-    assert "budget" in p2_low or "retail" in p2_low
-    assert "diy" in p2_low or "this week" in p2_low
-    assert "Shopping Links" in p2
+    assert "image board" in low
+    assert "companion" in low
+    assert "Parking Zone" in text
+    assert "Keep the existing stall clear" in text
+    assert "shopping list" in low
+    assert "estimated total" in low
+    assert "this list totals" in low
+    assert "$150" in text
+    assert "step by step" in low
+    assert "safety" in low
+    assert "climate" in low
+    assert "weekly reset" in low
+    assert "Shopping Links" in text
     assert "The FlowSpace Design Team" in text
 
     # Six-layer reasoning stays in the backend schema — not on the customer PDF.
@@ -162,16 +153,17 @@ def test_pdf_handles_empty_deliverable():
     assert "95%" in text
     assert "organized view" in text.lower() or "shopping list" in text.lower()
     assert pdf[:5] == b"%PDF-"
-    assert len(PdfReader(io.BytesIO(pdf)).pages) == 2
+    assert len(PdfReader(io.BytesIO(pdf)).pages) >= 2
 
 
 def test_pdf_placeholder_when_images_missing():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     text = _text(pdf)
-    assert HERO_PLACEHOLDER_LABEL in text
+    assert HERO_PLACEHOLDER_LABEL not in text
     assert _page_image_count(pdf, 0) == 0
     assert "BEFORE & AFTER" not in text
     assert COMPARE_BEFORE_BANNER not in text
+    assert "do not invent an after" in text.lower() or "image board" in text.lower()
 
 
 def test_pdf_embeds_front_view_bytes_in_hero():
@@ -185,8 +177,9 @@ def test_pdf_embeds_front_view_bytes_in_hero():
     text = _text(pdf)
     assert HERO_PLACEHOLDER_LABEL not in text
     assert "ORGANIZED VIEW" in text
-    assert "YOUR PHOTO" not in text or "RE-ZONED" in text
-    assert _page_image_count(pdf, 0) >= 1
+    assert "BEFORE & AFTER" in text
+    assert _page_image_count(pdf, 0) == 0
+    assert len(PdfReader(io.BytesIO(pdf)).pages[-1].images) >= 1
     assert len(pdf) > len(empty) + 800
 
 
@@ -201,8 +194,12 @@ def test_pdf_embeds_detail_card_views_when_provided():
         images={"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3},
     )
     assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
-    assert "ADDITIONAL VIEWS" in _text(pdf)
-    assert _page_image_count(pdf, 0) >= 4
+    assert "ADDITIONAL VIEWS" not in _text(pdf)
+    from image_board import board_spec
+
+    spec = board_spec(LEAD, DELIVERABLE, {"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3})
+    assert spec["detail_sources"] == ["view_1", "view_2", "view_3"]
+    assert all(caption == "Additional room view" for caption in spec["detail_captions"])
 
 
 def test_pdf_omits_additional_views_when_missing():
@@ -220,8 +217,8 @@ def test_pdf_labels_original_photo_as_interim_hero():
     text = _text(pdf)
     assert HERO_PLACEHOLDER_LABEL not in text
     assert "YOUR PHOTO" in text
-    assert "ORGANIZED VIEW UNAVAILABLE" in text
-    assert _page_image_count(pdf, 0) >= 1
+    assert COMPARE_AFTER_EMPTY in text
+    assert len(PdfReader(io.BytesIO(pdf)).pages[-1].images) >= 1
 
 
 def test_pdf_before_after_when_both_present_stays_compact():
@@ -238,7 +235,7 @@ def test_pdf_before_after_when_both_present_stays_compact():
         },
     )
     reader = PdfReader(io.BytesIO(pdf))
-    assert 2 <= len(reader.pages) <= 3
+    assert 2 <= len(reader.pages) <= 6
     text = _text(pdf)
     assert "Before & after" in text or "BEFORE" in text
     assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in text
@@ -247,10 +244,9 @@ def test_pdf_before_after_when_both_present_stays_compact():
     assert COMPARE_BEFORE_EMPTY not in text
     assert COMPARE_AFTER_EMPTY not in text
     # Comparison photos are on page 2 (or a short page 3), not a 5-page magazine
-    compare_page = reader.pages[-1] if len(reader.pages) == 3 else reader.pages[1]
+    compare_page = reader.pages[-1]
     assert len(compare_page.images) >= 2
     assert HERO_PLACEHOLDER_LABEL not in text
-    assert _page_image_count(pdf, 0) >= 1
 
 
 def test_pdf_honest_empty_when_only_after():
@@ -264,7 +260,7 @@ def test_pdf_honest_empty_when_only_after():
     assert COMPARE_BEFORE_EMPTY in text
     assert COMPARE_AFTER_EMPTY not in text
     assert "ORGANIZED VIEW" in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 6
 
 
 def test_pdf_honest_empty_when_only_before():
@@ -278,7 +274,7 @@ def test_pdf_honest_empty_when_only_before():
     assert COMPARE_AFTER_EMPTY in text
     assert COMPARE_BEFORE_EMPTY not in text
     assert "YOUR PHOTO" in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 3
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 6
 
 
 def test_pdf_ignores_non_bytes_front_view():
@@ -287,8 +283,13 @@ def test_pdf_ignores_non_bytes_front_view():
         deliverable=DELIVERABLE,
         images={"front_view": "/api/uploads/photo/not-bytes"},
     )
-    assert HERO_PLACEHOLDER_LABEL in _text(pdf)
+    assert HERO_PLACEHOLDER_LABEL not in _text(pdf)
     assert _page_image_count(pdf, 0) == 0
+    from image_board import board_spec
+
+    spec = board_spec(LEAD, DELIVERABLE, {"front_view": "/api/uploads/photo/not-bytes"})
+    assert spec["hero_mode"] == "placeholder"
+    assert spec["claims_organized_photo"] is False
 
 
 def test_bakeoff_fixture_pdf_answers_ryan_questions():
@@ -314,6 +315,7 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "optional" in low
     assert answers["routine"]
     assert "workbench" in answers["possessions"].lower()
-    assert len(reader.pages) == 2
-    assert "shopping list" in (reader.pages[1].extract_text() or "").lower()
-    assert "this week" in (reader.pages[1].extract_text() or "").lower() or "diy" in (reader.pages[1].extract_text() or "").lower()
+    assert 2 <= len(reader.pages) <= 6
+    joined = text.lower()
+    assert "shopping list" in joined
+    assert "step by step" in joined or "weekly reset" in joined
