@@ -686,7 +686,7 @@ def test_each_room_photo_is_edited_and_a_failure_blocks_final_email(monkeypatch)
     from image_board import board_spec
 
     spec = board_spec(lead, PLAN, images)
-    assert spec["hero_mode"] == "source_grid"
+    assert spec["hero_mode"] == "hero_plus_afters"
     assert spec["claims_organized_photo"] is False
     assert "after_crop" not in spec["detail_sources"]
     assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02", "SOURCE_03", "SOURCE_04"]
