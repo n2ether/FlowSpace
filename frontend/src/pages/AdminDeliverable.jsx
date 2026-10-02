@@ -129,7 +129,7 @@ const ImageUrlField = ({ label, value, onChange, token, testId, onAiGenerate, ai
                         <img
                             src={previewSrc}
                             alt={label}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain"
                         />
                     ) : (
                         <ImageIcon className="h-5 w-5 text-slate-300" />
@@ -908,7 +908,7 @@ const AdminDeliverable = () => {
                                                 <img
                                                     src={src}
                                                     alt={`ref-${i}`}
-                                                    className="h-full w-full object-cover"
+                                                    className="h-full w-full object-contain"
                                                 />
                                             </a>
                                         );

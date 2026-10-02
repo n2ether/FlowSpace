@@ -161,7 +161,7 @@ export default function Account() {
                                                 <img
                                                     src={thumb}
                                                     alt=""
-                                                    className="h-full w-full object-cover"
+                                                    className="h-full w-full object-contain"
                                                 />
                                             ) : (
                                                 <div className="flex h-full items-center justify-center text-sm text-slate-400">

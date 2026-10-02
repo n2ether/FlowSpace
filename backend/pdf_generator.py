@@ -52,6 +52,7 @@ from reportlab.platypus import (
 
 from blueprint_consistency import companion_sections
 from blueprint_layers import BUDGET_LABELS, STORAGE
+from photo_contain import contain_rect
 from pdf_images import (
     COMPARE_AFTER_BANNER,
     COMPARE_AFTER_EMPTY,
@@ -376,16 +377,16 @@ def _esc(text: str) -> str:
     )
 
 
-def _cover_image(
+def _fit_image(
     src: Optional[bytes],
     width: float,
     height: float,
     *,
     missing_label: str = "Image not provided",
     missing_sublabel: str = "",
-    fill: bool = True,
+    fill: bool = False,
 ) -> Any:
-    """Fit a photo into a box. ``fill=True`` covers and clips; missing stays a labeled panel."""
+    """Fit a photo into a box. Room photos contain (no crop). Missing stays a labeled panel."""
     data = coerce_image_bytes(src)
     if not data:
         return _placeholder(width, height, missing_label, missing_sublabel)
@@ -396,9 +397,9 @@ def _cover_image(
 
 
 class ClippedPhoto(Flowable):
-    """Draw an image covering (or contained in) a rounded box without a white letterbox."""
+    """Draw a photo inside a box. The default contains the full frame."""
 
-    def __init__(self, data: bytes, width: float, height: float, fill: bool = True):
+    def __init__(self, data: bytes, width: float, height: float, fill: bool = False):
         super().__init__()
         self.data = data
         self.width = width
@@ -409,6 +410,14 @@ class ClippedPhoto(Flowable):
         if iw <= 0 or ih <= 0:
             raise ValueError("empty")
         self._iw, self._ih = iw, ih
+
+    def placed_size(self) -> Tuple[float, float]:
+        """Pixel size of the drawn image. Contain stays inside the box."""
+        if self.fill:
+            scale = max(self.width / self._iw, self.height / self._ih)
+        else:
+            scale = min(self.width / self._iw, self.height / self._ih)
+        return (self._iw * scale, self._ih * scale)
 
     def wrap(self, availWidth, availHeight):
         return (self.width, self.height)
@@ -421,11 +430,7 @@ class ClippedPhoto(Flowable):
         path = c.beginPath()
         path.rect(0, 0, self.width, self.height)
         c.clipPath(path, stroke=0, fill=0)
-        if self.fill:
-            scale = max(self.width / self._iw, self.height / self._ih)
-        else:
-            scale = min(self.width / self._iw, self.height / self._ih)
-        dw, dh = self._iw * scale, self._ih * scale
+        dw, dh = self.placed_size()
         x = (self.width - dw) / 2.0
         y = (self.height - dh) / 2.0
         c.drawImage(self._ir, x, y, width=dw, height=dh, mask="auto")
@@ -965,10 +970,10 @@ def _hero_block(
     s = _styles()
     data = coerce_image_bytes(img_bytes)
     if data:
-        photo = _cover_image(data, width, height - 15)
+        photo = _fit_image(data, width, height - 15)
         banner_text = HERO_BANNER_ORIGINAL if kind == "original" else HERO_BANNER_ORGANIZED
     else:
-        photo = _cover_image(
+        photo = _fit_image(
             None,
             width,
             height - 15,
@@ -1133,7 +1138,7 @@ def _zones_row(
     if floor_plan:
         visual = [
             Paragraph("ZONE PLAN (TOP VIEW)", s["section"]),
-            _cover_image(floor_plan, left_w, 1.55 * inch),
+            _fit_image(floor_plan, left_w, 1.55 * inch),
             Spacer(1, 3),
             Paragraph("From your photo — no invented dimensions.", s["muted"]),
         ]
@@ -1210,7 +1215,7 @@ def _additional_views(
         body = [
             Paragraph(f"VIEW {idx + 1}  —  {_esc(label)}", s["cardCat"]),
             Spacer(1, 3),
-            _cover_image(data, card_w - 8, 0.92 * inch),
+            _fit_image(data, card_w - 8, 0.92 * inch),
         ]
         cells.append(_card(body, card_w, pad=5))
     widths = [card_w] * n
@@ -1288,6 +1293,24 @@ def _bottom_cards(
     return t
 
 
+def _room_photo_flowable(
+    data: bytes,
+    max_width: float,
+    max_height: float,
+) -> Any:
+    """Contain a room photo in ``max_width`` × ``max_height`` and size the frame to that fit.
+
+    The flowable is as tall as the contained image, so a portrait phone photo
+    is not locked into a short wide crop window.
+    """
+    reader = ImageReader(io.BytesIO(data))
+    iw, ih = reader.getSize()
+    if iw <= 0 or ih <= 0:
+        raise ValueError("empty")
+    _ox, _oy, _dw, dh = contain_rect(iw, ih, max_width, max_height)
+    return ClippedPhoto(data, max_width, max(dh, 24), fill=False)
+
+
 def _compare_panel(
     img_bytes: Optional[bytes],
     width: float,
@@ -1299,9 +1322,12 @@ def _compare_panel(
     s = _styles()
     data = coerce_image_bytes(img_bytes)
     if data:
-        photo = _cover_image(data, width, height)
+        try:
+            photo = _room_photo_flowable(data, width, height)
+        except Exception:
+            photo = _fit_image(None, width, height, missing_label="Image unavailable")
     else:
-        photo = _cover_image(
+        photo = _fit_image(
             None, width, height, missing_label=empty_label, missing_sublabel=empty_sub
         )
     head = Table([[Paragraph(banner, s["banner"])]], colWidths=[width], rowHeights=[15])
@@ -1346,7 +1372,8 @@ def _before_after_section(
     after_banner: str = COMPARE_AFTER_BANNER,
 ) -> Table:
     # Stacked, full width, so a phone does not have to pinch a side-by-side pair.
-    photo_h = 2.05 * inch if compact else 2.85 * inch
+    # ``photo_h`` is a maximum. Each photo then contains at its own ratio.
+    photo_h = 2.15 * inch if compact else 3.15 * inch
     left = _compare_panel(
         before, width, photo_h,
         before_banner, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
