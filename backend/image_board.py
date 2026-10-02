@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from blueprint_consistency import prepare_deliverable
+from blueprint_consistency import prepare_deliverable, safety_guidance
 from pdf_generator import plan_title, space_label
 from pdf_images import (
     HERO_PLACEHOLDER_LABEL,
@@ -213,8 +213,33 @@ def _tagline(lead: Dict[str, Any]) -> str:
     return "SAME ROOM. " + ". ".join(words) + "."
 
 
+def _space_themed(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> bool:
+    blob = " ".join(
+        str(lead.get(key) or "")
+        for key in ("goals", "must_stay", "notes", "space_type")
+    )
+    blob += " " + str(deliverable.get("summary") or "") + " " + str(deliverable.get("intro") or "")
+    return bool(re.search(r"\bspace(?:[-\s]?themed)?\b", blob, re.I))
+
+
+def _nursery_materials(space_theme: bool) -> List[Dict[str, str]]:
+    teal_note = "Space theme" if space_theme else "Textile"
+    return [
+        {"name": "Cream", "hex": "#F4EFE6", "note": "Textile"},
+        {"name": "Natural oak", "hex": "#C4A574", "note": "Wood you have"},
+        {"name": "Clay", "hex": "#C17B4A", "note": "Accent"},
+        {"name": "Muted teal", "hex": "#5E8A84", "note": teal_note},
+        {"name": "Soft charcoal", "hex": "#3E4744", "note": "Accent"},
+    ]
+
+
 def _palette(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
+    from space_rails import is_nursery_space
+
     swatches = [{"name": "Existing walls", "hex": "#C5C8C6", "note": "Not repainted"}]
+    if is_nursery_space(lead):
+        swatches.extend(_nursery_materials(_space_themed(lead, deliverable)))
+        return swatches[:6]
     hex_color = str(deliverable.get("wall_color_hex") or "")
     name = str(deliverable.get("wall_color_name") or "")
     if hex_color and "keep existing" not in name.lower() and "no paint" not in name.lower():
@@ -225,9 +250,8 @@ def _palette(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str
             label, color = _PALETTE[key]
             swatches.append({"name": label, "hex": color, "note": "Textiles"})
     if len(swatches) == 1:
-        swatches.append({"name": "Cream", "hex": "#F3EEE6", "note": "Textiles"})
-        swatches.append({"name": "Oak", "hex": "#C4A574", "note": "Wood you have"})
-    # Unique by hex, keep order, cap at 6.
+        swatches.append({"name": "Cream", "hex": "#F3EEE6", "note": "Textile"})
+        swatches.append({"name": "Natural oak", "hex": "#C4A574", "note": "Wood you have"})
     seen = set()
     out = []
     for swatch in swatches:
@@ -313,34 +337,94 @@ def _zone_labels(deliverable: Dict[str, Any]) -> List[str]:
     return labels[:4]
 
 
+def _role_label(title: str) -> str:
+    low = title.lower()
+    if any(key in low for key in ("sleep", "crib")):
+        return "SLEEP"
+    if any(key in low for key in ("dress", "change", "diaper", "dresser")):
+        return "CHANGE"
+    if any(key in low for key in ("comfort", "feed", "rock", "seat")):
+        return "COMFORT"
+    if any(key in low for key in ("path", "play", "circulat", "floor", "walk", "door")):
+        return "CLEAR PATH"
+    if "park" in low:
+        return "PARK"
+    if any(key in low for key in ("stor", "bin", "shelf")):
+        return "STORAGE"
+    if "work" in low:
+        return "WORK"
+    words = [word for word in title.split() if word]
+    return " ".join(words[:2]).upper() or "ZONE"
+
+
+def topdown_layout(deliverable: Dict[str, Any], *, organized: bool) -> Dict[str, Any]:
+    """Practical approximate plan: furniture, window, door, circulation.
+
+    This is a diagram, not a generated floor-plan photo and not a measured drawing.
+    """
+    zones = _zone_labels(deliverable)
+    furniture: List[str] = []
+    circulation = "CLEAR PATH"
+    for zone in zones:
+        label = _role_label(zone)
+        if label == "CLEAR PATH":
+            circulation = "CLEAR PATH"
+            continue
+        if label not in furniture:
+            furniture.append(label)
+    if not furniture:
+        furniture = ["DAILY", "STORAGE", "COMFORT"]
+    furniture = furniture[:3]
+    caption = (
+        "Approximate top view of the organized room — furniture, window, door, and the clear path. Not a measured plan."
+        if organized
+        else "Approximate top view from the plan — furniture, window, door, and the clear path. Not a photo and not a measured plan."
+    )
+    return {
+        "window": "WINDOW",
+        "door": "DOOR",
+        "furniture": furniture,
+        "circulation": circulation,
+        "approximate": True,
+        "matches_after": organized,
+        "caption": caption,
+    }
+
+
+def _crop_slots(after: Image.Image) -> List[Dict[str, Any]]:
+    """Honest crops. The caption says they are details, not new camera angles."""
+    boxes = (
+        (0.0, 0.04, 0.58, 0.70),
+        (0.42, 0.04, 1.0, 0.70),
+        (0.10, 0.40, 0.90, 1.0),
+    )
+    return [
+        {
+            "image": _crop_frac(after, box),
+            "caption": "Detail from the organized view",
+            "source": "after_crop",
+        }
+        for box in boxes
+    ]
+
+
 def _detail_slots(images: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Real extra views, else crops of the organized after. Never a fake new angle."""
+    """Real extra views when the pipeline made them, else crops of the organized after.
+
+    Never a fake new angle, and never an extra view when the after was discarded.
+    """
     after = _open_image(images.get("after"))
-    slots = []
-    for key, caption in (
-        ("view_1", "Additional room view"),
-        ("view_2", "Additional room view"),
-        ("view_3", "Additional room view"),
-    ):
+    real = []
+    for key in ("view_1", "view_2", "view_3"):
         img = _open_image(images.get(key))
         if img is not None:
-            slots.append({"image": img, "caption": caption, "source": key})
-    if slots:
-        return slots[:3]
-    if after is not None:
-        return [
-            {
-                "image": _crop_frac(after, (0.0, 0.08, 0.62, 0.92)),
-                "caption": "Detail from the organized view",
-                "source": "after_crop",
-            },
-            {
-                "image": _crop_frac(after, (0.38, 0.08, 1.0, 0.92)),
-                "caption": "Detail from the organized view",
-                "source": "after_crop",
-            },
-        ]
-    return []
+            real.append({"image": img, "caption": "Additional after view", "source": key})
+    crops = _crop_slots(after) if after is not None else []
+    if len(real) >= 2:
+        return real[:4]
+    if real:
+        return (real + crops)[:4]
+    return crops[:3]
 
 
 def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, images: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -382,6 +466,8 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "claims_organized_photo": hero_mode in {"before_after", "after_only"},
         "detail_captions": [slot["caption"] for slot in details],
         "detail_sources": [slot["source"] for slot in details],
+        "topdown": topdown_layout(doc, organized=hero_mode in {"before_after", "after_only"}),
+        "safety": safety_guidance(lead, doc),
         "placeholder_label": HERO_PLACEHOLDER_LABEL,
         "placeholder_sub": HERO_PLACEHOLDER_SUB,
     }
@@ -428,41 +514,56 @@ def _photo_or_empty(base: Image.Image, img: Optional[Image.Image], box: Tuple[in
     _caption_bar(base, box, label)
 
 
-def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], zones: Sequence[str]) -> None:
+def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> None:
+    """Furniture, window, door, and a clear path. Approximate — no dimensions."""
     draw = ImageDraw.Draw(base)
     _rounded(draw, box, 16, CARD)
     x0, y0, x1, y1 = box
     draw.text((x0 + 16, y0 + 12), "ROOM PLAN", font=_font("sans-bold", 14), fill=GREEN)
     draw.text((x0 + 118, y0 + 14), "APPROXIMATE", font=_font("sans", 12), fill=MUTED)
-    room = (x0 + 16, y0 + 42, x1 - 16, y1 - 36)
+    room = (x0 + 18, y0 + 46, x1 - 18, y1 - 52)
     draw.rounded_rectangle(room, radius=10, outline=GREEN, width=3)
-    # Window ticks on the top wall, door gap on the left. No measurements.
     rx0, ry0, rx1, ry1 = room
-    win_w = (rx1 - rx0) // 3
+    win_w = max(80, (rx1 - rx0) // 3)
     win_x = rx0 + (rx1 - rx0 - win_w) // 2
-    draw.line((win_x, ry0 + 8, win_x + win_w, ry0 + 8), fill=CLAY, width=3)
-    draw.rectangle((rx0 - 1, ry0 + 28, rx0 + 8, ry0 + 78), fill=PAPER)
-    labels = list(zones) or ["Sleep", "Daily care", "Floor path", "Comfort"]
-    cols = 2
-    inner_w = (rx1 - rx0 - 24) // cols
-    inner_h = (ry1 - ry0 - 24) // 2
-    for i, label in enumerate(labels[:4]):
-        col, row = i % cols, i // cols
-        cx = rx0 + 12 + col * inner_w
-        cy = ry0 + 14 + row * inner_h
-        pill = (cx + 6, cy + 8, cx + inner_w - 10, cy + inner_h - 10)
-        draw.rounded_rectangle(pill, radius=12, fill=GREEN_SOFT)
-        lines = _fit(draw, label, _font("sans-bold", 15), inner_w - 28, 3)
-        ty = cy + (inner_h - 18 * len(lines)) // 2
+    draw.line((win_x, ry0 + 10, win_x + win_w, ry0 + 10), fill=CLAY, width=4)
+    draw.line((win_x, ry0 + 16, win_x + win_w, ry0 + 16), fill=CLAY, width=2)
+    window_label = str(topdown.get("window") or "WINDOW")
+    draw.text((win_x + 8, ry0 + 22), window_label, font=_font("sans-bold", 12), fill=CLAY)
+    door_top = ry0 + 36
+    draw.rectangle((rx0 - 1, door_top, rx0 + 10, door_top + 54), fill=PAPER)
+    draw.text((rx0 + 16, door_top + 16), str(topdown.get("door") or "DOOR"), font=_font("sans-bold", 12), fill=GREEN)
+    furniture = list(topdown.get("furniture") or [])[:3]
+    slots = (
+        (0.40, 0.18, 0.92, 0.48),
+        (0.08, 0.46, 0.48, 0.78),
+        (0.52, 0.50, 0.92, 0.80),
+    )
+    rw, rh = rx1 - rx0, ry1 - ry0
+    for label, (l, t, r, b) in zip(furniture, slots):
+        pill = (rx0 + int(l * rw), ry0 + int(t * rh), rx0 + int(r * rw), ry0 + int(b * rh))
+        draw.rounded_rectangle(pill, radius=10, fill=GREEN_SOFT, outline=GREEN, width=2)
+        lines = _fit(draw, str(label), _font("sans-bold", 14), pill[2] - pill[0] - 16, 2)
+        ty = pill[1] + max(8, (pill[3] - pill[1] - 16 * len(lines)) // 2)
         for line in lines:
-            draw.text((cx + 16, ty), line, font=_font("sans-bold", 15), fill=GREEN)
-            ty += 18
-    draw.text((x0 + 16, y1 - 28), "Not a measured floor plan.", font=_font("sans", 12), fill=MUTED)
+            draw.text((pill[0] + 10, ty), line, font=_font("sans-bold", 14), fill=GREEN)
+            ty += 16
+    path = str(topdown.get("circulation") or "CLEAR PATH")
+    arrow_y = ry1 - 22
+    draw.line((rx0 + 24, arrow_y, rx1 - 28, arrow_y), fill=CLAY, width=3)
+    draw.polygon([(rx1 - 22, arrow_y), (rx1 - 34, arrow_y - 6), (rx1 - 34, arrow_y + 6)], fill=CLAY)
+    draw.text((rx0 + 28, arrow_y - 18), path, font=_font("sans-bold", 11), fill=CLAY)
+    caption = str(topdown.get("caption") or "Not a measured floor plan.")
+    fitted = _fit(draw, caption, _font("sans", 11), x1 - x0 - 32, 2)
+    ty = y1 - 36
+    for line in fitted:
+        draw.text((x0 + 16, ty), line, font=_font("sans", 11), fill=MUTED)
+        ty += 13
 
 
 def _draw_moves(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves: Sequence[Dict[str, str]]) -> None:
     x0, y0, x1, y1 = box
-    draw.text((x0, y0), "WHAT'S NEW AND WHY", font=_font("sans-bold", 13), fill=GREEN)
+    draw.text((x0, y0), "DESIGN MOVES", font=_font("sans-bold", 13), fill=GREEN)
     items = list(moves)[:6]
     if not items:
         return
@@ -526,17 +627,19 @@ def build_image_board(
 
     hx0, hy0, hx1, hy1 = hero
     gap = 12
-    half_w = (hx1 - hx0 - gap) // 2
     if spec["hero_mode"] == "before_after":
-        _photo_or_empty(base, before, (hx0, hy0, hx0 + half_w, hy1), "BEFORE — YOUR PHOTO", "Original photo not provided", "We compare against the photo you uploaded")
         _photo_or_empty(
             base,
             after,
-            (hx0 + half_w + gap, hy0, hx1, hy1),
+            hero,
             "AFTER — ORGANIZED VIEW",
             "Organized view unavailable",
             "We do not invent an after photo.",
         )
+        if before is not None:
+            inset_w, inset_h = 280, 180
+            inset = (hx0 + 16, hy1 - inset_h - 16, hx0 + 16 + inset_w, hy1 - 16)
+            _photo_or_empty(base, before, inset, "BEFORE — YOUR PHOTO", "Original photo not provided", "")
     elif spec["hero_mode"] == "after_only":
         _photo_or_empty(base, after, hero, "AFTER — ORGANIZED VIEW", "Organized view unavailable", "We do not invent an after photo.")
     elif spec["hero_mode"] == "before_only":
@@ -556,7 +659,7 @@ def build_image_board(
 
     rx0, ry0, rx1, ry1 = right
     plan_h = 430
-    _draw_plan(base, (rx0, ry0, rx1, ry0 + plan_h), spec["zones"])
+    _draw_plan(base, (rx0, ry0, rx1, ry0 + plan_h), spec["topdown"])
     draw = ImageDraw.Draw(base)
     _draw_moves(draw, (rx0, ry0 + plan_h + 16, rx1, ry1), spec["moves"])
 
@@ -583,7 +686,7 @@ def build_image_board(
             pw = draw.textlength(product["price"], font=_font("sans-bold", 15))
             draw.text((prod_box[2] - 16 - pw, y + 2), product["price"], font=_font("sans-bold", 15), fill=GREEN)
 
-    draw.text((pal_box[0] + 16, pal_box[1] + 12), "PALETTE AND MATERIALS", font=_font("sans-bold", 13), fill=GREEN)
+    draw.text((pal_box[0] + 16, pal_box[1] + 12), "PALETTE & MATERIALS", font=_font("sans-bold", 13), fill=GREEN)
     swatch_w = 80
     for i, swatch in enumerate(spec["palette"][:5]):
         x = pal_box[0] + 16 + (i % 5) * (swatch_w + 12)

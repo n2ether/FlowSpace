@@ -1372,7 +1372,7 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
             Paragraph("", s["td"]),
         ])
     rows.append([
-        Paragraph("ESTIMATED TOTAL  ·  typical retail range", s["tdBold"]),
+        Paragraph("LIST TOTAL", s["tdBold"]),
         "",
         "",
         Paragraph(_money(total) if total else "—", s["tdBoldRight"]),

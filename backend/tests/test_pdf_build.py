@@ -105,7 +105,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "Parking Zone" in text
     assert "Keep the existing stall clear" in text
     assert "shopping list" in low
-    assert "estimated total" in low
+    assert "list total" in low
     assert "this list totals" in low
     assert "$150" in text
     assert "step by step" in low
@@ -199,7 +199,7 @@ def test_pdf_embeds_detail_card_views_when_provided():
 
     spec = board_spec(LEAD, DELIVERABLE, {"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3})
     assert spec["detail_sources"] == ["view_1", "view_2", "view_3"]
-    assert all(caption == "Additional room view" for caption in spec["detail_captions"])
+    assert all(caption == "Additional after view" for caption in spec["detail_captions"])
 
 
 def test_pdf_omits_additional_views_when_missing():

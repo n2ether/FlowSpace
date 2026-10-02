@@ -4,7 +4,7 @@ FlowSpace Automation Pipeline
 Triggered after Stripe payment is confirmed.
 Full flow:
   1. AI draft the design plan (Claude)
-  2. Generate room rendering (Replicate FLUX)
+  2. Generate room rendering (OpenAI Images)
   3. Build the image board and the companion PDF
   4. Email both to the customer (Resend)
   5. Update lead status in MongoDB
@@ -19,7 +19,11 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
-from ai_image_generator import WALL_RETRY_CONSTRAINT, generate_front_view
+from ai_image_generator import (
+    WALL_RETRY_CONSTRAINT,
+    generate_front_view,
+    generate_supporting_views,
+)
 from email_service import send_blueprint
 from image_orientation import (
     UnreadableImage,
@@ -124,7 +128,7 @@ def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> 
     degrees = qa.suggested_rotate_degrees if qa.gravity_wrong else 0
     if degrees:
         try:
-            logger.info("[automation] Retrying FLUX with source rotated %s°", degrees)
+            logger.info("[automation] Retrying OpenAI image edit with source rotated %s°", degrees)
             return rotate_photo_bytes(original_bytes, degrees)
         except Exception as exc:
             logger.warning("[automation] Could not rotate source for QA retry: %s", exc)
@@ -146,7 +150,7 @@ async def _generate_organized_with_qa(
     fs_bucket,
     original_bytes: Optional[bytes],
 ) -> tuple[Optional[bytes], str, RenderQAResult]:
-    """FLUX once, cheap vision QA, one retry with stronger rails, then give up."""
+    """OpenAI image once, cheap vision QA, one retry with stronger rails, then give up."""
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
     qa = RenderQAResult(ok=True, skipped=True, error="not_run")
@@ -159,13 +163,13 @@ async def _generate_organized_with_qa(
             reference_photo_bytes=original_bytes,
         )
         logger.info(
-            "[automation] FLUX organized render ready: %d bytes (%s)",
+            "[automation] OpenAI organized render ready: %d bytes (%s)",
             len(organized_bytes or b""),
             image_mime,
         )
     except Exception as img_err:
         logger.warning(
-            "[automation] FLUX generation failed (soft-fail, PDF continues): %s",
+            "[automation] OpenAI image generation failed (soft-fail, PDF continues): %s",
             img_err,
         )
         return None, image_mime, RenderQAResult(ok=False, reasons=[str(img_err)], error="generate_failed")
@@ -197,7 +201,7 @@ async def _generate_organized_with_qa(
             extra_constraint=extra,
         )
     except Exception as img_err:
-        logger.warning("[automation] FLUX QA retry failed: %s", img_err)
+        logger.warning("[automation] OpenAI image QA retry failed: %s", img_err)
         return None, image_mime, RenderQAResult(
             ok=False,
             windows_covered=qa.windows_covered,
@@ -254,7 +258,7 @@ async def run_automation(
 
     try:
         # ── Step 0: Gravity-correct the customer photo ───────────────────
-        # EXIF must be applied before Claude vision, FLUX, or PDF embeds.
+        # EXIF must be applied before Claude vision, OpenAI image edit, or the board.
         original_bytes: Optional[bytes] = None
         first_photo = (lead.get("photos") or [None])[0]
         if first_photo:
@@ -284,7 +288,7 @@ async def run_automation(
         logger.info("[automation] Plan drafted and saved")
 
         # ── Step 2: AI Image Generation + QA safety net ──────────────────
-        logger.info("[automation] Step 2: Generating room rendering via Replicate...")
+        logger.info("[automation] Step 2: Generating room rendering via OpenAI...")
         organized_bytes, image_mime, render_qa = await _generate_organized_with_qa(
             lead=lead,
             plan=plan,
@@ -308,6 +312,9 @@ async def run_automation(
                 {
                     "$set": {
                         "front_view_url": None,
+                        "view_1_url": None,
+                        "view_2_url": None,
+                        "view_3_url": None,
                         "front_view_kind": "original" if original_bytes else "placeholder",
                         "updated_at": _iso(datetime.now(timezone.utc)),
                     }
@@ -319,7 +326,9 @@ async def run_automation(
             )
 
         # Persist the organized render when we have one. Upload failure must
-        # NOT discard in-memory bytes — those still go into build_pdf().
+        # NOT discard in-memory bytes — those still go into the board and PDF.
+        # Extra views and the practical top-down are produced only after QA passes.
+        supporting: Dict[str, bytes] = {}
         if organized_bytes:
             try:
                 ext = "jpg" if "jpeg" in image_mime else "png"
@@ -341,21 +350,53 @@ async def run_automation(
                 logger.info("[automation] Rendering saved: %s", front_view_url)
             except Exception as upload_err:
                 logger.warning(
-                    "[automation] GridFS upload failed; keeping in-memory FLUX bytes: %s",
+                    "[automation] GridFS upload failed; keeping in-memory organized render bytes: %s",
                     upload_err,
                 )
+            try:
+                supporting = await generate_supporting_views(
+                    lead=lead,
+                    deliverable=plan,
+                    reference_photo_bytes=original_bytes,
+                    organized_bytes=organized_bytes,
+                )
+            except Exception as view_err:
+                logger.warning(
+                    "[automation] Supporting views failed (soft-fail, board keeps hero crops): %s",
+                    view_err,
+                )
+                supporting = {}
+            for slot, blob in supporting.items():
+                try:
+                    ext = "jpg" if blob[:2] == b"\xff\xd8" else "png"
+                    file_id = await fs_bucket.upload_from_stream(
+                        f"ai_{slot}_{lead_id}.{ext}",
+                        as_gridfs_source(blob),
+                        metadata={
+                            "content_type": "image/jpeg" if ext == "jpg" else "image/png",
+                            "uploaded_at": _iso(datetime.now(timezone.utc)),
+                            "source": "automation",
+                            "lead_id": lead_id,
+                            "slot": slot,
+                        },
+                    )
+                    await db.deliverables.update_one(
+                        {"lead_id": lead_id},
+                        {"$set": {f"{slot}_url": f"/api/uploads/photo/{file_id}"}},
+                    )
+                except Exception as upload_err:
+                    logger.warning(
+                        "[automation] Could not store supporting view %s: %s",
+                        slot,
+                        upload_err,
+                    )
 
         # ── Step 3: Image board + companion PDF ─────────────────────────
         logger.info("[automation] Step 3: Building image board and companion PDF...")
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
 
-        fetched = {
-            "front_view": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("front_view_url")),
-            "floor_plan": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("floor_plan_url")),
-            "view_1": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_1_url")),
-            "view_2": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_2_url")),
-            "view_3": await _fetch_gridfs_bytes(fs_bucket, deliverable_doc.get("view_3_url")),
-        }
+        # This-run bytes only. A previous organized hero or extra view must not
+        # fill the board after QA discards the after.
         customer_photos = []
         for p in (lead.get("photos") or [])[:6]:
             url = p if isinstance(p, str) else (p.get("url") if isinstance(p, dict) else None)
@@ -363,20 +404,20 @@ async def run_automation(
             if b:
                 customer_photos.append(b)
 
-        # This-run FLUX only. Never fall back to a previously stored organized
-        # render — QA-discarded afters used to leak that stale GridFS image
-        # into the PDF hero ("Hero source=organized") even after discard.
+        # This-run organized render only. Never fall back to a previously stored
+        # organized image — QA-discarded afters used to leak that stale GridFS
+        # image into the hero even after discard.
         hero_bytes, hero_kind = choose_hero(
             organized_bytes=organized_bytes,
             original_bytes=original_bytes,
         )
         if hero_kind == "original":
             logger.warning(
-                "[automation] FLUX unavailable — using labeled customer original as interim hero (%d bytes)",
+                "[automation] Organized render unavailable — using labeled customer original as interim hero (%d bytes)",
                 len(hero_bytes or b""),
             )
         elif hero_kind == "placeholder":
-            logger.warning("[automation] No FLUX render and no original photo — branded placeholder hero")
+            logger.warning("[automation] No organized render and no original photo — branded placeholder hero")
         else:
             logger.info("[automation] Hero source=organized (%d bytes)", len(hero_bytes or b""))
 
@@ -385,8 +426,11 @@ async def run_automation(
             hero_kind=hero_kind,
             before=original_bytes,
             after=organized_bytes,
+            view_1=supporting.get("view_1"),
+            view_2=supporting.get("view_2"),
+            view_3=supporting.get("view_3"),
             customer_photos=customer_photos,
-            fetched=fetched,
+            fetched={},
         )
         logger.info(
             "[automation] PDF images: hero=%s (%s bytes) before=%s after=%s views=%s/%s/%s floor_plan=%s photos=%d",
