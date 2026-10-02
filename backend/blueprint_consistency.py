@@ -181,7 +181,7 @@ _BLANKET_NOTE = (
 
 NURSERY_SAFETY = (
     "Anchor the dresser to the wall and keep every drawer.",
-    "The crib stays bare except a fitted sheet — no loose blankets, pillows, or bumpers.",
+    "The crib stays clear except a fitted sheet and a wearable sleep sack — no teddy bears, loose cushions, pillows, loose blankets, or bumpers.",
     "Do not add a portable heater, wall heater, or electric blanket near the sleep area.",
     "Keep window cords out of reach.",
     "Keep a clear floor path to the door.",
@@ -601,7 +601,7 @@ def _maintenance(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
     if is_nursery_space(lead):
         return (
             "Once a week, take ten minutes: check that the dresser is still anchored, "
-            "the crib is bare except a fitted sheet, the floor path is clear, and the room is a comfortable temperature. "
+            "the crib holds only a fitted sheet and a wearable sleep sack, the floor path is clear, and the room is a comfortable temperature. "
             "Put diaper supplies back in the existing drawers."
         )
     return (

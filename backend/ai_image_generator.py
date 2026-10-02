@@ -41,37 +41,36 @@ EDIT_SIZE = "auto"
 TEXT_TO_IMAGE_SIZE = "1536x1152"
 IMAGE_TIMEOUT_SECONDS = 180.0
 
-# Additional after views, only after the hero passes QA. Not a measured plan.
-SUPPORTING_VIEWS: Tuple[Tuple[str, str], ...] = (
-    (
-        "view_1",
-        "ADDITIONAL AFTER VIEW of the same organized room, closer to the sleep or crib side. "
-        "Keep the same wall paint, windows, door, and furniture. Shift the camera only. "
-        "Do not redesign the room or invent a new floor plan.",
-    ),
-    (
-        "view_2",
-        "ADDITIONAL AFTER VIEW of the same organized room, closer to the dresser. "
-        "Keep every drawer. Do not replace drawers with baskets or add open cubbies. "
-        "Same wall paint, same windows, same door.",
-    ),
-    (
-        "view_3",
-        "ADDITIONAL AFTER VIEW of the same organized room, closer to the window and seating. "
-        "Keep the window fully visible. Do not cover it. Same wall paint and furniture.",
-    ),
+# Near-duplicate extra views (same framing as the hero) are regenerated once, then dropped.
+# Mean absolute error on a 48×32 fingerprint. Same-framing JPEG copies land well under this;
+# a real change of camera does not.
+_SIMILAR_VIEW_MAX_MAE = 14.0
+
+DISTINCT_VIEW_RETRY_NURSERY = (
+    "PREVIOUS EXTRA VIEW WAS TOO SIMILAR to the hero or another view. "
+    "Move the camera and change the subject. Do not repeat the window-and-crib hero. "
+    "A near-duplicate will be discarded."
+)
+DISTINCT_VIEW_RETRY_GENERAL = (
+    "PREVIOUS EXTRA VIEW WAS TOO SIMILAR to the hero or another view. "
+    "Move the camera and change the subject. Do not repeat the wide hero framing. "
+    "A near-duplicate will be discarded."
 )
 
 from ai_drafter import COLORS, FEELING, STORAGE, STYLE, _humanize
 from image_orientation import upright_bytes
-from space_rails import nursery_storage_line
+from space_rails import is_nursery_space, nursery_storage_line, supporting_view_plan
 
 
-def _with_space_rails(lead: Dict[str, Any], extra_constraint: str) -> str:
+def _with_space_rails(
+    lead: Dict[str, Any],
+    extra_constraint: str,
+    deliverable: Optional[Dict[str, Any]] = None,
+) -> str:
     """Append kids-room rails. Keep this call if the image provider changes."""
     from space_rails import image_prompt_rails
 
-    parts = [image_prompt_rails(lead), (extra_constraint or "").strip()]
+    parts = [image_prompt_rails(lead, deliverable), (extra_constraint or "").strip()]
     return " ".join(part for part in parts if part)
 
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
@@ -148,7 +147,7 @@ def _build_kontext_prompt(
     rails = ORGANIZE_RAILS
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = _with_space_rails(lead, extra_constraint)
+    extra = _with_space_rails(lead, extra_constraint, deliverable)
     if extra and not extra.endswith((".", " ")):
         extra = extra + " "
 
@@ -199,7 +198,7 @@ def _build_text_to_image_prompt(
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = _with_space_rails(lead, extra_constraint)
+    extra = _with_space_rails(lead, extra_constraint, deliverable)
     if extra and not extra.endswith((".", " ")):
         extra = extra + " "
     storage_line = nursery_storage_line(lead, storage_str)
@@ -362,8 +361,50 @@ async def generate_front_view(
     return image_bytes, mime
 
 
+def _distinct_retry(lead: Dict[str, Any]) -> str:
+    if is_nursery_space(lead):
+        return DISTINCT_VIEW_RETRY_NURSERY
+    return DISTINCT_VIEW_RETRY_GENERAL
+
+
+def _fingerprint(data: bytes) -> Optional[list]:
+    """Small RGB fingerprint used only to reject near-duplicate extra views."""
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    resample = getattr(getattr(Image, "Resampling", Image), "BILINEAR")
+    small = img.convert("RGB").resize((48, 32), resample)
+    pixels = small.get_flattened_data() if hasattr(small, "get_flattened_data") else small.getdata()
+    return list(pixels)
+
+
+def renders_too_similar(left: Optional[bytes], right: Optional[bytes], *, max_mae: float = _SIMILAR_VIEW_MAX_MAE) -> bool:
+    """True when two renders are the same framing, not merely the same room colors."""
+    if not left or not right:
+        return False
+    try:
+        a = _fingerprint(left)
+        b = _fingerprint(right)
+    except Exception:
+        logger.warning("[images] Could not compare extra-view similarity")
+        return False
+    if not a or not b or len(a) != len(b):
+        return False
+    total = 0.0
+    count = 0
+    for p, q in zip(a, b):
+        total += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+        count += 3
+    if count == 0:
+        return False
+    return (total / count) <= max_mae
+
+
 def _supporting_prompt(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]], instruction: str) -> str:
-    """Same wall, window, and nursery rails as the hero, plus one camera note."""
+    """Same wall, window, nursery, crib, and theme rails as the hero, plus one camera note."""
     base = _build_edit_prompt(lead, deliverable)
     return (
         f"{base} {instruction} "
@@ -381,10 +422,13 @@ async def generate_supporting_views(
 ) -> Dict[str, bytes]:
     """Two to three additional after views from a QA-passing organized render.
 
-    Edits the organized after (the customer photo if that is all we have).
-    Each view is dropped when vision QA fails. A missing API key raises
-    ``RuntimeError`` so the caller can soft-fail and keep the hero crops.
-    This does not invent a measured floor plan — the board draws that diagram.
+    Each view targets a different focal point (dresser, rocker, door for a
+    kids' room). Edits the organized after (the customer photo if that is all
+    we have). A view is dropped when vision QA fails. If it is a near-duplicate
+    of the hero or of a view already kept, it is regenerated once and then
+    dropped. A missing API key raises ``RuntimeError`` so the caller can
+    soft-fail and keep the hero crops. This does not invent a measured floor
+    plan — the board draws that diagram.
     """
     source = organized_bytes or reference_photo_bytes
     if not source:
@@ -399,20 +443,38 @@ async def generate_supporting_views(
     from render_qa import review_organized_render
 
     found: Dict[str, bytes] = {}
-    for key, instruction in SUPPORTING_VIEWS:
-        prompt = _supporting_prompt(lead, deliverable, instruction)
-        try:
-            raw, _mime = await _edit_image(client, prompt, source)
-        except Exception as exc:
-            logger.warning("[images] Supporting view %s failed: %s", key, exc)
-            continue
-        qa = review_organized_render(after_bytes=raw, before_bytes=before or source, attempt=1)
-        if qa.failed:
-            logger.warning(
-                "[images] Dropping supporting view %s after QA: %s",
-                key,
-                qa.reasons,
-            )
-            continue
-        found[key] = raw
+    for key, instruction, _caption in supporting_view_plan(lead):
+        accepted: Optional[bytes] = None
+        for attempt in (1, 2):
+            note = instruction
+            if attempt == 2:
+                note = f"{instruction} {_distinct_retry(lead)}"
+            prompt = _supporting_prompt(lead, deliverable, note)
+            try:
+                raw, _mime = await _edit_image(client, prompt, source)
+            except Exception as exc:
+                logger.warning("[images] Supporting view %s failed: %s", key, exc)
+                break
+            qa = review_organized_render(after_bytes=raw, before_bytes=before or source, attempt=attempt)
+            if qa.failed:
+                logger.warning(
+                    "[images] Dropping supporting view %s after QA: %s",
+                    key,
+                    qa.reasons,
+                )
+                break
+            references = [source, *found.values()]
+            if any(renders_too_similar(raw, ref) for ref in references):
+                logger.warning(
+                    "[images] Supporting view %s is too similar to the hero or another view (attempt %s)",
+                    key,
+                    attempt,
+                )
+                if attempt == 1:
+                    continue
+                break
+            accepted = raw
+            break
+        if accepted is not None:
+            found[key] = accepted
     return found

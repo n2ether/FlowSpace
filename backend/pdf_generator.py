@@ -1618,21 +1618,39 @@ def build_pdf(
 
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
-    if before_bytes or after_bytes:
+    if after_bytes:
+        # Organized after exists: show that final render. Do not print the
+        # "we do not invent" / "organized view unavailable" disclaimer.
+        story.append(NextPageTemplate("compare"))
+        story.append(PageBreak())
+        story.append(Paragraph("FINAL ORGANIZED VIEW", s["guideH"]))
+        if before_bytes:
+            reference = (
+                "This page shows the final organized after beside your original photo. "
+                "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+            )
+        else:
+            reference = (
+                "This page shows the final organized after. "
+                "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+            )
+        story.append(Paragraph(reference, s["guideBody"]))
+        story.append(Spacer(1, 8))
+        story.append(_before_after_section(before_bytes, after_bytes, content_w, compact=False))
+    elif before_bytes:
         story.append(NextPageTemplate("compare"))
         story.append(PageBreak())
         story.append(Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]))
         story.append(
             Paragraph(
-                "The image board is the primary visual. This page repeats the photos for reference. "
-                "Your original photo is on the left. The organized view is on the right — "
-                "same windows and walls (~95%). Paint is optional and is not applied in the visual. "
+                "The image board is the primary visual. Your original photo is on the left. "
+                "An organized after was not produced for this package. "
                 "We do not invent an after image.",
                 s["guideBody"],
             )
         )
         story.append(Spacer(1, 8))
-        story.append(_before_after_section(before_bytes, after_bytes, content_w, compact=False))
+        story.append(_before_after_section(before_bytes, None, content_w, compact=False))
 
     doc.build(story)
     return buf.getvalue()

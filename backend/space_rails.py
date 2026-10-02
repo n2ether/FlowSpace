@@ -7,7 +7,7 @@ generation share one wording. The OpenAI image path keeps calling
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 NURSERY_SPACE_KEYS = frozenset(
     {
@@ -31,6 +31,22 @@ NURSERY_IMAGE_RAILS = (
     "still look meaningfully calmer and more intentional."
 )
 
+# Every nursery render — hero and extra views — and any composite that pastes those renders.
+CRIB_INTERIOR_RAILS = (
+    "CRIB INTERIOR LOCK — obey this in every render, including the hero and every extra view: "
+    "remove the teddy bear and every loose cushion, pillow, stuffed animal, bumper, loose blanket, "
+    "and other loose object from inside the crib. "
+    "The only things allowed in the crib are a fitted sheet and a wearable sleep sack. "
+    "Do not leave toys or cushions in the crib. Do not composite a teddy or cushion back into the crib."
+)
+
+SPACE_THEME_IMAGE_RAILS = (
+    "SPACE THEME LOCK: this kids' room already has a space theme. Keep it and make it clearer. "
+    "Artwork, textiles, and small decor are planets, the moon, rockets, and astronauts. "
+    "Do not use generic nursery animals, woodland creatures, farm animals, or unrelated cartoon art. "
+    "Do not replace the space theme with a new theme. Do not repaint the walls to create it."
+)
+
 NURSERY_DRAFT_RULES = """
 Kids' room / nursery rules (only when space_type is a kids' room, nursery, or the answers describe one):
 - Preserve the existing dresser and every drawer. If it is a six-drawer dresser, all six drawers stay.
@@ -38,6 +54,8 @@ Kids' room / nursery rules (only when space_type is a kids' room, nursery, or th
 - Do not add large open cubbies, Kallax-style cube storage, or a new wall of open shelves.
 - Storage must simplify the day (fewer decisions), not add a sorting or labeling chore.
 - Keep the real room, furniture, proportions, and any space theme already there. The refresh should still look meaningfully calmer.
+- If the room has a space theme, keep planets, the moon, rockets, and astronauts. Do not swap that art for generic nursery animals.
+- In every view the crib interior stays clear: a fitted sheet and a wearable sleep sack only. No teddy bear, loose cushion, pillow, bumper, or loose blanket in the crib.
 - Shopping-list prices must add up to the budget figure you state. One kit total only.
 - The customer's budget band is their stated budget. Do not write a second kit price.
 - Do not put a blanket, electric blanket, or crib blanket on the shopping list. Warm the window with a thermal curtain or shade (a thermal window layer), not a blanket.
@@ -50,7 +68,7 @@ NURSERY_DO_NOT = (
     "Do not replace dresser drawers with baskets.",
     "Do not add large open cubbies or cube storage.",
     "Do not place a portable heater, wall heater, or electric blanket near the sleep area.",
-    "Do not put loose blankets, pillows, or bumpers in the crib.",
+    "Do not put a teddy bear, loose cushion, pillow, bumper, or loose blanket in the crib.",
     "Keep window cords out of reach.",
 )
 
@@ -59,6 +77,61 @@ _NURSERY_TEXT = re.compile(
     re.I,
 )
 _SIX_DRAWER = re.compile(r"\b(six|6)[-\s]?drawer\b", re.I)
+_SPACE_THEME = re.compile(
+    r"\b(?:space[-\s]?theme(?:d)?|planets?|rockets?|astronauts?|outer\s+space|galax(?:y|ies)|solar\s+system|moon)\b",
+    re.I,
+)
+
+# Extra after views must not repeat the window-and-crib hero.
+# (slot, edit instruction, board caption)
+NURSERY_SUPPORTING_VIEWS: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "view_1",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the dresser and changing station only. "
+        "Frame the six-drawer dresser large, from a three-quarter angle beside it. "
+        "The crib and the window must sit at the edge or out of frame — they are not the subject. "
+        "This must not look like the window-and-crib hero. Keep all six drawers. "
+        "Do not replace drawers with baskets or add open cubbies. Same wall paint.",
+        "Dresser and changing station",
+    ),
+    (
+        "view_2",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the rocking chair. "
+        "Stand to the side of the room so the rocker is the subject, not the crib and not the window wall. "
+        "Show the chair and the floor beside it. Do not repeat the hero's window-and-crib composition. "
+        "Same wall paint and furniture. Do not redesign the room.",
+        "Rocker",
+    ),
+    (
+        "view_3",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the door and the clear walking path. "
+        "Camera at the doorway, looking along the open floor. The crib and window are not the subject. "
+        "Show circulation from the door into the room. Same door location, same wall paint, same furniture. "
+        "Do not invent a new floor plan.",
+        "Door and circulation",
+    ),
+)
+
+GENERAL_SUPPORTING_VIEWS: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "view_1",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the main storage, closer than the wide hero. "
+        "Do not repeat the hero framing. Same walls, windows, and architecture.",
+        "Main storage",
+    ),
+    (
+        "view_2",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the work surface or daily-use zone. "
+        "Use a different camera position from the hero. Same wall paint and openings.",
+        "Daily-use zone",
+    ),
+    (
+        "view_3",
+        "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the door and the clear circulation path. "
+        "Do not repeat the wide hero framing. Same door, same walls. Do not invent a new floor plan.",
+        "Door and circulation",
+    ),
+)
 
 
 def _space_key(lead: Dict[str, Any] | None) -> str:
@@ -90,11 +163,74 @@ def mentions_six_drawer(*blobs: str) -> bool:
     return any(_SIX_DRAWER.search(blob or "") for blob in blobs)
 
 
-def image_prompt_rails(lead: Dict[str, Any] | None) -> str:
-    """Extra image-edit constraint. Empty for closets, garages, and other rooms."""
+def _theme_blob(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> str:
+    lead = lead or {}
+    deliverable = deliverable or {}
+    parts = [
+        str(lead.get(key) or "")
+        for key in (
+            "goals",
+            "must_stay",
+            "notes",
+            "space_type",
+            "biggest_challenge",
+            "daily_improvement",
+            "bothers_other",
+        )
+    ]
+    for key in ("summary", "intro", "notes"):
+        parts.append(str(deliverable.get(key) or ""))
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict):
+            parts.append(str(zone.get("title") or ""))
+            parts.append(str(zone.get("desc") or ""))
+        else:
+            parts.append(str(zone))
+    for key in ("strategy", "needs", "action_plan"):
+        parts.extend(str(item) for item in (deliverable.get(key) or []))
+    return " ".join(parts)
+
+
+def is_space_theme(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> bool:
+    """True when a kids' room already has a space theme (planets, moon, rockets, astronauts)."""
+    if not is_nursery_space(lead):
+        return False
+    return bool(_SPACE_THEME.search(_theme_blob(lead, deliverable)))
+
+
+def image_prompt_rails(
+    lead: Dict[str, Any] | None,
+    deliverable: Dict[str, Any] | None = None,
+) -> str:
+    """Extra image-edit constraint. Empty for closets, garages, and other rooms.
+
+    Nursery rails include the crib-interior lock. Space-theme rails are added
+    only when that theme is already in the room or the plan.
+    """
     if not is_nursery_space(lead):
         return ""
-    return NURSERY_IMAGE_RAILS
+    parts = [NURSERY_IMAGE_RAILS, CRIB_INTERIOR_RAILS]
+    if is_space_theme(lead, deliverable):
+        parts.append(SPACE_THEME_IMAGE_RAILS)
+    return " ".join(parts)
+
+
+def supporting_view_plan(lead: Dict[str, Any] | None) -> Tuple[Tuple[str, str, str], ...]:
+    """Extra after views: (slot, edit instruction, board caption).
+
+    Nursery views aim at the dresser, the rocker, and the door — not another
+    window-and-crib hero. Other rooms get the same idea with their own subjects.
+    """
+    if is_nursery_space(lead):
+        return NURSERY_SUPPORTING_VIEWS
+    return GENERAL_SUPPORTING_VIEWS
+
+
+def supporting_view_caption(lead: Dict[str, Any] | None, key: str) -> str:
+    for slot, _instruction, caption in supporting_view_plan(lead):
+        if slot == key:
+            return caption
+    return "Additional after view"
 
 
 def nursery_storage_line(lead: Dict[str, Any] | None, storage_str: str) -> str:
@@ -120,5 +256,12 @@ def nursery_draft_addon(lead: Dict[str, Any] | None) -> str:
         "Do not add large open cubbies. Storage must reduce daily effort, not add a chore. "
         "State one shopping total that equals qty × price for every line. "
         "Do not add a blanket product or a heater. "
+        "The crib interior stays clear: a fitted sheet and a wearable sleep sack only. "
+        "No teddy bear, loose cushion, pillow, or loose blanket in the crib. "
         "Finish every sentence."
+    ) + (
+        " This room has a space theme. Keep planets, the moon, rockets, and astronauts. "
+        "Do not replace that art with generic nursery animals."
+        if is_space_theme(lead)
+        else ""
     )

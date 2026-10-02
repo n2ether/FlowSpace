@@ -6,7 +6,8 @@ routes must populate these keys with raw image **bytes** (JPEG/PNG). URLs are
 resolved *before* render — the generators never fetch.
 
 The image board is the primary visual (hero, details, zone diagram).
-The companion PDF repeats before | after only as a photo reference.
+The companion PDF's last page shows the final organized after when one exists.
+It repeats the unavailable / "we do not invent" disclaimer only when that after is missing.
 
 Keys
 ----

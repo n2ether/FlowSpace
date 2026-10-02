@@ -142,7 +142,9 @@ def test_blanket_sku_and_150_vs_230_cannot_disagree():
     assert spec["budget_display"] == "$150"
     assert sections["safety"] == spec["safety"]
     safety = " ".join(sections["safety"]).lower()
-    assert "no loose blankets" in safety
+    assert "no loose blankets" in safety or "loose blankets" in safety
+    assert "sleep sack" in safety
+    assert "teddy" in safety
     assert "heater" in safety and "do not" in safety
     assert "window cords" in safety
     climate = " ".join(sections["climate"]).lower()

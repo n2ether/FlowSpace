@@ -213,32 +213,29 @@ def _tagline(lead: Dict[str, Any]) -> str:
     return "SAME ROOM. " + ". ".join(words) + "."
 
 
-def _space_themed(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> bool:
-    blob = " ".join(
-        str(lead.get(key) or "")
-        for key in ("goals", "must_stay", "notes", "space_type")
-    )
-    blob += " " + str(deliverable.get("summary") or "") + " " + str(deliverable.get("intro") or "")
-    return bool(re.search(r"\bspace(?:[-\s]?themed)?\b", blob, re.I))
-
-
 def _nursery_materials(space_theme: bool) -> List[Dict[str, str]]:
-    teal_note = "Space theme" if space_theme else "Textile"
+    if space_theme:
+        return [
+            {"name": "Natural oak", "hex": "#C4A574", "note": "Wood you have"},
+            {"name": "Moon", "hex": "#E4E0D4", "note": "Space theme"},
+            {"name": "Rocket", "hex": "#C44536", "note": "Space theme"},
+            {"name": "Planet", "hex": "#3E7C78", "note": "Space theme"},
+        ]
     return [
         {"name": "Cream", "hex": "#F4EFE6", "note": "Textile"},
         {"name": "Natural oak", "hex": "#C4A574", "note": "Wood you have"},
         {"name": "Clay", "hex": "#C17B4A", "note": "Accent"},
-        {"name": "Muted teal", "hex": "#5E8A84", "note": teal_note},
+        {"name": "Muted teal", "hex": "#5E8A84", "note": "Textile"},
         {"name": "Soft charcoal", "hex": "#3E4744", "note": "Accent"},
     ]
 
 
 def _palette(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
-    from space_rails import is_nursery_space
+    from space_rails import is_nursery_space, is_space_theme
 
     swatches = [{"name": "Existing walls", "hex": "#C5C8C6", "note": "Not repainted"}]
     if is_nursery_space(lead):
-        swatches.extend(_nursery_materials(_space_themed(lead, deliverable)))
+        swatches.extend(_nursery_materials(is_space_theme(lead, deliverable)))
         return swatches[:6]
     hex_color = str(deliverable.get("wall_color_hex") or "")
     name = str(deliverable.get("wall_color_name") or "")
@@ -357,7 +354,7 @@ def _role_label(title: str) -> str:
     return " ".join(words[:2]).upper() or "ZONE"
 
 
-def topdown_layout(deliverable: Dict[str, Any], *, organized: bool) -> Dict[str, Any]:
+def topdown_layout(deliverable: Dict[str, Any], *, organized: bool, space_theme: bool = False) -> Dict[str, Any]:
     """Practical approximate plan: furniture, window, door, circulation.
 
     This is a diagram, not a generated floor-plan photo and not a measured drawing.
@@ -375,11 +372,18 @@ def topdown_layout(deliverable: Dict[str, Any], *, organized: bool) -> Dict[str,
     if not furniture:
         furniture = ["DAILY", "STORAGE", "COMFORT"]
     furniture = furniture[:3]
-    caption = (
-        "Approximate top view of the organized room — furniture, window, door, and the clear path. Not a measured plan."
-        if organized
-        else "Approximate top view from the plan — furniture, window, door, and the clear path. Not a photo and not a measured plan."
-    )
+    if space_theme:
+        caption = (
+            "Approximate plan. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
+        )
+    elif organized:
+        caption = (
+            "Approximate top view of the organized room — furniture, window, door, and the clear path. Not a measured plan."
+        )
+    else:
+        caption = (
+            "Approximate top view from the plan — furniture, window, door, and the clear path. Not a photo and not a measured plan."
+        )
     return {
         "window": "WINDOW",
         "door": "DOOR",
@@ -387,6 +391,7 @@ def topdown_layout(deliverable: Dict[str, Any], *, organized: bool) -> Dict[str,
         "circulation": circulation,
         "approximate": True,
         "matches_after": organized,
+        "space_theme": space_theme,
         "caption": caption,
     }
 
@@ -408,17 +413,21 @@ def _crop_slots(after: Image.Image) -> List[Dict[str, Any]]:
     ]
 
 
-def _detail_slots(images: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _detail_slots(images: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Real extra views when the pipeline made them, else crops of the organized after.
 
-    Never a fake new angle, and never an extra view when the after was discarded.
+    Captions name the focal point the prompt asked for. Crops stay labeled as
+    details of the organized view — never a fake new angle, and never an extra
+    view when the after was discarded.
     """
+    from space_rails import supporting_view_caption
+
     after = _open_image(images.get("after"))
     real = []
     for key in ("view_1", "view_2", "view_3"):
         img = _open_image(images.get(key))
         if img is not None:
-            real.append({"image": img, "caption": "Additional after view", "source": key})
+            real.append({"image": img, "caption": supporting_view_caption(lead, key), "source": key})
     crops = _crop_slots(after) if after is not None else []
     if len(real) >= 2:
         return real[:4]
@@ -444,8 +453,11 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     else:
         hero_mode = "placeholder"
         hero_label = HERO_PLACEHOLDER_LABEL
+    from space_rails import is_space_theme
+
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    details = _detail_slots(images)
+    details = _detail_slots(images, lead)
+    themed = is_space_theme(lead, doc)
     return {
         "deliverable": doc,
         "images": images,
@@ -466,7 +478,14 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "claims_organized_photo": hero_mode in {"before_after", "after_only"},
         "detail_captions": [slot["caption"] for slot in details],
         "detail_sources": [slot["source"] for slot in details],
-        "topdown": topdown_layout(doc, organized=hero_mode in {"before_after", "after_only"}),
+        "space_theme": themed,
+        "theme_line": "PLANETS · MOON · ROCKETS · ASTRONAUTS" if themed else "",
+        "hero_before_overlay": False,
+        "topdown": topdown_layout(
+            doc,
+            organized=hero_mode in {"before_after", "after_only"},
+            space_theme=themed,
+        ),
         "safety": safety_guidance(lead, doc),
         "placeholder_label": HERO_PLACEHOLDER_LABEL,
         "placeholder_sub": HERO_PLACEHOLDER_SUB,
@@ -514,6 +533,15 @@ def _photo_or_empty(base: Image.Image, img: Optional[Image.Image], box: Tuple[in
     _caption_bar(base, box, label)
 
 
+def _draw_space_glyphs(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+    """Moon, ringed planet, and rocket. Marks the plan as a space-themed room."""
+    draw.ellipse((x, y + 2, x + 14, y + 16), outline=CLAY, width=2)
+    draw.pieslice((x + 4, y + 2, x + 16, y + 16), start=100, end=260, fill=CARD)
+    draw.ellipse((x + 22, y + 3, x + 34, y + 15), outline=GREEN, width=2)
+    draw.arc((x + 16, y + 6, x + 40, y + 13), start=200, end=340, fill=GREEN, width=2)
+    draw.polygon([(x + 50, y), (x + 58, y + 16), (x + 42, y + 16)], fill=CLAY)
+
+
 def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> None:
     """Furniture, window, door, and a clear path. Approximate — no dimensions."""
     draw = ImageDraw.Draw(base)
@@ -521,6 +549,9 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     x0, y0, x1, y1 = box
     draw.text((x0 + 16, y0 + 12), "ROOM PLAN", font=_font("sans-bold", 14), fill=GREEN)
     draw.text((x0 + 118, y0 + 14), "APPROXIMATE", font=_font("sans", 12), fill=MUTED)
+    if topdown.get("space_theme"):
+        draw.text((x0 + 220, y0 + 14), "PLANETS · MOON · ROCKETS", font=_font("sans-bold", 11), fill=CLAY)
+        _draw_space_glyphs(draw, x1 - 78, y0 + 10)
     room = (x0 + 18, y0 + 46, x1 - 18, y1 - 52)
     draw.rounded_rectangle(room, radius=10, outline=GREEN, width=3)
     rx0, ry0, rx1, ry1 = room
@@ -617,6 +648,11 @@ def build_image_board(
     tag_font = _font("sans-bold", 13)
     tag_w = draw.textlength(tag, font=tag_font)
     draw.text((W - 36 - tag_w, 58), tag, font=tag_font, fill=GREEN)
+    if spec.get("theme_line"):
+        theme_font = _font("sans-bold", 12)
+        theme = spec["theme_line"]
+        theme_w = draw.textlength(theme, font=theme_font)
+        draw.text((W - 36 - theme_w, 80), theme, font=theme_font, fill=CLAY)
     draw.rectangle((36, 128, W - 36, 131), fill=GREEN)
 
     main_top = 148
@@ -625,9 +661,11 @@ def build_image_board(
     mid = (1292, main_top, 1292 + 560, main_top + main_h)
     right = (1868, main_top, W - 36, main_top + main_h)
 
-    hx0, hy0, hx1, hy1 = hero
     gap = 12
     if spec["hero_mode"] == "before_after":
+        # The hero is the organized after only. A small before chip used to sit
+        # in the lower-left and put the cluttered original (teddy, loose cushions)
+        # back on top of the render. The companion PDF keeps the labeled before.
         _photo_or_empty(
             base,
             after,
@@ -636,10 +674,6 @@ def build_image_board(
             "Organized view unavailable",
             "We do not invent an after photo.",
         )
-        if before is not None:
-            inset_w, inset_h = 280, 180
-            inset = (hx0 + 16, hy1 - inset_h - 16, hx0 + 16 + inset_w, hy1 - 16)
-            _photo_or_empty(base, before, inset, "BEFORE — YOUR PHOTO", "Original photo not provided", "")
     elif spec["hero_mode"] == "after_only":
         _photo_or_empty(base, after, hero, "AFTER — ORGANIZED VIEW", "Organized view unavailable", "We do not invent an after photo.")
     elif spec["hero_mode"] == "before_only":
@@ -647,7 +681,7 @@ def build_image_board(
     else:
         _empty_panel(base, hero, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB)
 
-    details = _detail_slots(imgs)
+    details = _detail_slots(imgs, lead)
     mx0, my0, mx1, my1 = mid
     if details:
         slot_h = (my1 - my0 - gap * (len(details) - 1)) // len(details)

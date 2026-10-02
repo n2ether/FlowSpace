@@ -151,18 +151,70 @@ def test_garage_prompt_still_allows_bins():
     assert "nursery / kids room lock" not in prompt
 
 
-def test_supporting_prompt_keeps_nursery_rails_and_wall_lock():
-    from ai_image_generator import SUPPORTING_VIEWS, _supporting_prompt
+def test_nursery_prompt_clears_the_crib_and_strengthens_a_space_theme():
+    lead = {
+        "space_type": "kids_room",
+        "must_stay": "Six-drawer dresser, crib, space-themed wall decor",
+        "goals": "Keep the space theme",
+    }
+    prompt = _build_kontext_prompt(lead, {"summary": "Keep the planets and the moon."}).lower()
+    assert "teddy" in prompt
+    assert "sleep sack" in prompt
+    assert "fitted sheet" in prompt
+    assert "loose cushion" in prompt
+    assert "astronaut" in prompt
+    assert "planets" in prompt
+    assert "nursery animals" in prompt
+    assert "do not repaint the walls to create it" in prompt or "do not repaint the walls" in prompt
+    plain = _build_kontext_prompt({"space_type": "kids_room", "must_stay": "Six-drawer dresser, crib"}).lower()
+    assert "teddy" in plain
+    assert "sleep sack" in plain
+    assert "astronaut" not in plain
+    garage = _build_kontext_prompt({"space_type": "garage", "storage_needs": ["tools"]}).lower()
+    assert "teddy" not in garage
+    assert "astronaut" not in garage
+    assert "crib interior" not in garage
 
+
+def test_supporting_views_target_distinct_focal_points():
+    from space_rails import supporting_view_plan
+
+    nursery = supporting_view_plan({"space_type": "kids_room", "must_stay": "crib"})
+    captions = [caption for _slot, _instruction, caption in nursery]
+    assert captions == ["Dresser and changing station", "Rocker", "Door and circulation"]
+    blob = " ".join(instruction for _slot, instruction, _caption in nursery).lower()
+    assert "dresser" in blob
+    assert "rocker" in blob or "rocking" in blob
+    assert "door" in blob
+    assert "window-and-crib" in blob
+    assert "closer to the sleep" not in blob
+    general = supporting_view_plan({"space_type": "garage"})
+    general_blob = " ".join(instruction for _slot, instruction, _caption in general).lower()
+    assert "crib" not in general_blob
+    assert [caption for _slot, _instruction, caption in general] == [
+        "Main storage",
+        "Daily-use zone",
+        "Door and circulation",
+    ]
+
+
+def test_supporting_prompt_keeps_nursery_rails_and_wall_lock():
+    from ai_image_generator import _supporting_prompt
+    from space_rails import supporting_view_plan
+
+    instruction = supporting_view_plan({"space_type": "kids_room"})[0][1]
     prompt = _supporting_prompt(
-        {"space_type": "kids_room", "must_stay": "Six-drawer dresser, crib"},
+        {"space_type": "kids_room", "must_stay": "Six-drawer dresser, crib, space-themed wall decor", "goals": "space theme"},
         {},
-        SUPPORTING_VIEWS[1][1],
+        instruction,
     ).lower()
     assert "six-drawer" in prompt or "six drawer" in prompt
     assert "do not replace drawers with baskets" in prompt or "do not add baskets in place of drawers" in prompt
     assert "wall paint" in prompt
     assert "additional after view" in prompt
+    assert "dresser and changing station" in prompt
+    assert "teddy" in prompt
+    assert "astronaut" in prompt
     assert "measured floor plan" not in prompt or "invent a new floor plan" in prompt
 
 

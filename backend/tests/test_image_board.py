@@ -75,9 +75,16 @@ def test_board_claims_after_only_when_the_render_exists():
     assert "SLEEP" in spec["topdown"]["furniture"]
     assert spec["topdown"]["matches_after"] is True
     assert spec["topdown"]["approximate"] is True
+    assert spec["space_theme"] is True
+    assert spec["hero_before_overlay"] is False
+    assert "astronaut" in spec["topdown"]["caption"].lower()
+    assert spec["theme_line"] == "PLANETS · MOON · ROCKETS · ASTRONAUTS"
     names = [swatch["name"] for swatch in spec["palette"]]
     assert "Existing walls" in names
     assert "Natural oak" in names
+    assert "Moon" in names
+    assert "Rocket" in names
+    assert "Planet" in names
     assert any(swatch["note"] == "Not repainted" for swatch in spec["palette"])
     assert any(swatch["note"] == "Space theme" for swatch in spec["palette"])
     png = build_image_board(
@@ -86,10 +93,64 @@ def test_board_claims_after_only_when_the_render_exists():
         images={"front_view": after, "front_view_kind": "organized", "before": before, "after": after},
     )
     img = Image.open(io.BytesIO(png))
-    # Right half of the hero is the organized after (solid test color).
-    for point in ((200, 400), (980, 500)):
+    # The hero is the organized after, including the lower-left where a before chip used to sit.
+    for point in ((200, 400), (980, 500), (120, 800)):
         pixel = img.getpixel(point)
         assert abs(pixel[0] - 20) < 8 and abs(pixel[1] - 90) < 8 and abs(pixel[2] - 70) < 8
+        assert abs(pixel[0] - 150) > 20
+
+
+def test_extra_views_are_captioned_by_focal_point():
+    lead, deliverable = _load()
+    after = _jpeg((20, 90, 70))
+    images = {
+        "front_view": after,
+        "front_view_kind": "organized",
+        "after": after,
+        "view_1": _jpeg((12, 40, 180)),
+        "view_2": _jpeg((180, 40, 40)),
+        "view_3": _jpeg((40, 160, 70)),
+    }
+    spec = board_spec(lead, deliverable, images)
+    assert spec["detail_sources"] == ["view_1", "view_2", "view_3"]
+    assert spec["detail_captions"] == [
+        "Dresser and changing station",
+        "Rocker",
+        "Door and circulation",
+    ]
+
+
+def test_nursery_pdf_hides_invent_disclaimer_when_the_after_exists():
+    lead, deliverable = _load()
+    after = _jpeg((20, 90, 70))
+    before = _jpeg((150, 130, 100))
+    pdf = build_pdf(
+        lead=lead,
+        deliverable=deliverable,
+        images={
+            "front_view": after,
+            "front_view_kind": "organized",
+            "before": before,
+            "after": after,
+        },
+    )
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    low = text.lower()
+    assert "final organized view" in low
+    assert "do not invent an after" not in low
+    assert "organized view unavailable" not in low
+    assert "we do not invent an organized after" not in low
+    assert "sleep sack" in low
+    assert "no loose blankets" in low or "loose blankets" in low
+
+    missing = build_pdf(
+        lead=lead,
+        deliverable=deliverable,
+        images={"before": before, "front_view": before, "front_view_kind": "original"},
+    )
+    missing_low = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(missing)).pages).lower()
+    assert "do not invent an after" in missing_low
+    assert "organized view unavailable" in missing_low
 
 
 def test_companion_keeps_the_full_zone_sentence_and_one_total():
