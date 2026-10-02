@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { LogIn } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -15,6 +15,7 @@ const AdminLogin = () => {
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
 
     const submit = async (e) => {
         e.preventDefault();
@@ -22,7 +23,8 @@ const AdminLogin = () => {
         try {
             const res = await api.post("/admin/login", { password });
             localStorage.setItem("cs_admin_token", res.data.token);
-            navigate("/admin");
+            const next = searchParams.get("next") || "";
+            navigate(next.startsWith("/admin") ? next : "/admin");
         } catch {
             toast.error("Invalid password");
         } finally {

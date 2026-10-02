@@ -1,15 +1,15 @@
 """
 FlowSpace companion PDF — the long-form half of a two-file Blueprint.
 
-The primary visual is ``image_board.build_image_board`` (a landscape PNG).
-This PDF is the companion guide:
+The primary visual is ``image_board.build_image_board`` (a portrait PNG).
+This PDF is the phone-friendly companion guide:
 
   - Full zone explanations and needs (no mid-word clipping)
   - Shopping list, retailer links, and one list total
   - Step-by-step work, safety, climate, maintenance, and the weekly reset
   - A before | after reference page only when a real photo exists
 
-The image board carries the hero, extra views, approximate room plan,
+The portrait Blueprint carries the hero, the room plan,
 what's-new callouts, palette, and roadmap. Do not cram those into this PDF.
 
 Hard rules:
@@ -221,6 +221,8 @@ def plan_title(space_type: Optional[str]) -> str:
 
 
 PAGE_W, PAGE_H = LETTER
+# Narrow page so body type stays readable when a phone fits the page to the screen.
+PHONE_W, PHONE_H = 390, 744
 MARGIN = 0.40 * inch
 DASH_HEADER_H = 0.90 * inch
 INT_HEADER_H = 0.46 * inch
@@ -336,19 +338,23 @@ def _styles():
         ),
         "guideKicker": ParagraphStyle(
             "guideKicker", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=8, leading=11, textColor=EMERALD_DEEP, spaceAfter=2,
+            fontSize=11, leading=14, textColor=EMERALD_DEEP, spaceAfter=4,
+        ),
+        "guideTitle": ParagraphStyle(
+            "guideTitle", parent=base["BodyText"], fontName=_font("FSSerif-Bold"),
+            fontSize=20, leading=24, textColor=SLATE, spaceAfter=6,
         ),
         "guideH": ParagraphStyle(
             "guideH", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
-            fontSize=12, leading=15, textColor=SLATE, spaceBefore=8, spaceAfter=4,
+            fontSize=16, leading=20, textColor=SLATE, spaceBefore=12, spaceAfter=6,
         ),
         "guideH3": ParagraphStyle(
             "guideH3", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=10.5, leading=13, textColor=EMERALD_DEEP, spaceBefore=6, spaceAfter=1,
+            fontSize=14, leading=18, textColor=EMERALD_DEEP, spaceBefore=8, spaceAfter=2,
         ),
         "guideBody": ParagraphStyle(
             "guideBody", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=10, leading=13.4, textColor=INK, spaceAfter=3,
+            fontSize=14, leading=19, textColor=INK, spaceAfter=6,
         ),
     }
 
@@ -828,22 +834,33 @@ def _draw_logo(canvas, x: float, y: float, size: float = 16, stroke: Color = EME
     canvas.restoreState()
 
 
+def _page_box(canvas):
+    page_w, page_h = canvas._pagesize
+    inset = 18 if page_w < 500 else MARGIN
+    return page_w, page_h, inset
+
+
 def _draw_footer(canvas, page: int) -> None:
     canvas.saveState()
+    page_w, _page_h, inset = _page_box(canvas)
     y = FOOTER_H
     canvas.setStrokeColor(MINT)
     canvas.setLineWidth(1.6)
-    canvas.line(0, y, PAGE_W, y)
+    canvas.line(0, y, page_w, y)
     canvas.setFillColor(SOFT)
-    canvas.rect(0, 0, PAGE_W, y, fill=1, stroke=0)
+    canvas.rect(0, 0, page_w, y, fill=1, stroke=0)
     canvas.setFillColor(SLATE_SOFT)
-    canvas.setFont(_font("FSSans"), 6.1)
-    if page == 1:
-        canvas.drawString(MARGIN, 14, FOOTER_NOTE)
-        canvas.drawRightString(PAGE_W - MARGIN, 14, "The FlowSpace Design Team")
+    canvas.setFont(_font("FSSans"), 8 if page_w < 500 else 6.1)
+    note = "The FlowSpace Design Team · Windows stay ~95% true to your photo."
+    if page_w < 500:
+        canvas.drawString(inset, 12, note)
+        canvas.drawRightString(page_w - inset, 12, str(page))
+    elif page == 1:
+        canvas.drawString(inset, 14, FOOTER_NOTE)
+        canvas.drawRightString(page_w - inset, 14, "The FlowSpace Design Team")
     else:
-        canvas.drawString(MARGIN, 14, "The FlowSpace Design Team  ·  Functional design  ·  Lasting value")
-        canvas.drawRightString(PAGE_W - MARGIN, 14, f"Page {page}")
+        canvas.drawString(inset, 14, "The FlowSpace Design Team  ·  Functional design  ·  Lasting value")
+        canvas.drawRightString(page_w - inset, 14, f"Page {page}")
     canvas.restoreState()
 
 
@@ -898,30 +915,32 @@ def _draw_dashboard_header(canvas, title: str, vibe: str) -> None:
 
 def _draw_interior_header(canvas, title: str, kind: str = "interior") -> None:
     canvas.saveState()
+    page_w, page_h, inset = _page_box(canvas)
     canvas.setFillColor(WHITE)
-    canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    canvas.rect(0, 0, page_w, page_h, fill=1, stroke=0)
     canvas.setFillColor(EMERALD)
-    canvas.rect(0, PAGE_H - 4, PAGE_W, 4, fill=1, stroke=0)
-    top = PAGE_H - 0.28 * inch
-    _draw_logo(canvas, MARGIN, top, 13, EMERALD)
+    canvas.rect(0, page_h - 4, page_w, 4, fill=1, stroke=0)
+    top = page_h - 0.28 * inch
+    _draw_logo(canvas, inset, top, 13, EMERALD)
     canvas.setFillColor(SLATE)
     canvas.setFont(_font("FSSerif-Bold"), 11.5)
-    canvas.drawString(MARGIN + 20, top - 2, "FlowSpace")
-    canvas.setFillColor(SLATE_SOFT)
-    canvas.setFont(_font("FSSans"), 6.2)
-    canvas.drawString(MARGIN + 92, top, title)
+    canvas.drawString(inset + 20, top - 2, "FlowSpace")
     canvas.setFillColor(EMERALD_DEEP)
-    canvas.setFont(_font("FSSans-Semi"), 6.4)
+    canvas.setFont(_font("FSSans-Semi"), 8 if page_w < 500 else 6.4)
     if kind == "compare":
         right = "BEFORE & AFTER"
     elif kind == "guide":
         right = "COMPANION GUIDE"
     else:
-        right = "SHOPPING LIST  ·  DIY THIS WEEK"
-    canvas.drawRightString(PAGE_W - MARGIN, top, right)
+        right = "SHOPPING LIST"
+    canvas.drawRightString(page_w - inset, top, right)
+    if page_w >= 500:
+        canvas.setFillColor(SLATE_SOFT)
+        canvas.setFont(_font("FSSans"), 6.2)
+        canvas.drawString(inset + 92, top, title)
     canvas.setStrokeColor(BORDER)
     canvas.setLineWidth(0.5)
-    canvas.line(MARGIN, PAGE_H - INT_HEADER_H + 4, PAGE_W - MARGIN, PAGE_H - INT_HEADER_H + 4)
+    canvas.line(inset, page_h - INT_HEADER_H + 4, page_w - inset, page_h - INT_HEADER_H + 4)
     canvas.restoreState()
 
 
@@ -1326,26 +1345,28 @@ def _before_after_section(
     before_banner: str = COMPARE_BEFORE_BANNER,
     after_banner: str = COMPARE_AFTER_BANNER,
 ) -> Table:
-    gap = 8
-    col_w = (width - gap) / 2
-    photo_h = 2.05 * inch if compact else 6.55 * inch
+    # Stacked, full width, so a phone does not have to pinch a side-by-side pair.
+    photo_h = 2.05 * inch if compact else 2.85 * inch
     left = _compare_panel(
-        before, col_w, photo_h,
+        before, width, photo_h,
         before_banner, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
     )
     right = _compare_panel(
-        after, col_w, photo_h,
+        after, width, photo_h,
         after_banner, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
     )
-    t = Table([[left, right]], colWidths=[col_w, col_w])
+    panel_h = 15 + photo_h
+    t = Table([[left], [right]], colWidths=[width], rowHeights=[panel_h, panel_h])
     t.setStyle(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (0, 0), 0),
-                ("RIGHTPADDING", (0, 0), (0, 0), gap),
-                ("LEFTPADDING", (1, 0), (1, 0), 0),
-                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, 0), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("TOPPADDING", (0, 1), (-1, 1), 8),
+                ("BOTTOMPADDING", (0, 1), (-1, 1), 0),
             ]
         )
     )
@@ -1402,6 +1423,25 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
     ]
     table.setStyle(TableStyle(style_cmds))
     return table
+
+
+def _shopping_blocks(items: List[Dict[str, Any]]) -> List[Any]:
+    """One item per block so the list stays readable on a phone-width page."""
+    s = _styles()
+    flows: List[Any] = []
+    rows = [it for it in (items or []) if isinstance(it, dict)][:12]
+    if not rows:
+        flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
+        return flows
+    for it in rows:
+        qty, price, sub = _line_total(it)
+        name = str(it.get("name") or "Organizer")
+        qty_label = str(int(qty) if float(qty).is_integer() else qty)
+        price_label = _money(price) if price else "Typical"
+        sub_label = _money(sub) if sub else "—"
+        flows.append(Paragraph(f"<b>{_esc(name)}</b>", s["guideBody"]))
+        flows.append(Paragraph(f"Qty {qty_label} · {price_label} each · {sub_label}", s["guideBody"]))
+    return flows
 
 
 def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -> Table:
@@ -1485,7 +1525,7 @@ def build_pdf(
     `lead` — questionnaire/lead document
     `deliverable` — zones, needs, shopping_list, strategy, action_plan, …
     `images` — see ``pdf_images``. The before | after page uses real bytes only.
-    The visual board is a separate PNG from ``build_image_board``.
+    The visual board is a separate portrait PNG from ``build_image_board``.
     """
     _register_fonts()
     images = normalize_pdf_images(images)
@@ -1496,13 +1536,15 @@ def build_pdf(
     title_text = plan_title(space_key)
     customer_name = lead.get("name") or "there"
     vibe = _keyword_line(lead)
-    content_w = PAGE_W - 2 * MARGIN
+    page_w, page_h = PHONE_W, PHONE_H
+    inset = 18
+    content_w = page_w - 2 * inset
 
     int_frame = Frame(
-        MARGIN,
+        inset,
         FOOTER_H + 0.06 * inch,
         content_w,
-        PAGE_H - INT_HEADER_H - FOOTER_H - 0.12 * inch,
+        page_h - INT_HEADER_H - FOOTER_H - 0.12 * inch,
         leftPadding=0,
         rightPadding=0,
         topPadding=4,
@@ -1511,7 +1553,7 @@ def build_pdf(
     )
     doc = BaseDocTemplate(
         buf,
-        pagesize=LETTER,
+        pagesize=(page_w, page_h),
         pageTemplates=[
             PageTemplate(id="guide", frames=[int_frame], onPage=_make_on_page("guide", title_text, vibe)),
             PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe)),
@@ -1521,12 +1563,15 @@ def build_pdf(
     )
 
     story: List[Any] = []
-    story.append(Paragraph("YOUR BLUEPRINT, IN TWO FILES", s["guideKicker"]))
+    story.append(Paragraph(_esc(title_text), s["guideTitle"]))
+    story.append(Paragraph("PORTRAIT BLUEPRINT FIRST, THEN THIS GUIDE", s["guideKicker"]))
     story.append(
         Paragraph(
-            f"Hi {_esc(customer_name)}. The image board is the visual plan — hero, "
-            "room views, and the approximate layout. This companion guide is the detail: "
-            "full steps, the shopping list, safety, climate, and the weekly reset.",
+            f"Hi {_esc(customer_name)}. Open the portrait Blueprint first — the hero, "
+            "what changed, and the room flow. This companion guide is next, and it is "
+            "meant to be read on your phone: full steps, the shopping list, safety, "
+            "climate, the weekly reset, and each before and after from the same photo. "
+            "Measurements are approximate.",
             s["guideBody"],
         )
     )
@@ -1559,7 +1604,7 @@ def build_pdf(
     if sections["budget_note"]:
         story.append(Paragraph(_esc(sections["budget_note"]), s["guideBody"]))
     story.append(Spacer(1, 4))
-    story.append(_shopping_table(deliverable.get("shopping_list") or [], content_w))
+    story.extend(_shopping_blocks(deliverable.get("shopping_list") or []))
     story.append(Spacer(1, 8))
     story.append(Paragraph(f"THIS LIST TOTALS  {_esc(str(sections['list_total']))}", s["guideH"]))
     if sections["stated_budget"]:
@@ -1698,9 +1743,9 @@ def build_pdf(
         story.append(Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]))
         story.append(
             Paragraph(
-                "The image board is the primary visual. Your original photo is on the left. "
+                "The portrait Blueprint is the primary visual. Your original photo is shown first. "
                 "An organized after was not produced for this package. "
-                "We do not invent an after image.",
+                "Do not invent an after.",
                 s["guideBody"],
             )
         )

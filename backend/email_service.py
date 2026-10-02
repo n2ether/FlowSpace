@@ -30,26 +30,42 @@ def _admin_email() -> str:
     return (os.environ.get("ADMIN_EMAIL") or DEFAULT_ADMIN).strip() or DEFAULT_ADMIN
 
 
+def _preview_url(lead_id: str) -> str:
+    base = (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").rstrip("/")
+    return f"{base}/admin/leads/{lead_id}/blueprint"
+
+
 def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> str:
-    if two_files:
-        attached = (
-            "Two files are attached. The <strong>image board</strong> is the visual plan — "
-            "your before and after, the room layout, and the roadmap. "
-            "The <strong>companion guide</strong> is the detail — steps, the shopping list, "
-            "safety, climate, and the weekly reset."
-        )
-        open_line = "Open the image board first, then the companion guide."
-        inside_visual = "Image board — hero, layout, palette, and roadmap"
-        inside_detail = "Companion guide — steps, shopping links, safety, and reset"
-    else:
-        attached = (
-            "Your personalized <strong>" + plan_title(space_type) + "</strong> is attached. "
-            "Inside you'll find your FlowSpace Blueprint — designed around your space."
-        )
-        open_line = "Open the attached PDF to get started."
-        inside_visual = "Organized visual of your actual space"
-        inside_detail = "Step-by-step action plan"
+    """Final customer email. Blueprint preview first, then the guide. No internal language."""
     space = plan_title(space_type)
+    if two_files:
+        preview = """
+              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1F3D2C;">1 · Your Blueprint</p>
+              <img src="cid:blueprint-preview" alt="Your FlowSpace Blueprint" width="400" style="width:100%;max-width:400px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
+              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">The portrait plan — hero, what changed, and how the room flows. The same image is attached.</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td align="center" style="background:#1F3D2C;border-radius:999px;padding:14px 18px;">
+                    <span style="color:#ffffff;font-size:16px;font-weight:700;">Open the companion guide</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1F3D2C;">2 · Companion guide</p>
+              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">The guide is the attached PDF. Read it on your phone for the steps, shopping list, safety, climate, and weekly reset.</p>
+        """
+    else:
+        preview = f"""
+              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
+                Your personalized <strong>{space}</strong> is attached.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td align="center" style="background:#1F3D2C;border-radius:999px;padding:14px 18px;">
+                    <span style="color:#ffffff;font-size:16px;font-weight:700;">Open your Blueprint</span>
+                  </td>
+                </tr>
+              </table>
+        """
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -58,85 +74,42 @@ def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> s
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Your FlowSpace Blueprint is Ready</title>
 </head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 0;">
+<body style="margin:0;padding:0;background:#f3eee6;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eee6;padding:24px 0;">
     <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+      <td align="center" style="padding:0 16px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:16px;overflow:hidden;">
 
-          <!-- Header -->
           <tr>
-            <td style="background:#1F3D2C;padding:28px 40px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td>
-                    <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">FlowSpace</span>
-                    <span style="font-size:11px;color:#cfe2d7;margin-left:10px;letter-spacing:0.05em;">Clear space. Create flow. Live better.</span>
-                  </td>
-                </tr>
-              </table>
+            <td style="background:#1F3D2C;padding:24px 20px;">
+              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">FlowSpace</span>
+              <div style="font-size:13px;color:#cfe2d7;margin-top:4px;">Clear space. Create flow. Live better.</div>
             </td>
           </tr>
 
-          <!-- Body -->
           <tr>
-            <td style="padding:48px 40px 32px;">
-              <h1 style="margin:0 0 8px;font-size:28px;font-weight:300;color:#1F3D2C;letter-spacing:-0.5px;">
-                Your Blueprint is Ready, {customer_name}! 🎉
+            <td style="padding:28px 20px 24px;">
+              <h1 style="margin:0 0 12px;font-size:28px;font-weight:500;color:#1F3D2C;letter-spacing:-0.4px;line-height:1.2;">
+                Your Blueprint is ready, {customer_name}
               </h1>
-              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
-                {attached}
+              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
+                Start with the Blueprint. The companion guide comes after it.
               </p>
-
-              <!-- What's Inside Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0;margin-bottom:28px;">
-                <tr>
-                  <td style="padding:24px 28px;">
-                    <p style="margin:0 0 14px;font-size:13px;font-weight:700;color:#1F3D2C;text-transform:uppercase;letter-spacing:0.1em;">
-                      What's Inside Your Blueprint
-                    </p>
-                    <table width="100%" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; {inside_visual}</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; {inside_detail}</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Shopping list with one total that matches the lines</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Safety, climate, and the weekly reset</td>
-                      </tr>
-                      <tr>
-                        <td style="padding:4px 0;font-size:14px;color:#374151;">✓ &nbsp; Design strategy for lasting calm</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin:0 0 32px;font-size:15px;color:#475569;line-height:1.7;">
-                An organized space isn't just about aesthetics — it's about reducing the mental
-                load of daily life. Your Blueprint is designed to create a space that feels as
-                good as it looks. {open_line}
+              {preview}
+              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
+                An organized space is about a lighter day, not just a prettier photo.
               </p>
-
-              <!-- Divider -->
-              <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 32px;">
-
-              <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">
+              <p style="margin:0;font-size:16px;color:#64748b;line-height:1.6;">
                 Warmly,<br>
                 <strong style="color:#1F3D2C;">The FlowSpace Team</strong><br>
-                <a href="https://flowspace.solutions" style="color:#10b981;text-decoration:none;">flowspace.solutions</a>
+                <a href="https://flowspace.solutions" style="color:#1F3D2C;">flowspace.solutions</a>
               </p>
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
-            <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;">
+            <td style="background:#f7f4ef;padding:16px 20px;border-top:1px solid #e7e1d6;">
+              <p style="margin:0;font-size:13px;color:#6e655c;text-align:center;line-height:1.5;">
                 FlowSpace · Better spaces, better living.<br>
                 Questions? Reply to this email anytime.
               </p>
@@ -205,9 +178,10 @@ async def send_blueprint(
     if board_bytes:
         attachments.append(
             {
-                "filename": f"FlowSpace_{stem}_Image_Board_{safe_name}.png",
+                "filename": f"FlowSpace_{stem}_Blueprint_{safe_name}.png",
                 "content": base64.b64encode(board_bytes).decode("utf-8"),
                 "content_type": "image/png",
+                "content_id": "blueprint-preview",
             }
         )
     attachments.append(
@@ -311,16 +285,18 @@ async def send_contact_sheet(
 
 def _draft_package_html(customer_name: str, lead_id: str, space_type: str) -> str:
     space = plan_title(space_type)
+    preview = _preview_url(lead_id)
     return f"""
 <!DOCTYPE html>
 <html>
 <body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
-  <h2 style="color:#1F3D2C;">FlowSpace DRAFT board + companion — not final</h2>
+  <h2 style="color:#1F3D2C;">FlowSpace DRAFT portrait Blueprint + companion — not final</h2>
   <p>Hi {customer_name},</p>
-  <p>Attached is the <strong>DRAFT</strong> image board and companion guide for lead <code>{lead_id}</code> ({space}).</p>
+  <p>Attached is the <strong>DRAFT</strong> portrait Blueprint and companion guide for lead <code>{lead_id}</code> ({space}).</p>
   <p><strong>This is for your review only.</strong> It is not the customer final package. Please reply with any notes before we send final.</p>
+  <p>Mobile preview (review only, does not send final): <a href="{preview}">{preview}</a></p>
   <ul>
-    <li>Image board — hero + full-room afters, room plan, design moves, palette, roadmap</li>
+    <li>Portrait Blueprint — hero, what changed, room flow, palette, roadmap</li>
     <li>Companion guide — steps, shopping list, safety, climate, weekly reset, and per-source before/after pages</li>
   </ul>
   <p>Warmly,<br>The FlowSpace Team</p>
@@ -356,7 +332,7 @@ async def send_draft_package(
     if board_bytes:
         attachments.append(
             {
-                "filename": f"FlowSpace_{stem}_DRAFT_Image_Board_{safe_name}.png",
+                "filename": f"FlowSpace_{stem}_DRAFT_Blueprint_{safe_name}.png",
                 "content": base64.b64encode(board_bytes).decode("utf-8"),
                 "content_type": "image/png",
             }

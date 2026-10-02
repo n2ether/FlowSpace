@@ -122,8 +122,10 @@ WALL_RETRY_CONSTRAINT = (
 )
 
 SAME_CAMERA_CONSTRAINT = (
-    "SAME CAMERA LOCK: edit this exact source photo only. Keep this camera angle, "
-    "framing, and viewpoint. Do not invent a different corner, a new angle, or a substitute view."
+    "SAME CAMERA LOCK: edit this exact source photo only. Keep the same camera, crop, "
+    "perspective, field of view, architecture, and fixed features — windows, doors, and "
+    "furniture that stays. Do not crop another photo, invent an angle, or derive this "
+    "view from a different source."
 )
 
 

@@ -20,11 +20,12 @@ import stripe as stripe_sdk
 import httpx
 
 from image_board import build_image_board
+from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
 from email_service import send_blueprint, send_contact_sheet, send_draft_package
-from source_photos import final_email_block_reason
+from source_photos import draft_send_block_reason, final_email_block_reason
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
@@ -962,10 +963,37 @@ def _blueprint_filenames(lead: Dict[str, Any]) -> Tuple[str, str, str]:
         ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client")
     )
     stem = plan_title(lead.get("space_type")).replace(" ", "_")
-    board = f"FlowSpace_{stem}_Image_Board_{safe_name}.png"
+    board = f"FlowSpace_{stem}_Blueprint_{safe_name}.png"
     pdf = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
     package = f"FlowSpace_{stem}_Blueprint_{safe_name}.zip"
     return board, pdf, package
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/presentation")
+async def deliverable_presentation(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Phone-page model for a lead. Does not email anyone or mark the package final."""
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    media = []
+    for entry in d.get("source_afters") or []:
+        if not isinstance(entry, dict):
+            continue
+        media.append(
+            {
+                "label": entry.get("label") or "",
+                "after_label": entry.get("after_label") or "",
+                "before_url": entry.get("source_url") or None,
+                "after_url": entry.get("after_url") or None,
+            }
+        )
+    if not media and (d.get("front_view_url") or images.get("after")):
+        first_photo = (lead.get("photos") or [None])[0]
+        before_url = None
+        if isinstance(first_photo, str):
+            before_url = first_photo
+        elif isinstance(first_photo, dict):
+            before_url = first_photo.get("url")
+        media.append({"before_url": before_url, "after_url": d.get("front_view_url") or None})
+    return build_presentation(lead, d, images, lead_id=lead_id, media=media or None)
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
@@ -1084,7 +1112,7 @@ async def send_draft_package_endpoint(
 ):
     """Email DRAFT board + companion PDF for Flo/Camila review. Does not mark final."""
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
-    reason = final_email_block_reason(deliverable)
+    reason = draft_send_block_reason(deliverable)
     if reason:
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
@@ -1118,6 +1146,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     reason = final_email_block_reason(deliverable)
     if reason:
+        # Refuse the customer send. Do not rewrite a review lead and do not mark it final.
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)

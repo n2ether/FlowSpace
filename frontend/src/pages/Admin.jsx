@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Plus, Trash2, Users, Image, CreditCard, FileText, RefreshCcw } from "lucide-react";
+import { LogOut, Plus, Trash2, Users, Image, CreditCard, FileText, RefreshCcw, Smartphone } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { Input } from "../components/ui/input";
@@ -201,6 +201,15 @@ const Admin = () => {
                                             >
                                                 <FileText className="mr-1 h-3.5 w-3.5" />
                                                 Design
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => navigate(`/admin/leads/${l.id}/blueprint`)}
+                                                className="rounded-full px-3 py-1 text-xs"
+                                                data-testid={`lead-preview-${l.id}`}
+                                            >
+                                                <Smartphone className="mr-1 h-3.5 w-3.5" />
+                                                Preview
                                             </Button>
                                             <Button
                                                 variant="outline"

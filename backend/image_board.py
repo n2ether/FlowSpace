@@ -1,15 +1,16 @@
-"""Primary visual FlowSpace image board.
+"""Primary visual FlowSpace Blueprint.
 
-One landscape PNG per Blueprint. The companion PDF carries the long form.
+One portrait PNG (~2:3) per Blueprint, assembled here from real text layers
+and the FlowSpace mark. Photos are pasted in as themselves. The image model
+never draws this board or its type. Shopping, safety, climate, the weekly
+reset, and the full steps live in the companion guide.
+
 Photos are only the customer's before image and renders the pipeline actually
-produced. When several room photos were required, each organized after is shown
-at a useful size. A missing after stays empty — it is not a crop of another
-angle. Detail crops are extras for a single organized photo only. The room
-plan is a zone diagram, not a measured drawing.
-
-Layout follows Camila's board hierarchy (hero, supporting views, approximate
-plan, what's-new callouts, palette, product references, roadmap, budget)
-without copying a specific nursery design.
+produced. When several room photos were required, the hero is the first
+complete after and each remaining after is a full frame. A missing after stays
+empty — it is not a crop of another angle. Detail crops are extras for a
+single organized photo only. The room plan is a zone diagram, not a measured
+drawing.
 """
 from __future__ import annotations
 
@@ -28,7 +29,10 @@ from pdf_images import (
     normalize_pdf_images,
 )
 
-W, H = 2600, 1240
+# Portrait shareable board. 2:3, text and mark drawn in code.
+PORTRAIT_W, PORTRAIT_H = 1200, 1800
+W, H = PORTRAIT_W, PORTRAIT_H
+BRAND_LINE = "BOUTIQUE  ·  FUNCTIONAL  ·  INTENTIONAL  ·  AFFORDABLE"
 
 PAPER = (243, 238, 230)
 INK = (42, 38, 34)
@@ -693,170 +697,283 @@ def _draw_moves(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves
             ty += 15
 
 
+def _draw_mark(draw: ImageDraw.ImageDraw, x: int, y: int, size: int, color=GREEN) -> None:
+    """House mark used on the companion PDF, drawn as vectors — not a baked logo image."""
+    s = size
+    peak = (x + s * 0.5, y)
+    eave_r = (x + s, y + s * 0.42)
+    bot_r = (x + s, y + s)
+    bot_l = (x, y + s)
+    eave_l = (x, y + s * 0.42)
+    draw.line([peak, eave_r, bot_r, bot_l, eave_l, peak], fill=color, width=max(2, size // 16))
+    wave_y = y + s * 0.62
+    draw.arc((x + s * 0.18, wave_y - s * 0.12, x + s * 0.55, wave_y + s * 0.12), start=200, end=340, fill=color, width=max(2, size // 18))
+    draw.arc((x + s * 0.42, wave_y - s * 0.08, x + s * 0.82, wave_y + s * 0.16), start=200, end=350, fill=color, width=max(2, size // 18))
+
+
+def board_layout(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Shared portrait boxes so the PNG and the tests describe the same frames."""
+    width, height = PORTRAIT_W, PORTRAIT_H
+    margin = 40
+    images = spec.get("images") or {}
+    pairs = _source_pairs(images)
+    multi = spec.get("hero_mode") == "hero_plus_afters" and len(pairs) >= 2
+    rest_count = max(0, len(pairs) - 1) if multi else 0
+
+    header = (margin, 24, width - margin, 214)
+    y = header[3] + 16
+    source_h = 156 if rest_count else 0
+    source_gap = 14 if rest_count else 0
+    outcome_h = 86
+    footer = (margin, height - 54, width - margin, height - 22)
+    palette_h = 128
+    roadmap_h = 168
+    section_gaps = 30
+    hero_floor = 420
+    hero_h = (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps
+    # Leave the middle band for "what's new" and the room plan.
+    middle_reserve = 480
+    if hero_h > (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps - middle_reserve:
+        hero_h = (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps - middle_reserve
+    if hero_h < hero_floor:
+        hero_h = hero_floor
+    hero = (margin, y, width - margin, y + int(hero_h))
+    y = hero[3] + 14
+    sources: List[Tuple[int, int, int, int]] = []
+    if rest_count:
+        gap = 12
+        avail = width - 2 * margin
+        cell_w = (avail - gap * (rest_count - 1)) // rest_count
+        for index in range(rest_count):
+            x0 = margin + index * (cell_w + gap)
+            sources.append((x0, y, x0 + cell_w, y + source_h))
+        y += source_h + source_gap
+    outcome = (margin, y, width - margin, y + outcome_h)
+    y = outcome[3] + 12
+    bottom = footer[1] - 12
+    remain = max(0, bottom - y)
+    usable = max(0, remain - section_gaps - palette_h - roadmap_h)
+    changes_h = int(usable * 0.52)
+    plan_h = usable - changes_h
+    changes = (margin, y, width - margin, y + changes_h)
+    y = changes[3] + 10
+    plan = (margin, y, width - margin, y + plan_h)
+    y = plan[3] + 10
+    palette = (margin, y, width - margin, y + palette_h)
+    y = palette[3] + 10
+    roadmap = (margin, y, width - margin, y + roadmap_h)
+    return {
+        "size": (width, height),
+        "header": header,
+        "hero": hero,
+        "sources": sources,
+        "outcome": outcome,
+        "changes": changes,
+        "plan": plan,
+        "palette": palette,
+        "roadmap": roadmap,
+        "footer": footer,
+        "multi": multi,
+    }
+
+
+def _draw_header(base: Image.Image, spec: Dict[str, Any], box: Tuple[int, int, int, int]) -> None:
+    draw = ImageDraw.Draw(base)
+    x0, y0, x1, _y1 = box
+    _draw_mark(draw, x0, y0 + 4, 46, GREEN)
+    draw.text((x0 + 58, y0 + 6), "FlowSpace", font=_font("serif-bold", 28), fill=GREEN)
+    draw.text((x0 + 58, y0 + 40), "Clear space. Create flow. Live better.", font=_font("sans", 13), fill=MUTED)
+
+    badge = (x1 - 228, y0, x1, y0 + 78)
+    _rounded(draw, badge, 16, GREEN)
+    draw.text((badge[0] + 22, badge[1] + 12), "FLOWSPACE", font=_font("sans-bold", 12), fill=(207, 226, 215))
+    draw.text((badge[0] + 22, badge[1] + 28), "BLUEPRINT", font=_font("serif-bold", 22), fill=WHITE)
+    draw.text((badge[0] + 22, badge[1] + 54), "Your space. Your flow. Your life.", font=_font("sans", 11), fill=(207, 226, 215))
+
+    headline = _fit(draw, spec.get("headline") or "Your space", _font("serif-bold", 34), x1 - x0, 1)
+    draw.text((x0, y0 + 92), headline[0] if headline else "Your space", font=_font("serif-bold", 34), fill=INK)
+    brand = _fit(draw, BRAND_LINE, _font("sans-bold", 12), x1 - x0, 1)
+    draw.text((x0, y0 + 138), brand[0] if brand else BRAND_LINE, font=_font("sans-bold", 12), fill=GREEN)
+    personal = spec.get("tagline") or ""
+    if spec.get("theme_line"):
+        personal = f"{personal}   {spec['theme_line']}".strip()
+    fitted = _fit(draw, personal, _font("sans", 13), x1 - x0, 1)
+    if fitted:
+        draw.text((x0, y0 + 160), fitted[0], font=_font("sans", 13), fill=MUTED)
+    draw.rectangle((x0, y0 + 184, x1, y0 + 187), fill=GREEN)
+
+
+def _draw_outcome(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], text: str) -> None:
+    _rounded(draw, box, 16, CARD)
+    x0, y0, x1, _y1 = box
+    draw.text((x0 + 16, y0 + 12), "THE OUTCOME", font=_font("sans-bold", 12), fill=GREEN)
+    lines = _fit(draw, text, _font("serif-italic", 18), x1 - x0 - 32, 2)
+    y = y0 + 36
+    for line in lines:
+        draw.text((x0 + 16, y), line, font=_font("serif-italic", 18), fill=INK)
+        y += 24
+
+
+def _draw_changes(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves: Sequence[Dict[str, str]]) -> None:
+    x0, y0, x1, y1 = box
+    _rounded(draw, box, 16, CARD)
+    draw.text((x0 + 16, y0 + 12), "WHAT'S NEW & WHY", font=_font("sans-bold", 13), fill=GREEN)
+    items = list(moves)[:4]
+    if not items:
+        draw.text((x0 + 16, y0 + 40), "The companion guide lists each change.", font=_font("sans", 14), fill=MUTED)
+        return
+    cols = 2 if len(items) > 1 else 1
+    rows = (len(items) + cols - 1) // cols
+    gap_x, gap_y = 10, 8
+    inner_top = y0 + 40
+    cell_w = (x1 - x0 - 32 - gap_x * (cols - 1)) // cols
+    cell_h = max(36, (y1 - inner_top - 12 - gap_y * (rows - 1)) // rows)
+    for index, move in enumerate(items):
+        col, row = index % cols, index // cols
+        cx = x0 + 16 + col * (cell_w + gap_x)
+        cy = inner_top + row * (cell_h + gap_y)
+        draw.ellipse((cx, cy + 2, cx + 22, cy + 24), outline=CLAY, width=2)
+        num = str(index + 1)
+        draw.text((cx + 7, cy + 4), num, font=_font("sans-bold", 12), fill=CLAY)
+        title = _fit(draw, move.get("title") or "", _font("sans-bold", 12), cell_w - 32, 1)
+        draw.text((cx + 28, cy + 4), title[0] if title else "", font=_font("sans-bold", 12), fill=INK)
+        body = _fit(draw, move.get("body") or "", _font("sans", 13), cell_w - 8, 3)
+        ty = cy + 30
+        for line in body:
+            if ty > cy + cell_h - 4:
+                break
+            draw.text((cx, ty), line, font=_font("sans", 13), fill=MUTED)
+            ty += 16
+
+
+def _draw_palette_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], swatches: Sequence[Dict[str, str]]) -> None:
+    _rounded(draw, box, 16, CARD)
+    x0, y0, x1, _y1 = box
+    draw.text((x0 + 16, y0 + 12), "PALETTE & MATERIALS", font=_font("sans-bold", 13), fill=GREEN)
+    items = list(swatches)[:5] or [{"name": "Cream", "hex": "#F3EEE6", "note": "Textile"}]
+    gap = 10
+    avail = x1 - x0 - 32
+    sw = min(96, (avail - gap * (len(items) - 1)) // max(1, len(items)))
+    for index, swatch in enumerate(items):
+        x = x0 + 16 + index * (sw + gap)
+        y = y0 + 40
+        draw.rounded_rectangle((x, y, x + sw, y + 36), radius=8, fill=_rgb(swatch.get("hex") or "#C5C8C6"))
+        name = _fit(draw, swatch.get("name") or "", _font("sans", 12), sw + 4, 1)
+        draw.text((x, y + 42), name[0] if name else "", font=_font("sans", 12), fill=INK)
+        note = _fit(draw, swatch.get("note") or "", _font("sans", 11), sw + 4, 1)
+        if note:
+            draw.text((x, y + 58), note[0], font=_font("sans", 11), fill=MUTED)
+
+
+def _draw_roadmap_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], steps: Sequence[Dict[str, str]], budget: str) -> None:
+    _rounded(draw, box, 16, CARD)
+    x0, y0, x1, _y1 = box
+    draw.text((x0 + 16, y0 + 12), "ROADMAP", font=_font("sans-bold", 13), fill=GREEN)
+    label = budget or "—"
+    font = _font("serif-bold", 22)
+    tw = draw.textlength(label, font=font)
+    draw.text((x1 - 16 - tw, y0 + 8), label, font=font, fill=GREEN)
+    hint = _font("sans", 11)
+    hw = draw.textlength("LIST TOTAL", font=hint)
+    draw.text((x1 - 16 - hw, y0 + 32), "LIST TOTAL", font=hint, fill=MUTED)
+    for index, step in enumerate(list(steps)[:3]):
+        y = y0 + 52 + index * 34
+        draw.ellipse((x0 + 16, y, x0 + 36, y + 20), fill=GREEN)
+        draw.text((x0 + 22, y + 2), str(index + 1), font=_font("sans-bold", 12), fill=WHITE)
+        title = step.get("title") or ""
+        draw.text((x0 + 44, y), title, font=_font("sans-bold", 13), fill=INK)
+        body = _fit(draw, step.get("body") or "", _font("sans", 12), x1 - x0 - 70, 1)
+        if body:
+            draw.text((x0 + 44, y + 16), body[0], font=_font("sans", 12), fill=MUTED)
+
+
+def _draw_board_footer(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int]) -> None:
+    x0, y0, x1, _y1 = box
+    text = "Companion guide: steps, shopping, safety, climate, and the weekly reset."
+    fitted = _fit(draw, text, _font("sans", 13), x1 - x0, 1)
+    if fitted:
+        draw.text((x0, y0), fitted[0], font=_font("sans", 13), fill=MUTED)
+
+
+def _hero_frame(spec: Dict[str, Any], images: Dict[str, Any]) -> Tuple[Optional[Image.Image], str, str, str]:
+    before = _open_image(images.get("before"))
+    after = _open_image(images.get("after"))
+    pairs = _source_pairs(images)
+    if spec["hero_mode"] == "before_only" and before is None:
+        before = _open_image(images.get("front_view"))
+    if spec["hero_mode"] == "after_only" and after is None:
+        after = _open_image(images.get("front_view"))
+    if spec["hero_mode"] == "hero_plus_afters":
+        pair = pairs[0] if pairs else {}
+        hero_after = _open_image(pair.get("after")) if pair else after
+        label = f"{pair.get('label') or 'SOURCE_01'} → {pair.get('after_label') or 'AFTER_01'}"
+        return hero_after, label, "Organized view unavailable", "We do not invent an after photo."
+    if spec["hero_mode"] in {"before_after", "after_only"}:
+        return after, "AFTER — ORGANIZED VIEW", "Organized view unavailable", "We do not invent an after photo."
+    if spec["hero_mode"] == "before_only":
+        return before, spec["hero_label"], spec["hero_label"], "We do not invent an organized after."
+    return None, spec.get("hero_label") or HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB
+
+
+def _empty_thumb(base: Image.Image, box: Tuple[int, int, int, int], title: str, sub: str) -> None:
+    draw = ImageDraw.Draw(base)
+    _rounded(draw, box, 16, (236, 244, 239))
+    x0, y0, x1, y1 = box
+    width = x1 - x0 - 20
+    title_lines = _fit(draw, title, _font("sans-bold", 14), width, 3)
+    sub_lines = _fit(draw, sub, _font("sans", 12), width, 3)
+    y = y0 + 16
+    for line in title_lines:
+        draw.text((x0 + 10, y), line, font=_font("sans-bold", 14), fill=GREEN)
+        y += 18
+    y += 4
+    for line in sub_lines:
+        if y > y1 - 16:
+            break
+        draw.text((x0 + 10, y), line, font=_font("sans", 12), fill=MUTED)
+        y += 16
+
+
 def build_image_board(
     *,
     lead: Dict[str, Any],
     deliverable: Dict[str, Any],
     images: Dict[str, Any],
 ) -> bytes:
-    """Render the primary visual board as a PNG."""
+    """Render the portrait Blueprint PNG. Text and the logo are drawn here."""
     spec = board_spec(lead, deliverable, images)
-    imgs = spec["images"]
-    before = _open_image(imgs.get("before"))
-    after = _open_image(imgs.get("after"))
-    if spec["hero_mode"] == "before_only" and before is None:
-        before = _open_image(imgs.get("front_view"))
-    if spec["hero_mode"] == "after_only" and after is None:
-        after = _open_image(imgs.get("front_view"))
+    layout = board_layout(spec)
+    width, height = layout["size"]
+    base = Image.new("RGBA", (width, height), PAPER + (255,))
+    _draw_header(base, spec, layout["header"])
 
-    base = Image.new("RGBA", (W, H), PAPER + (255,))
-    draw = ImageDraw.Draw(base)
-
-    # Header
-    draw.text((36, 22), "FLOWSPACE", font=_font("sans-bold", 14), fill=GREEN)
-    draw.text((150, 24), "IMAGE BOARD", font=_font("sans", 13), fill=MUTED)
-    headline = spec["headline"]
-    draw.text((36, 46), headline, font=_font("serif-bold", 40), fill=INK)
-    draw.text((36, 96), spec["subtitle"], font=_font("serif-italic", 20), fill=MUTED)
-    tag = spec["tagline"]
-    tag_font = _font("sans-bold", 13)
-    tag_w = draw.textlength(tag, font=tag_font)
-    draw.text((W - 36 - tag_w, 58), tag, font=tag_font, fill=GREEN)
-    if spec.get("theme_line"):
-        theme_font = _font("sans-bold", 12)
-        theme = spec["theme_line"]
-        theme_w = draw.textlength(theme, font=theme_font)
-        draw.text((W - 36 - theme_w, 80), theme, font=theme_font, fill=CLAY)
-    draw.rectangle((36, 128, W - 36, 131), fill=GREEN)
-
-    main_top = 148
-    main_h = 800
-    hero = (36, main_top, 36 + 1240, main_top + main_h)
-    mid = (1292, main_top, 1292 + 560, main_top + main_h)
-    right = (1868, main_top, W - 36, main_top + main_h)
-
-    gap = 12
-    pairs = _source_pairs(imgs)
-    if spec["hero_mode"] == "hero_plus_afters":
-        # Strong hero = first after; mid column = remaining full-room afters (no crops).
-        hero_after = _open_image(pairs[0].get("after")) if pairs else after
-        hero_label = str((pairs[0].get("after_label") if pairs else None) or "AFTER_01")
-        source_label = str((pairs[0].get("label") if pairs else None) or "SOURCE_01")
-        _photo_or_empty(
-            base,
-            hero_after,
-            hero,
-            f"{source_label} → {hero_label}",
-            "Organized view unavailable",
-            "We do not invent an after photo.",
-        )
-    elif spec["hero_mode"] == "source_grid":
-        _draw_source_grid(base, (hero[0], hero[1], mid[2], hero[3]), pairs)
-    elif spec["hero_mode"] == "before_after":
-        # The hero is the organized after only. A small before chip used to sit
-        # in the lower-left and put the cluttered original (teddy, loose cushions)
-        # back on top of the render. The companion PDF keeps the labeled before.
-        _photo_or_empty(
-            base,
-            after,
-            hero,
-            "AFTER — ORGANIZED VIEW",
-            "Organized view unavailable",
-            "We do not invent an after photo.",
-        )
-    elif spec["hero_mode"] == "after_only":
-        _photo_or_empty(base, after, hero, "AFTER — ORGANIZED VIEW", "Organized view unavailable", "We do not invent an after photo.")
-    elif spec["hero_mode"] == "before_only":
-        _photo_or_empty(base, before, hero, spec["hero_label"], spec["hero_label"], "We do not invent an organized after.")
+    hero_img, hero_label, empty_title, empty_sub = _hero_frame(spec, spec["images"])
+    if hero_img is None and spec["hero_mode"] == "placeholder":
+        _empty_panel(base, layout["hero"], empty_title, empty_sub)
     else:
-        _empty_panel(base, hero, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB)
+        _photo_or_empty(base, hero_img, layout["hero"], hero_label, empty_title, empty_sub)
 
-    if spec["hero_mode"] == "hero_plus_afters":
-        details = _pair_slots(pairs[1:]) if len(pairs) > 1 else []
-    elif spec["hero_mode"] == "source_grid":
-        details = []
-    else:
-        details = _detail_slots(imgs, lead)
-    mx0, my0, mx1, my1 = mid
-    if spec["hero_mode"] == "source_grid":
-        pass
-    elif details:
-        slot_h = (my1 - my0 - gap * (len(details) - 1)) // len(details)
-        for i, slot in enumerate(details):
-            top = my0 + i * (slot_h + gap)
-            _photo_or_empty(base, slot["image"], (mx0, top, mx1, top + slot_h), slot["caption"], slot["caption"], "")
-    else:
-        _empty_panel(base, mid, "Additional views", "They appear when an organized photo exists. We do not invent them.")
+    pairs = _source_pairs(spec["images"])
+    for box, pair in zip(layout["sources"], pairs[1:]):
+        label = str(pair.get("label") or "SOURCE")
+        after_label = str(pair.get("after_label") or "AFTER")
+        after = _open_image(pair.get("after"))
+        if after is None:
+            _empty_thumb(base, box, f"{label} — after missing", "Not filled from another angle.")
+        else:
+            _photo_or_empty(base, after, box, f"{label} → {after_label}", f"{label} — after missing", "Not filled from another angle.")
 
-    rx0, ry0, rx1, ry1 = right
-    plan_h = 430
-    _draw_plan(base, (rx0, ry0, rx1, ry0 + plan_h), spec["topdown"])
     draw = ImageDraw.Draw(base)
-    _draw_moves(draw, (rx0, ry0 + plan_h + 16, rx1, ry1), spec["moves"])
-
-    # Bottom strip
-    by = main_top + main_h + 18
+    _draw_outcome(draw, layout["outcome"], spec.get("subtitle") or "")
+    _draw_changes(draw, layout["changes"], spec.get("moves") or [])
+    _draw_plan(base, layout["plan"], spec["topdown"])
     draw = ImageDraw.Draw(base)
-    prod_box = (36, by, 980, H - 36)
-    pal_box = (1000, by, 1580, H - 36)
-    road_box = (1600, by, W - 36, H - 36)
-    _rounded(draw, prod_box, 16, CARD)
-    _rounded(draw, pal_box, 16, CARD)
-    _rounded(draw, road_box, 16, CARD)
-
-    draw.text((prod_box[0] + 16, prod_box[1] + 12), "PRODUCT REFERENCES", font=_font("sans-bold", 13), fill=GREEN)
-    draw.text((prod_box[0] + 16, prod_box[1] + 32), "From your shopping list. These are not catalog photos.", font=_font("sans", 12), fill=MUTED)
-    products = spec["products"] or [{"name": "Shopping list is in the companion guide.", "price": ""}]
-    for i, product in enumerate(products[:4]):
-        y = prod_box[1] + 58 + i * 36
-        swatch = spec["palette"][i % len(spec["palette"])]["hex"]
-        draw.rounded_rectangle((prod_box[0] + 16, y, prod_box[0] + 40, y + 24), radius=4, fill=_rgb(swatch))
-        name_lines = _fit(draw, product["name"], _font("sans", 15), 760, 1)
-        draw.text((prod_box[0] + 50, y + 2), name_lines[0] if name_lines else product["name"], font=_font("sans", 15), fill=INK)
-        if product.get("price"):
-            pw = draw.textlength(product["price"], font=_font("sans-bold", 15))
-            draw.text((prod_box[2] - 16 - pw, y + 2), product["price"], font=_font("sans-bold", 15), fill=GREEN)
-
-    draw.text((pal_box[0] + 16, pal_box[1] + 12), "PALETTE & MATERIALS", font=_font("sans-bold", 13), fill=GREEN)
-    swatch_w = 80
-    for i, swatch in enumerate(spec["palette"][:5]):
-        x = pal_box[0] + 16 + (i % 5) * (swatch_w + 12)
-        y = pal_box[1] + 48
-        draw.rounded_rectangle((x, y, x + swatch_w, y + 64), radius=10, fill=_rgb(swatch["hex"]))
-        for li, line in enumerate(_fit(draw, swatch["name"], _font("sans", 12), swatch_w + 8, 2)):
-            draw.text((x, y + 72 + li * 14), line, font=_font("sans", 12), fill=INK)
-        draw.text((x, y + 102), swatch.get("note") or "", font=_font("sans", 11), fill=MUTED)
-
-    draw.text((road_box[0] + 16, road_box[1] + 12), "ROADMAP", font=_font("sans-bold", 13), fill=GREEN)
-    budget = spec["budget_display"]
-    budget_font = _font("serif-bold", 28)
-    bw = draw.textlength(budget, font=budget_font)
-    draw.text((road_box[2] - 16 - bw, road_box[1] + 8), budget, font=budget_font, fill=GREEN)
-    label = "LIST TOTAL"
-    lw = draw.textlength(label, font=_font("sans-bold", 11))
-    draw.text((road_box[2] - 16 - lw, road_box[1] + 40), label, font=_font("sans-bold", 11), fill=MUTED)
-    for i, step in enumerate(spec["roadmap"]):
-        y = road_box[1] + 62 + i * 48
-        draw.ellipse((road_box[0] + 16, y, road_box[0] + 38, y + 22), fill=GREEN)
-        draw.text((road_box[0] + 23, y + 3), str(i + 1), font=_font("sans-bold", 12), fill=WHITE)
-        draw.text((road_box[0] + 46, y), step["title"], font=_font("sans-bold", 13), fill=INK)
-        body = _fit(draw, step["body"], _font("sans", 12), road_box[2] - road_box[0] - 70, 2)
-        draw.text((road_box[0] + 46, y + 18), " ".join(body), font=_font("sans", 12), fill=MUTED)
-
-    # Priorities sit in the palette card's lower area if there is room; keep them on the footer line.
-    priority = ""
-    if spec["priorities"]:
-        bits = []
-        for item in spec["priorities"][:3]:
-            fitted = _fit(draw, item, _font("sans", 12), 280, 1)
-            if fitted:
-                bits.append(fitted[0].rstrip("."))
-        priority = "PRIORITIES  " + "   ·   ".join(bits)
-    draw.text((36, H - 28), priority or "PRIORITIES  are listed in full in the companion guide.", font=_font("sans", 12), fill=MUTED)
-    foot = "Windows and proportions stay ~95% true to your photo. Paint is not applied unless you asked."
-    fw = draw.textlength(foot, font=_font("sans", 12))
-    draw.text((W - 36 - fw, H - 28), foot, font=_font("sans", 12), fill=MUTED)
+    _draw_palette_row(draw, layout["palette"], spec.get("palette") or [])
+    _draw_roadmap_row(draw, layout["roadmap"], spec.get("roadmap") or [], spec.get("budget_display") or "—")
+    _draw_board_footer(draw, layout["footer"])
 
     out = io.BytesIO()
     base.convert("RGB").save(out, format="PNG", optimize=True)
     return out.getvalue()
+
+

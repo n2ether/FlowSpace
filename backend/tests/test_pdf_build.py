@@ -92,7 +92,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     assert pdf[:5] == b"%PDF-"
     reader = PdfReader(io.BytesIO(pdf))
-    assert 2 <= len(reader.pages) <= 6
+    assert 2 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "FlowSpace" in text
     assert "Ada Lovelace" in text
@@ -100,7 +100,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "Bedroom Design Plan" not in text
     low = text.lower()
 
-    assert "image board" in low
+    assert "portrait blueprint" in low
     assert "companion" in low
     assert "Parking Zone" in text
     assert "Keep the existing stall clear" in text
@@ -163,7 +163,7 @@ def test_pdf_placeholder_when_images_missing():
     assert _page_image_count(pdf, 0) == 0
     assert "BEFORE & AFTER" not in text
     assert COMPARE_BEFORE_BANNER not in text
-    assert "do not invent an after" in text.lower() or "image board" in text.lower()
+    assert "do not invent an after" in text.lower() or "portrait blueprint" in text.lower()
 
 
 def test_pdf_embeds_front_view_bytes_in_hero():
@@ -235,7 +235,7 @@ def test_pdf_before_after_when_both_present_stays_compact():
         },
     )
     reader = PdfReader(io.BytesIO(pdf))
-    assert 2 <= len(reader.pages) <= 6
+    assert 2 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "Before & after" in text or "BEFORE" in text
     assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in text
@@ -269,7 +269,7 @@ def test_pdf_honest_empty_when_only_after():
     assert "final organized view" in low
     assert "do not invent an after" not in low
     assert "we do not invent an organized after" not in low
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 6
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 16
 
 
 def test_pdf_honest_empty_when_only_before():
@@ -283,7 +283,7 @@ def test_pdf_honest_empty_when_only_before():
     assert COMPARE_AFTER_EMPTY in text
     assert COMPARE_BEFORE_EMPTY not in text
     assert "YOUR PHOTO" in text
-    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 6
+    assert len(PdfReader(io.BytesIO(pdf)).pages) <= 16
 
 
 def test_pdf_ignores_non_bytes_front_view():
@@ -324,7 +324,7 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "optional" in low
     assert answers["routine"]
     assert "workbench" in answers["possessions"].lower()
-    assert 2 <= len(reader.pages) <= 6
+    assert 2 <= len(reader.pages) <= 16
     joined = text.lower()
     assert "shopping list" in joined
     assert "step by step" in joined or "weekly reset" in joined
