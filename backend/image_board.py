@@ -2,8 +2,10 @@
 
 One landscape PNG per Blueprint. The companion PDF carries the long form.
 Photos are only the customer's before image and renders the pipeline actually
-produced. Detail panels are crops of that organized view, or extra view slots
-when those bytes exist. The room plan is a zone diagram, not a measured drawing.
+produced. When several room photos were required, each organized after is shown
+at a useful size. A missing after stays empty — it is not a crop of another
+angle. Detail crops are extras for a single organized photo only. The room
+plan is a zone diagram, not a measured drawing.
 
 Layout follows Camila's board hierarchy (hero, supporting views, approximate
 plan, what's-new callouts, palette, product references, roadmap, budget)
@@ -413,14 +415,52 @@ def _crop_slots(after: Image.Image) -> List[Dict[str, Any]]:
     ]
 
 
-def _detail_slots(images: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Real extra views when the pipeline made them, else crops of the organized after.
+def _source_pairs(images: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pairs = images.get("source_pairs") or []
+    if not isinstance(pairs, list):
+        return []
+    return [pair for pair in pairs if isinstance(pair, dict)]
 
-    Captions name the focal point the prompt asked for. Crops stay labeled as
-    details of the organized view — never a fake new angle, and never an extra
-    view when the after was discarded.
+
+def _pair_slots(pairs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One slot per required source. A missing after stays empty — never a crop."""
+    slots = []
+    for index, pair in enumerate(pairs):
+        label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
+        after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
+        img = _open_image(pair.get("after"))
+        if img is None:
+            slots.append(
+                {
+                    "image": None,
+                    "caption": f"{label} — after missing",
+                    "source": label,
+                    "missing": True,
+                }
+            )
+        else:
+            slots.append(
+                {
+                    "image": img,
+                    "caption": f"{label} → {after_label}",
+                    "source": label,
+                    "missing": False,
+                }
+            )
+    return slots
+
+
+def _detail_slots(images: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Per-source afters when the lead has several room photos.
+
+    Crops and hero-derived extra views are optional details for a single
+    organized photo. They never stand in for a missing source angle.
     """
     from space_rails import supporting_view_caption
+
+    pairs = _source_pairs(images)
+    if len(pairs) >= 2:
+        return _pair_slots(pairs)
 
     after = _open_image(images.get("after"))
     real = []
@@ -456,8 +496,17 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     from space_rails import is_space_theme
 
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    pairs = _source_pairs(images)
+    multi = len(pairs) >= 2
     details = _detail_slots(images, lead)
     themed = is_space_theme(lead, doc)
+    if multi:
+        complete = all(not slot.get("missing") for slot in details) and bool(details)
+        hero_mode = "source_grid"
+        hero_label = "ALL SOURCE ANGLES" if complete else "INCOMPLETE — MISSING SOURCE AFTER"
+        claims_organized = complete
+    else:
+        claims_organized = hero_mode in {"before_after", "after_only"}
     return {
         "deliverable": doc,
         "images": images,
@@ -475,7 +524,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "stated_budget": doc.get("stated_budget") or "",
         "hero_mode": hero_mode,
         "hero_label": hero_label,
-        "claims_organized_photo": hero_mode in {"before_after", "after_only"},
+        "claims_organized_photo": claims_organized,
         "detail_captions": [slot["caption"] for slot in details],
         "detail_sources": [slot["source"] for slot in details],
         "space_theme": themed,
@@ -483,7 +532,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "hero_before_overlay": False,
         "topdown": topdown_layout(
             doc,
-            organized=hero_mode in {"before_after", "after_only"},
+            organized=claims_organized,
             space_theme=themed,
         ),
         "safety": safety_guidance(lead, doc),
@@ -520,6 +569,30 @@ def _empty_panel(base: Image.Image, box: Tuple[int, int, int, int], title: str, 
     for line in sub_lines:
         draw.text((x0 + 18, y), line, font=_font("sans", 16), fill=MUTED)
         y += 22
+
+
+def _draw_source_grid(base: Image.Image, box: Tuple[int, int, int, int], pairs: Sequence[Dict[str, Any]]) -> None:
+    """Every required after at a useful size. A gap stays empty."""
+    x0, y0, x1, y1 = box
+    count = max(1, len(pairs))
+    cols = 2 if count >= 2 else 1
+    rows = (count + cols - 1) // cols
+    gap = 12
+    cell_w = (x1 - x0 - gap * (cols - 1)) // cols
+    cell_h = (y1 - y0 - gap * (rows - 1)) // rows
+    for index, pair in enumerate(pairs):
+        col = index % cols
+        row = index // cols
+        cx = x0 + col * (cell_w + gap)
+        cy = y0 + row * (cell_h + gap)
+        cell = (cx, cy, cx + cell_w, cy + cell_h)
+        label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
+        after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
+        after = _open_image(pair.get("after"))
+        if after is None:
+            _empty_panel(base, cell, f"{label} — after missing", "Not filled from another angle.")
+        else:
+            _photo_or_empty(base, after, cell, f"{label} → {after_label}", f"{label} — after missing", "Not filled from another angle.")
 
 
 def _photo_or_empty(base: Image.Image, img: Optional[Image.Image], box: Tuple[int, int, int, int], label: str, empty_title: str, empty_sub: str) -> None:
@@ -662,7 +735,10 @@ def build_image_board(
     right = (1868, main_top, W - 36, main_top + main_h)
 
     gap = 12
-    if spec["hero_mode"] == "before_after":
+    pairs = _source_pairs(imgs)
+    if spec["hero_mode"] == "source_grid":
+        _draw_source_grid(base, (hero[0], hero[1], mid[2], hero[3]), pairs)
+    elif spec["hero_mode"] == "before_after":
         # The hero is the organized after only. A small before chip used to sit
         # in the lower-left and put the cluttered original (teddy, loose cushions)
         # back on top of the render. The companion PDF keeps the labeled before.
@@ -681,9 +757,11 @@ def build_image_board(
     else:
         _empty_panel(base, hero, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB)
 
-    details = _detail_slots(imgs, lead)
+    details = [] if spec["hero_mode"] == "source_grid" else _detail_slots(imgs, lead)
     mx0, my0, mx1, my1 = mid
-    if details:
+    if spec["hero_mode"] == "source_grid":
+        pass
+    elif details:
         slot_h = (my1 - my0 - gap * (len(details) - 1)) // len(details)
         for i, slot in enumerate(details):
             top = my0 + i * (slot_h + gap)

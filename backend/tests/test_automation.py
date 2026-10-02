@@ -120,6 +120,7 @@ def _run(
         return generate(**kwargs)
 
     async def fake_send(**kwargs):
+        captured.setdefault("send_calls", []).append(kwargs.get("customer_email"))
         return send
 
     captured = capture if capture is not None else {}
@@ -196,7 +197,9 @@ def test_automation_uses_labeled_original_when_flux_fails(monkeypatch):
         lead=_lead(with_photo=True),
         capture=captured,
     )
-    assert sent is True
+    assert sent is False
+    assert db.leads.docs["lead-img-1"]["status"] == "incomplete"
+    assert not captured.get("send_calls")
     images = captured["images"]
     assert images["front_view"] == original
     assert images["front_view_kind"] == "original"
@@ -243,12 +246,20 @@ def test_automation_passes_before_and_after_when_both_exist(monkeypatch):
         capture=captured,
     )
     assert sent is True
+    assert db.leads.docs["lead-img-1"]["status"] == "review"
+    assert db.leads.docs["lead-img-1"]["email_sent"] is False
+    assert not captured.get("send_calls")
     images = captured["images"]
     assert images["before"] == original
     assert images["after"] == flux
     assert images["front_view"] == flux
     assert images["front_view_kind"] == "organized"
     assert captured.get("draft_photo") == original
+    stored = db.deliverables.docs["lead-img-1"].get("source_afters") or []
+    assert len(stored) == 1
+    assert stored[0]["source_photo_id"] == "aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert stored[0]["status"] == "approved"
+    assert stored[0]["after_url"]
 
 
 def _exif_jpeg(*, size=(80, 40), color=(20, 80, 200), orientation=6) -> bytes:
@@ -420,7 +431,9 @@ def test_automation_discards_after_when_qa_fails_twice(monkeypatch):
         lead=_lead(with_photo=True),
         capture=captured,
     )
-    assert sent is True
+    assert sent is False
+    assert db.leads.docs["lead-img-1"]["status"] == "incomplete"
+    assert not captured.get("send_calls")
     images = captured["images"]
     assert images["after"] is None
     assert images["front_view"] == original
@@ -471,7 +484,9 @@ def test_qa_discard_clears_stale_organized_hero(monkeypatch):
             "front_view_kind": "organized",
         },
     )
-    assert sent is True
+    assert sent is False
+    assert db.leads.docs["lead-img-1"]["status"] == "incomplete"
+    assert not captured.get("send_calls")
     images = captured["images"]
     assert images["after"] is None
     assert images["front_view"] == original
@@ -503,7 +518,7 @@ def test_supporting_views_attach_only_after_qa_passes(monkeypatch):
         "automation.review_organized_render",
         lambda **k: RenderQAResult(ok=True),
     )
-    sent, captured, _db, _fs = _run(
+    sent, captured, db, _fs = _run(
         monkeypatch,
         generate=lambda **k: (organized, "image/jpeg"),
         fs=fs,
@@ -511,6 +526,8 @@ def test_supporting_views_attach_only_after_qa_passes(monkeypatch):
         capture=captured,
     )
     assert sent is True
+    assert db.leads.docs["lead-img-1"]["status"] == "review"
+    assert not captured.get("send_calls")
     images = captured["images"]
     assert images["after"] == organized
     assert images["front_view_kind"] == "organized"
@@ -556,7 +573,8 @@ def test_discarded_after_does_not_keep_a_stale_extra_view(monkeypatch):
             "front_view_kind": "organized",
         },
     )
-    assert sent is True
+    assert sent is False
+    assert db.leads.docs["lead-img-1"]["status"] == "incomplete"
     images = captured["images"]
     assert images["after"] is None
     assert images["view_1"] is None
@@ -565,3 +583,162 @@ def test_discarded_after_does_not_keep_a_stale_extra_view(monkeypatch):
     assert images["front_view_kind"] == "original"
     assert not captured.get("supporting_calls")
     assert db.deliverables.docs["lead-img-1"].get("view_1_url") is None
+
+
+def _ui_screenshot() -> bytes:
+    img = Image.new("RGB", (400, 800), (255, 255, 255))
+    draw = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(img)
+    for y in range(80, 700, 70):
+        draw.rectangle((24, y, 376, y + 40), fill=(241, 243, 245))
+    draw.rectangle((24, 720, 200, 770), fill=(31, 61, 44))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
+def test_each_room_photo_is_edited_and_a_failure_blocks_final_email(monkeypatch):
+    """Four angles: edit each source. One QA miss marks the package incomplete."""
+    from render_qa import RenderQAResult
+
+    photos = {
+        "aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((20, 40, 180)),
+        "bbbbbbbbbbbbbbbbbbbbbbbb": _jpeg((180, 40, 40)),
+        "cccccccccccccccccccccccc": _jpeg((40, 160, 70)),
+        "dddddddddddddddddddddddd": _jpeg((200, 160, 40)),
+    }
+    photos["eeeeeeeeeeeeeeeeeeeeeeee"] = _ui_screenshot()
+    lead = _lead()
+    lead["photos"] = [
+        {"url": "/api/uploads/photo/eeeeeeeeeeeeeeeeeeeeeeee", "filename": "intake-screenshot.png"},
+        "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa",
+        "/api/uploads/photo/bbbbbbbbbbbbbbbbbbbbbbbb",
+        "/api/uploads/photo/cccccccccccccccccccccccc",
+        "/api/uploads/photo/dddddddddddddddddddddddd",
+    ]
+    calls = []
+
+    def generate(**kwargs):
+        calls.append(kwargs.get("reference_photo_bytes"))
+        # Third room photo (index 2 of the room calls) fails QA both attempts.
+        color = (200, 30, 30) if len(calls) in (3, 4) else (10, 120, 80)
+        return _jpeg(color, size=(80, 60)), "image/jpeg"
+
+    qas = {"n": 0}
+
+    def review(**kwargs):
+        qas["n"] += 1
+        # Calls 3 and 4 are the two attempts for the third source.
+        if qas["n"] in (3, 4):
+            return RenderQAResult(ok=False, walls_repainted=True, reasons=["Walls went taupe"], attempt=kwargs.get("attempt", 1))
+        return RenderQAResult(ok=True)
+
+    monkeypatch.setattr("automation.review_organized_render", review)
+    captured: Dict[str, Any] = {"supporting_result": {"view_1": _jpeg((1, 2, 3), size=(20, 20))}}
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=_FakeFS(store=photos),
+        lead=lead,
+        capture=captured,
+        seed_deliverable={
+            "lead_id": "lead-img-1",
+            "view_1_url": "/api/uploads/photo/bbbbbbbbbbbbbbbbbbbbbbbb",
+            "view_2_url": "/api/uploads/photo/cccccccccccccccccccccccc",
+            "front_view_url": "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+    )
+    assert sent is False
+    assert db.leads.docs["lead-img-1"]["status"] == "incomplete"
+    assert not captured.get("send_calls")
+    assert not captured.get("supporting_calls")
+    # Screenshot is not edited. The failing source is retried once (4 sources → 5 edits).
+    assert len(calls) == 5
+    assert calls[0] == photos["aaaaaaaaaaaaaaaaaaaaaaaa"]
+    assert calls[1] == photos["bbbbbbbbbbbbbbbbbbbbbbbb"]
+    assert calls[2] == photos["cccccccccccccccccccccccc"]
+    assert calls[4] == photos["dddddddddddddddddddddddd"]
+    assert photos["eeeeeeeeeeeeeeeeeeeeeeee"] not in calls
+    doc = db.deliverables.docs["lead-img-1"]
+    mapping = {row["source_photo_id"]: row for row in doc["source_afters"]}
+    assert set(mapping) == {
+        "aaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbb",
+        "cccccccccccccccccccccccc",
+        "dddddddddddddddddddddddd",
+    }
+    assert mapping["cccccccccccccccccccccccc"]["status"] == "failed"
+    assert mapping["cccccccccccccccccccccccc"]["after_url"] is None
+    assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["status"] == "approved"
+    assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["after_url"]
+    assert doc.get("view_1_url") is None
+    assert doc.get("view_2_url") is None
+    assert doc.get("package_status") == "incomplete"
+    images = captured["images"]
+    assert images["view_1"] is None
+    assert [pair["label"] for pair in images["source_pairs"]] == [
+        "SOURCE_01",
+        "SOURCE_02",
+        "SOURCE_03",
+        "SOURCE_04",
+    ]
+    assert images["source_pairs"][2]["after"] is None
+    assert images["source_pairs"][0]["after"]
+    from image_board import board_spec
+
+    spec = board_spec(lead, PLAN, images)
+    assert spec["hero_mode"] == "source_grid"
+    assert spec["claims_organized_photo"] is False
+    assert "after_crop" not in spec["detail_sources"]
+    assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02", "SOURCE_03", "SOURCE_04"]
+    from pdf_generator import build_pdf
+    from pypdf import PdfReader
+
+    text = "\n".join(
+        (page.extract_text() or "")
+        for page in PdfReader(io.BytesIO(build_pdf(lead=lead, deliverable=PLAN, images=images))).pages
+    )
+    assert "SOURCE_01" in text and "AFTER_04" in text
+    assert "SOURCE_03" in text
+    assert "not replaced" in text.lower() or "incomplete" in text.lower()
+
+
+def test_multi_photo_review_keeps_every_after_and_skips_hero_angles(monkeypatch):
+    photos = {
+        "aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((20, 40, 180)),
+        "bbbbbbbbbbbbbbbbbbbbbbbb": _jpeg((180, 40, 40)),
+    }
+    lead = _lead()
+    lead["photos"] = [
+        "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa",
+        "/api/uploads/photo/bbbbbbbbbbbbbbbbbbbbbbbb",
+    ]
+    seen = []
+
+    def generate(**kwargs):
+        seen.append(kwargs.get("reference_photo_bytes"))
+        extra = kwargs.get("extra_constraint") or ""
+        assert "SAME CAMERA" in extra
+        return _jpeg((10, 90, 50) if len(seen) == 1 else (40, 160, 70)), "image/jpeg"
+
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=generate,
+        fs=_FakeFS(store=photos),
+        lead=lead,
+    )
+    assert sent is True
+    assert db.leads.docs["lead-img-1"]["status"] == "review"
+    assert not captured.get("send_calls")
+    assert not captured.get("supporting_calls")
+    assert seen == [photos["aaaaaaaaaaaaaaaaaaaaaaaa"], photos["bbbbbbbbbbbbbbbbbbbbbbbb"]]
+    rows = db.deliverables.docs["lead-img-1"]["source_afters"]
+    assert [row["label"] for row in rows] == ["SOURCE_01", "SOURCE_02"]
+    assert all(row["status"] == "approved" and row["after_url"] for row in rows)
+    assert db.deliverables.docs["lead-img-1"].get("contact_sheet_url")
+    assert db.deliverables.docs["lead-img-1"].get("package_status") == "review"
+    from image_board import board_spec
+
+    spec = board_spec(lead, PLAN, captured["images"])
+    assert spec["claims_organized_photo"] is True
+    assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02"]
+    assert "after_crop" not in spec["detail_sources"]

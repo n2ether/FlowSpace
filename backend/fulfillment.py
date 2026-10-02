@@ -9,8 +9,9 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-# Statuses where a second auto-trigger would duplicate work.
-IN_FLIGHT_OR_DONE = frozenset({"processing", "delivered"})
+# Statuses where a second auto-trigger would duplicate work or overwrite a
+# package that is already in review / marked incomplete.
+IN_FLIGHT_OR_DONE = frozenset({"processing", "delivered", "review", "incomplete"})
 # Statuses the admin retry (or a failed-email re-run) may restart.
 RESTARTABLE = frozenset({"new", "paid", "pdf_ready", "error"})
 
@@ -55,5 +56,8 @@ def checkout_lead_lookups(
 
 
 def should_auto_start_automation(status: Optional[str]) -> bool:
-    """True unless the pipeline is already running or already emailed."""
+    """True unless the pipeline is running, in review, incomplete, or already emailed.
+
+    Admin retry passes force=True and does not consult this helper.
+    """
     return (status or "new") not in IN_FLIGHT_OR_DONE

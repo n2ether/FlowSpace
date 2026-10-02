@@ -117,6 +117,11 @@ WALL_RETRY_CONSTRAINT = (
     "Do not color-grade or restyle the walls. Color preferences are textiles only."
 )
 
+SAME_CAMERA_CONSTRAINT = (
+    "SAME CAMERA LOCK: edit this exact source photo only. Keep this camera angle, "
+    "framing, and viewpoint. Do not invent a different corner, a new angle, or a substitute view."
+)
+
 
 def _soft_goods_colors(lead: Dict[str, Any]) -> str:
     """color_prefs describe textiles/accessories only — never wall paint."""
@@ -420,15 +425,14 @@ async def generate_supporting_views(
     reference_photo_bytes: Optional[bytes],
     organized_bytes: Optional[bytes],
 ) -> Dict[str, bytes]:
-    """Two to three additional after views from a QA-passing organized render.
+    """Optional labeled details from one organized hero. Not a multi-angle path.
 
-    Each view targets a different focal point (dresser, rocker, door for a
-    kids' room). Edits the organized after (the customer photo if that is all
-    we have). A view is dropped when vision QA fails. If it is a near-duplicate
-    of the hero or of a view already kept, it is regenerated once and then
-    dropped. A missing API key raises ``RuntimeError`` so the caller can
-    soft-fail and keep the hero crops. This does not invent a measured floor
-    plan — the board draws that diagram.
+    Multi-photo leads must not call this to invent angles the customer already
+    photographed. Each of those photos is edited on its own. These extras are
+    details of a single hero: a different focal point, dropped when vision QA
+    fails or the framing duplicates the hero. A missing API key raises
+    ``RuntimeError`` so the caller can soft-fail. This does not invent a
+    measured floor plan — the board draws that diagram.
     """
     source = organized_bytes or reference_photo_bytes
     if not source:

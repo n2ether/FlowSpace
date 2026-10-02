@@ -1317,17 +1317,25 @@ def _compare_panel(
     return stack
 
 
-def _before_after_section(before: Optional[bytes], after: Optional[bytes], width: float, *, compact: bool = True) -> Table:
+def _before_after_section(
+    before: Optional[bytes],
+    after: Optional[bytes],
+    width: float,
+    *,
+    compact: bool = True,
+    before_banner: str = COMPARE_BEFORE_BANNER,
+    after_banner: str = COMPARE_AFTER_BANNER,
+) -> Table:
     gap = 8
     col_w = (width - gap) / 2
     photo_h = 2.05 * inch if compact else 6.55 * inch
     left = _compare_panel(
         before, col_w, photo_h,
-        COMPARE_BEFORE_BANNER, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
+        before_banner, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
     )
     right = _compare_panel(
         after, col_w, photo_h,
-        COMPARE_AFTER_BANNER, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
+        after_banner, COMPARE_AFTER_EMPTY, COMPARE_AFTER_EMPTY_SUB,
     )
     t = Table([[left, right]], colWidths=[col_w, col_w])
     t.setStyle(
@@ -1615,6 +1623,53 @@ def build_pdf(
     if attachment_note:
         story.append(Spacer(1, 4))
         story.append(Paragraph(_esc(str(attachment_note)), s["guideBody"]))
+
+    source_pairs = images.get("source_pairs") or []
+    if isinstance(source_pairs, list) and len(source_pairs) >= 2:
+        # One before|after page per required room photo. A missing after stays
+        # empty — it is not replaced by another source or a hero crop.
+        any_missing = any(not coerce_image_bytes(pair.get("after")) for pair in source_pairs if isinstance(pair, dict))
+        for index, pair in enumerate(source_pairs):
+            if not isinstance(pair, dict):
+                continue
+            label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
+            after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
+            story.append(NextPageTemplate("compare"))
+            story.append(PageBreak())
+            story.append(Paragraph(f"{_esc(label)} → {_esc(after_label)}", s["guideH"]))
+            if coerce_image_bytes(pair.get("after")):
+                reference = (
+                    f"This page is {label} beside {after_label}. "
+                    "The after was edited from this source photo, same camera. "
+                    "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+                )
+            else:
+                reference = (
+                    f"{after_label} was not produced for {label}. "
+                    "This package is incomplete. "
+                    "A missing angle is not replaced by another photo or by a crop."
+                )
+            story.append(Paragraph(reference, s["guideBody"]))
+            if any_missing and index == 0:
+                story.append(
+                    Paragraph(
+                        "Required sources are still missing an approved after. This is not a final package.",
+                        s["guideBody"],
+                    )
+                )
+            story.append(Spacer(1, 8))
+            story.append(
+                _before_after_section(
+                    coerce_image_bytes(pair.get("before")),
+                    coerce_image_bytes(pair.get("after")),
+                    content_w,
+                    compact=False,
+                    before_banner=f"{label} — YOUR PHOTO",
+                    after_banner=f"{after_label} — ORGANIZED VIEW",
+                )
+            )
+        doc.build(story)
+        return buf.getvalue()
 
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
