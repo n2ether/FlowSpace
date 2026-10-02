@@ -166,14 +166,30 @@ def test_nursery_prompt_clears_the_crib_and_strengthens_a_space_theme():
     assert "planets" in prompt
     assert "nursery animals" in prompt
     assert "do not repaint the walls to create it" in prompt or "do not repaint the walls" in prompt
+    assert "wall switch" in prompt
+    assert "towel hanger" in prompt or "towel bar" in prompt
+    assert "family photo" in prompt or "photo collage" in prompt
+    assert "rabbit" in prompt
+    assert "outside the crib" in prompt or "pull-down" in prompt
+    assert "must keep from the photo" in prompt
     plain = _build_kontext_prompt({"space_type": "kids_room", "must_stay": "Six-drawer dresser, crib"}).lower()
     assert "teddy" in plain
     assert "sleep sack" in plain
     assert "astronaut" not in plain
+    assert "wall switch" in plain
     garage = _build_kontext_prompt({"space_type": "garage", "storage_needs": ["tools"]}).lower()
     assert "teddy" not in garage
     assert "astronaut" not in garage
     assert "crib interior" not in garage
+    assert "wall switch" in garage or "wall switches" in garage
+
+
+def test_nursery_door_view_bans_towel_hanger_and_keeps_switch():
+    from space_rails import supporting_view_plan
+
+    door = supporting_view_plan({"space_type": "kids_room"})[2][1].lower()
+    assert "wall switch" in door
+    assert "towel" in door
 
 
 def test_supporting_views_target_distinct_focal_points():

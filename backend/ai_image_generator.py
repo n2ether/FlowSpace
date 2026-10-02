@@ -70,7 +70,9 @@ def _with_space_rails(
     """Append kids-room rails. Keep this call if the image provider changes."""
     from space_rails import image_prompt_rails
 
-    parts = [image_prompt_rails(lead, deliverable), (extra_constraint or "").strip()]
+    must_stay = str((lead or {}).get("must_stay") or "").strip()
+    must_line = f"MUST KEEP from the photo: {must_stay}." if must_stay else ""
+    parts = [image_prompt_rails(lead, deliverable), must_line, (extra_constraint or "").strip()]
     return " ".join(part for part in parts if part)
 
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
@@ -92,6 +94,8 @@ ORGANIZE_RAILS = (
     "source photo — same window count, size, and placement, same wall lengths, "
     "same camera angle, same architecture. Do not add, remove, move, or invent "
     "walls, windows, doors, or dimensions. "
+    "Keep wall switches, outlets, and similar built-in controls in their exact "
+    "locations from the source photo — do not remove, cover, or relocate them. "
     "Never place shelves, racks, cabinets, bins, or any storage in front of, "
     "over, or across a window or door — openings stay fully visible and in the "
     "same location. "
