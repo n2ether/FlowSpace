@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from PIL import Image, ImageDraw, ImageFont
 
 from pdf_images import coerce_image_bytes
+from photo_contain import contain_pixels
 
 _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -51,14 +52,6 @@ def _open(data: Optional[bytes]) -> Optional[Image.Image]:
         return None
 
 
-def _cover(img: Image.Image, width: int, height: int) -> Image.Image:
-    scale = max(width / img.width, height / img.height)
-    resized = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))), Image.Resampling.LANCZOS)
-    left = max(0, (resized.width - width) // 2)
-    top = max(0, (resized.height - height) // 2)
-    return resized.crop((left, top, left + width, top + height))
-
-
 def _panel(
     base: Image.Image,
     box: tuple,
@@ -82,8 +75,9 @@ def _panel(
         draw.text((px0 + 16, py0 + ph // 2 - 28), empty_title, font=title_font, fill=GREEN)
         draw.text((px0 + 16, py0 + ph // 2 + 4), empty_sub, font=sub_font, fill=MUTED)
     else:
-        covered = _cover(image, pw, ph)
-        base.paste(covered, (px0, py0))
+        ox, oy, dw, dh = contain_pixels(image.width, image.height, pw, ph)
+        fitted = image.resize((max(1, dw), max(1, dh)), Image.Resampling.LANCZOS)
+        base.paste(fitted, (px0 + ox, py0 + oy))
     draw.rectangle((x0, y0, x1, y0 + bar_h), fill=GREEN)
     draw.text((x0 + 12, y0 + 8), banner, font=_font(16, bold=True), fill=WHITE)
 

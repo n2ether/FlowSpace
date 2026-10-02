@@ -6,11 +6,12 @@ never draws this board or its type. Shopping, safety, climate, the weekly
 reset, and the full steps live in the companion guide.
 
 Photos are only the customer's before image and renders the pipeline actually
-produced. When several room photos were required, the hero is the first
-complete after and each remaining after is a full frame. A missing after stays
-empty — it is not a crop of another angle. Detail crops are extras for a
-single organized photo only. The room plan is a zone diagram, not a measured
-drawing.
+produced. Each room photo is placed with contain: its own aspect ratio and
+field of view, never cover-cropped into a wide fixed slot. When several room
+photos were required, the hero is the first complete after and each remaining
+after is a full frame. A missing after stays empty — it is not a crop of
+another angle. Detail crops are extras for a single organized photo only.
+The room plan is a zone diagram, not a measured drawing.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from blueprint_consistency import prepare_deliverable, safety_guidance
 from pdf_generator import plan_title, space_label
+from photo_contain import contain_pixels, frame_size
 from pdf_images import (
     HERO_PLACEHOLDER_LABEL,
     HERO_PLACEHOLDER_SUB,
@@ -170,14 +172,6 @@ def _open_image(data: Optional[bytes]) -> Optional[Image.Image]:
         return img.convert("RGB")
     except Exception:
         return None
-
-
-def _cover(img: Image.Image, width: int, height: int) -> Image.Image:
-    scale = max(width / img.width, height / img.height)
-    resized = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))), Image.Resampling.LANCZOS)
-    left = max(0, (resized.width - width) // 2)
-    top = max(0, (resized.height - height) // 2)
-    return resized.crop((left, top, left + width, top + height))
 
 
 def _crop_frac(img: Image.Image, box: Tuple[float, float, float, float]) -> Image.Image:
@@ -552,11 +546,16 @@ def _text(draw: ImageDraw.ImageDraw, xy, text, font, fill, max_width=None) -> No
 
 def _caption_bar(base: Image.Image, box: Tuple[int, int, int, int], label: str) -> None:
     x0, y0, x1, y1 = box
-    bar_h = 34
-    overlay = Image.new("RGBA", (x1 - x0, bar_h), (31, 61, 44, 214))
+    bar_h = 34 if (y1 - y0) >= 80 else 22
+    overlay = Image.new("RGBA", (max(1, x1 - x0), bar_h), (31, 61, 44, 214))
     base.paste(overlay, (x0, y1 - bar_h), overlay)
     draw = ImageDraw.Draw(base)
-    draw.text((x0 + 12, y1 - bar_h + 8), label, font=_font("sans-bold", 14), fill=WHITE)
+    size = 14 if bar_h >= 30 else 11
+    font = _font("sans-bold", size)
+    while size > 9 and draw.textlength(label, font=font) > max(8, x1 - x0 - 16):
+        size -= 1
+        font = _font("sans-bold", size)
+    draw.text((x0 + 8, y1 - bar_h + max(2, (bar_h - size) // 2)), label, font=font, fill=WHITE)
 
 
 def _empty_panel(base: Image.Image, box: Tuple[int, int, int, int], title: str, sub: str) -> None:
@@ -601,14 +600,20 @@ def _draw_source_grid(base: Image.Image, box: Tuple[int, int, int, int], pairs: 
 
 
 def _photo_or_empty(base: Image.Image, img: Optional[Image.Image], box: Tuple[int, int, int, int], label: str, empty_title: str, empty_sub: str) -> None:
+    """Paint ``img`` contained in ``box``. The slot may letterbox; it never crops."""
     x0, y0, x1, y1 = box
-    w, h = x1 - x0, y1 - y0
+    w, h = max(1, x1 - x0), max(1, y1 - y0)
     if img is None:
         _empty_panel(base, box, empty_title, empty_sub)
         return
-    covered = _cover(img, w, h)
-    _paste_round(base, covered, (x0, y0), 16)
-    _caption_bar(base, box, label)
+    ox, oy, dw, dh = contain_pixels(img.width, img.height, w, h)
+    if dw <= 0 or dh <= 0:
+        _empty_panel(base, box, empty_title, empty_sub)
+        return
+    fitted = img.resize((dw, dh), Image.Resampling.LANCZOS)
+    radius = min(16, max(4, dw // 10), max(4, dh // 10))
+    _paste_round(base, fitted, (x0 + ox, y0 + oy), radius)
+    _caption_bar(base, (x0 + ox, y0 + oy, x0 + ox + dw, y0 + oy + dh), label)
 
 
 def _draw_space_glyphs(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
@@ -711,57 +716,116 @@ def _draw_mark(draw: ImageDraw.ImageDraw, x: int, y: int, size: int, color=GREEN
     draw.arc((x + s * 0.42, wave_y - s * 0.08, x + s * 0.82, wave_y + s * 0.16), start=200, end=350, fill=color, width=max(2, size // 18))
 
 
+def _image_aspect(data: Optional[bytes]) -> Optional[float]:
+    img = _open_image(data)
+    if img is None or img.width <= 0 or img.height <= 0:
+        return None
+    return img.width / float(img.height)
+
+
+def _hero_aspect(spec: Dict[str, Any]) -> Optional[float]:
+    """Aspect of the photo the hero frame will actually paint."""
+    images = spec.get("images") or {}
+    mode = spec.get("hero_mode")
+    pairs = _source_pairs(images)
+    data = None
+    if mode == "hero_plus_afters":
+        data = (pairs[0].get("after") if pairs else None) or images.get("after")
+    elif mode in {"before_after", "after_only"}:
+        data = images.get("after") or images.get("front_view")
+    elif mode == "before_only":
+        data = images.get("before") or images.get("front_view")
+    return _image_aspect(data)
+
+
+def _fitted_frame(aspect: Optional[float], max_w: int, max_h: int, *, missing_h: int) -> Tuple[int, int]:
+    """Natural-ratio frame. A missing photo keeps a full-width labeled panel."""
+    if aspect is None or aspect <= 0:
+        return (max(1, max_w), max(1, min(missing_h, max_h)))
+    return frame_size(aspect, max_w, max_h)
+
+
 def board_layout(spec: Dict[str, Any]) -> Dict[str, Any]:
-    """Shared portrait boxes so the PNG and the tests describe the same frames."""
+    """Shared portrait boxes so the PNG and the tests describe the same frames.
+
+    Room-photo frames follow each file's aspect ratio inside a max box. They
+    are not stretched into one wide hero or a row of short 16:9 cells.
+    """
     width, height = PORTRAIT_W, PORTRAIT_H
     margin = 40
+    content_w = width - 2 * margin
     images = spec.get("images") or {}
     pairs = _source_pairs(images)
     multi = spec.get("hero_mode") == "hero_plus_afters" and len(pairs) >= 2
-    rest_count = max(0, len(pairs) - 1) if multi else 0
+    rest = pairs[1:] if multi else []
 
     header = (margin, 24, width - margin, 214)
-    y = header[3] + 16
-    source_h = 156 if rest_count else 0
-    source_gap = 14 if rest_count else 0
-    outcome_h = 86
     footer = (margin, height - 54, width - margin, height - 22)
+    y_start = header[3] + 16
+    bottom = footer[1] - 12
+    outcome_h = 86
     palette_h = 128
     roadmap_h = 168
-    section_gaps = 30
-    hero_floor = 420
-    hero_h = (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps
-    # Leave the middle band for "what's new" and the room plan.
-    middle_reserve = 480
-    if hero_h > (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps - middle_reserve:
-        hero_h = (footer[1] - 12) - y - 14 - source_h - source_gap - outcome_h - 12 - palette_h - roadmap_h - section_gaps - middle_reserve
-    if hero_h < hero_floor:
-        hero_h = hero_floor
-    hero = (margin, y, width - margin, y + int(hero_h))
-    y = hero[3] + 14
+    changes_min = 156
+    plan_min = 176
+    gap_after_hero = 14
+    gap_after_row = 14 if rest else 0
+    gap_after_outcome = 12
+    section_gap = 10
+    text_fixed = outcome_h + changes_min + plan_min + palette_h + roadmap_h
+    gaps = gap_after_hero + gap_after_row + gap_after_outcome + section_gap * 3
+    photo_max = max(240, bottom - y_start - text_fixed - gaps)
+
+    if rest:
+        hero_max_h = min(int(photo_max * 0.58), photo_max - gap_after_row - 150)
+        hero_max_h = max(200, hero_max_h)
+    else:
+        hero_max_h = photo_max
+    hero_w, hero_h = _fitted_frame(_hero_aspect(spec), content_w, hero_max_h, missing_h=420)
+    y = y_start
+    hx = margin + max(0, (content_w - hero_w) // 2)
+    hero = (hx, y, hx + hero_w, y + hero_h)
+    y = hero[3] + gap_after_hero
+
     sources: List[Tuple[int, int, int, int]] = []
-    if rest_count:
+    if rest:
+        row_max_h = max(140, photo_max - hero_h - gap_after_row)
+        count = len(rest)
         gap = 12
-        avail = width - 2 * margin
-        cell_w = (avail - gap * (rest_count - 1)) // rest_count
-        for index in range(rest_count):
-            x0 = margin + index * (cell_w + gap)
-            sources.append((x0, y, x0 + cell_w, y + source_h))
-        y += source_h + source_gap
+        col_w = max(1, (content_w - gap * (count - 1)) // count)
+        fitted: List[Tuple[int, int]] = []
+        for pair in rest:
+            aspect = _image_aspect(pair.get("after"))
+            if aspect is None:
+                fitted.append((col_w, min(row_max_h, 200)))
+            else:
+                fitted.append(frame_size(aspect, col_w, row_max_h))
+        row_h = max(item[1] for item in fitted)
+        for index, (fw, fh) in enumerate(fitted):
+            col_x = margin + index * (col_w + gap)
+            x = col_x + max(0, (col_w - fw) // 2)
+            y_img = y + max(0, (row_h - fh) // 2)
+            sources.append((x, y_img, x + fw, y_img + fh))
+        y += row_h + gap_after_row
+
     outcome = (margin, y, width - margin, y + outcome_h)
-    y = outcome[3] + 12
-    bottom = footer[1] - 12
-    remain = max(0, bottom - y)
-    usable = max(0, remain - section_gaps - palette_h - roadmap_h)
-    changes_h = int(usable * 0.52)
-    plan_h = usable - changes_h
+    y = outcome[3] + gap_after_outcome
+    palette_top = bottom - roadmap_h - section_gap - palette_h
+    roadmap_top = bottom - roadmap_h
+    middle_bottom = palette_top - section_gap
+    middle = max(0, middle_bottom - y)
+    if middle <= section_gap + 2:
+        changes_h = 1
+        plan_h = 1
+    else:
+        usable = middle - section_gap
+        changes_h = max(1, int(usable * 0.48))
+        plan_h = max(1, usable - changes_h)
     changes = (margin, y, width - margin, y + changes_h)
-    y = changes[3] + 10
+    y = changes[3] + section_gap
     plan = (margin, y, width - margin, y + plan_h)
-    y = plan[3] + 10
-    palette = (margin, y, width - margin, y + palette_h)
-    y = palette[3] + 10
-    roadmap = (margin, y, width - margin, y + roadmap_h)
+    palette = (margin, palette_top, width - margin, palette_top + palette_h)
+    roadmap = (margin, roadmap_top, width - margin, roadmap_top + roadmap_h)
     return {
         "size": (width, height),
         "header": header,
