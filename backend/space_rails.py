@@ -24,9 +24,19 @@ NURSERY_SPACE_KEYS = frozenset(
 NURSERY_IMAGE_RAILS = (
     "NURSERY / KIDS ROOM LOCK: Preserve the real room, the furniture already in it, "
     "its proportions, windows, door, and any space theme already in the photo. "
+    "FIXED FEATURES LOCK: keep every wall switch, outlet, thermostat, and similar "
+    "built-in control in its exact location — including the wall switch beside the door. "
+    "Do not remove, cover, relocate, or invent a replacement for a wall switch. "
     "If a dresser is visible, keep that exact dresser. A six-drawer dresser keeps all "
     "six drawers. Do not replace drawers with baskets. Do not add large open cubbies, "
     "cube organizers, or a new bank of open shelves. Tidy loose items and textiles only. "
+    "Do not add a towel hanger, towel bar, or hanging towel near the door or on the "
+    "door wall — that addition is not part of the design. "
+    "FAMILY PHOTO WALL: when family photos or a photo collage are already on a wall, "
+    "keep that existing collage. Recompose or reposition it so its height feels "
+    "intentional relative to nearby shelves and space-themed artwork. Prefer one calm "
+    "cohesive grouping with negative space. Do not fill the wall with extra frames or "
+    "several small decorative pieces. "
     "Storage must make daily life simpler, not add a sorting chore. The room should "
     "still look meaningfully calmer and more intentional."
 )
@@ -43,7 +53,12 @@ CRIB_INTERIOR_RAILS = (
 SPACE_THEME_IMAGE_RAILS = (
     "SPACE THEME LOCK: this kids' room already has a space theme. Keep it and make it clearer. "
     "Artwork, textiles, and small decor are planets, the moon, rockets, and astronauts. "
-    "Do not use generic nursery animals, woodland creatures, farm animals, or unrelated cartoon art. "
+    "CRIB WALL: make Nicholas's space-explorer theme personal — a coordinated focal panel or "
+    "restrained composition of planets, the moon, rockets, and/or astronauts on the crib wall. "
+    "Reuse existing tactile sculptural space pieces from the photo where appropriate. "
+    "Do not use generic nursery animals, woodland creatures, farm animals, rabbits, or unrelated cartoon art. "
+    "Any 3D wall elements must look lightweight, securely mounted, and outside the crib's "
+    "reachable or pull-down zone. The crib sleep surface stays completely clear. "
     "Do not replace the space theme with a new theme. Do not repaint the walls to create it."
 )
 
@@ -54,7 +69,11 @@ Kids' room / nursery rules (only when space_type is a kids' room, nursery, or th
 - Do not add large open cubbies, Kallax-style cube storage, or a new wall of open shelves.
 - Storage must simplify the day (fewer decisions), not add a sorting or labeling chore.
 - Keep the real room, furniture, proportions, and any space theme already there. The refresh should still look meaningfully calmer.
-- If the room has a space theme, keep planets, the moon, rockets, and astronauts. Do not swap that art for generic nursery animals.
+- If the room has a space theme, keep planets, the moon, rockets, and astronauts. Do not swap that art for generic nursery animals or rabbits.
+- Preserve fixed features such as wall switches (including beside the door) in their exact locations.
+- Do not add a towel hanger or towel near the door.
+- Keep an existing family-photo collage calm: one intentional grouping with negative space; do not fill the wall with extra frames.
+- On the crib wall, prefer a personal space-explorer composition; 3D pieces stay lightweight, securely mounted, and outside crib reach.
 - In every view the crib interior stays clear: a fitted sheet and a wearable sleep sack only. No teddy bear, loose cushion, pillow, bumper, or loose blanket in the crib.
 - Shopping-list prices must add up to the budget figure you state. One kit total only.
 - The customer's budget band is their stated budget. Do not write a second kit price.
@@ -69,6 +88,10 @@ NURSERY_DO_NOT = (
     "Do not add large open cubbies or cube storage.",
     "Do not place a portable heater, wall heater, or electric blanket near the sleep area.",
     "Do not put a teddy bear, loose cushion, pillow, bumper, or loose blanket in the crib.",
+    "Do not remove, cover, or relocate the wall switch beside the door.",
+    "Do not add a towel hanger or hanging towel near the door.",
+    "Do not fill the family-photo wall with extra frames.",
+    "Do not use rabbit or generic animal art on the crib wall.",
     "Keep window cords out of reach.",
 )
 
@@ -107,6 +130,8 @@ NURSERY_SUPPORTING_VIEWS: Tuple[Tuple[str, str, str], ...] = (
         "DISTINCT ADDITIONAL AFTER VIEW. Focal point: the door and the clear walking path. "
         "Camera at the doorway, looking along the open floor. The crib and window are not the subject. "
         "Show circulation from the door into the room. Same door location, same wall paint, same furniture. "
+        "Keep the original wall switch beside the door in its exact location. "
+        "Do not add a towel hanger, towel bar, or hanging towel near the door. "
         "Do not invent a new floor plan.",
         "Door and circulation",
     ),
@@ -260,8 +285,14 @@ def nursery_draft_addon(lead: Dict[str, Any] | None) -> str:
         "No teddy bear, loose cushion, pillow, or loose blanket in the crib. "
         "Finish every sentence."
     ) + (
+        " Preserve wall switches in their exact locations (including beside the door). "
+        "Do not add a towel hanger near the door. "
+        "Keep any family-photo collage as one calm grouping with negative space. "
+    ) + (
         " This room has a space theme. Keep planets, the moon, rockets, and astronauts. "
-        "Do not replace that art with generic nursery animals."
+        "On the crib wall use a personal space-explorer composition; reuse existing tactile "
+        "space pieces; no rabbit or generic animal art. 3D decor stays securely mounted "
+        "outside crib reach."
         if is_space_theme(lead)
         else ""
     )
