@@ -145,11 +145,21 @@ def test_board_contains_each_of_four_portrait_views():
         assert 0.35 <= (x1 - x0) / (y1 - y0) <= 0.6
         assert _near(board.getpixel((x0 + 12, y0 + 12)), RED)
         assert _near(board.getpixel((x1 - 12, y0 + 12)), BLUE)
-    # Text sections stay on the sheet and below the photos.
-    assert layout["outcome"][1] >= layout["hero"][3]
-    assert layout["changes"][1] >= layout["outcome"][3]
-    assert layout["plan"][3] <= layout["palette"][1]
-    assert layout["roadmap"][3] <= height - 20
+    # Sections stay on the sheet. A portrait hero may sit beside the copy.
+    def _overlaps(a, b):
+        return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+    assert not _overlaps(layout["hero"], layout["outcome"])
+    assert all(not _overlaps(layout["hero"], box) for box in layout["sources"])
+    assert layout["changes"][1] >= layout["outcome"][1]
+    assert layout["plan"][1] >= layout["hero"][3] - 2
+    assert not _overlaps(layout["plan"], layout["hero"])
+    assert not _overlaps(layout["plan"], layout["palette"])
+    assert layout["palette"][3] <= height - 8
+    assert layout["roadmap"][3] <= height - 8
+    hero_h = layout["hero"][3] - layout["hero"][1]
+    # The previous sparse board capped this 1:2 hero near 417px tall.
+    assert hero_h >= 560
 
 
 def test_pdf_compare_panel_contains_a_portrait_room_photo():

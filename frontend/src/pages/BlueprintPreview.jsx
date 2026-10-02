@@ -21,20 +21,35 @@ function Section({ title, testId, children }) {
 }
 
 function RoomPlan({ plan }) {
-    const furniture = plan?.furniture || [];
+    const places = Array.isArray(plan?.places) ? plan.places : [];
     return (
         <Section title="Room flow" testId="blueprint-plan">
-            <div className="relative rounded-2xl border-2 border-[#1F3D2C] bg-[#f7f4ef] p-4">
-                <p className="text-center text-sm font-semibold text-[#C17B4A]">{plan?.window || "Window"}</p>
-                <p className="mt-3 text-sm font-semibold text-[#1F3D2C]">{plan?.door || "Door"}</p>
-                <div className="mt-3 grid gap-2">
-                    {furniture.map((label, index) => (
-                        <div key={`${label}-${index}`} className="rounded-xl bg-[#cfe2d7] px-3 py-3 text-base font-semibold text-[#1F3D2C]">
-                            {index + 1}. {label}
+            <div className="relative mx-auto aspect-[5/4] w-full overflow-hidden rounded-2xl border-[3px] border-[#1F3D2C] bg-[#faf6ef]">
+                <p className="absolute left-1/2 top-2 -translate-x-1/2 text-xs font-semibold tracking-wide text-[#C17B4A]">
+                    {plan?.window || "Window"}
+                </p>
+                <p className="absolute left-2 top-[22%] text-xs font-semibold text-[#1F3D2C]">{plan?.door || "Door"}</p>
+                {places.map((place) => {
+                    const box = Array.isArray(place.box) ? place.box : [0.08, 0.08, 0.32, 0.28];
+                    const [l, t, r, b] = box;
+                    return (
+                        <div
+                            key={place.id || place.label}
+                            className="absolute flex items-center justify-center rounded-xl border-2 border-[#1F3D2C] bg-[#cfe2d7] px-1 text-center text-xs font-semibold leading-tight text-[#1F3D2C]"
+                            style={{
+                                left: `${l * 100}%`,
+                                top: `${t * 100}%`,
+                                width: `${Math.max(8, (r - l) * 100)}%`,
+                                height: `${Math.max(8, (b - t) * 100)}%`,
+                            }}
+                        >
+                            {place.label}
                         </div>
-                    ))}
-                </div>
-                <p className="mt-3 text-base font-semibold text-[#C17B4A]">{plan?.circulation || "Clear path"}</p>
+                    );
+                })}
+                <p className="pointer-events-none absolute left-[18%] top-[46%] text-xs font-semibold text-[#C17B4A]">
+                    {plan?.circulation || "Clear path"}
+                </p>
             </div>
             {plan?.caption ? <p className="text-base text-[#6e655c]">{plan.caption}</p> : null}
         </Section>
@@ -83,13 +98,13 @@ function Gallery({ items, onOpen }) {
                         />
                     ) : (
                         <span className="px-6 text-center text-base text-[#1F3D2C]">
-                            {current.label} — after not ready. This angle is not filled from another photo.
+                            {current.caption || "This view is still coming"}. This angle is not filled from another photo.
                         </span>
                     )}
                 </button>
             </div>
             <p className="mt-3 text-center text-sm text-[#6e655c]">
-                {current.caption || current.label} · {index + 1} / {count}
+                {current.caption || "Organized view"} · {index + 1} / {count}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-3">
                 <button

@@ -1704,28 +1704,29 @@ def build_pdf(
         for index, pair in enumerate(source_pairs):
             if not isinstance(pair, dict):
                 continue
-            label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
-            after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
+            from image_board import customer_view_caption
+
+            ready = bool(coerce_image_bytes(pair.get("after")))
+            name = customer_view_caption(index, lead, missing=not ready)
             story.append(NextPageTemplate("compare"))
             story.append(PageBreak())
-            story.append(Paragraph(f"{_esc(label)} → {_esc(after_label)}", s["guideH"]))
-            if coerce_image_bytes(pair.get("after")):
+            story.append(Paragraph(_esc(name), s["guideH"]))
+            if ready:
                 reference = (
-                    f"This page is {label} beside {after_label}. "
-                    "The after was edited from this source photo, same camera. "
+                    "The organized view was edited from this photo, same camera. "
                     "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
                 )
             else:
                 reference = (
-                    f"{after_label} was not produced for {label}. "
-                    "This package is incomplete. "
+                    "This view is not ready. The package stays incomplete. "
                     "A missing angle is not replaced by another photo or by a crop."
                 )
             story.append(Paragraph(reference, s["guideBody"]))
             if any_missing and index == 0:
                 story.append(
                     Paragraph(
-                        "Required sources are still missing an approved after. This is not a final package.",
+                        "A required view is still missing its organized photo. "
+                        "That view is not filled from another angle.",
                         s["guideBody"],
                     )
                 )
@@ -1736,8 +1737,8 @@ def build_pdf(
                     coerce_image_bytes(pair.get("after")),
                     content_w,
                     compact=False,
-                    before_banner=f"{label} — YOUR PHOTO",
-                    after_banner=f"{after_label} — ORGANIZED VIEW",
+                    before_banner="Your photo",
+                    after_banner="Organized view",
                 )
             )
         doc.build(story)
