@@ -117,10 +117,13 @@ def test_board_shows_every_source_after_and_does_not_crop_fill_a_gap():
     assert "view_1" not in spec["detail_sources"]
     png = build_image_board(lead=LEAD, deliverable=PLAN, images=images)
     img = Image.open(io.BytesIO(png))
-    # Top-left cell is the blue after, not a crop pretending to be another angle.
+    # Hero is the first full-room after (blue), not a crop of another angle.
     assert img.getpixel((200, 280))[2] > 140
-    # A missing source stays a light empty panel, not the blue or red after.
-    missing = img.getpixel((200, 700))
+    assert img.getpixel((200, 700))[2] > 140
+    # Supporting column is the remaining full-room after (red), then an empty gap.
+    supporting = img.getpixel((1500, 300))
+    assert supporting[0] > 140 and supporting[1] < 80
+    missing = img.getpixel((1500, 700))
     assert missing[0] > 180 and missing[1] > 180
 
 
