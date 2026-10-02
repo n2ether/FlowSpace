@@ -250,3 +250,61 @@ async def send_blueprint(
         logger.warning("Admin notification failed (customer already sent): %s", e)
 
     return True, None
+
+
+def _review_sheet_html(customer_name: str, lead_id: str, *, incomplete: bool) -> str:
+    state = "incomplete" if incomplete else "ready for review"
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
+  <h2 style="color:#1F3D2C;">FlowSpace contact sheet — not final</h2>
+  <p>This is a review sheet for {customer_name} (lead <code>{lead_id}</code>). It is {state}.</p>
+  <p>Each row is one source photo and the after edited from that same camera. It is not the customer image board and not the companion PDF.</p>
+  <p>Do not send the final package until the sheet is approved. If a row has no after, the package stays incomplete.</p>
+</body>
+</html>
+"""
+
+
+async def send_contact_sheet(
+    *,
+    to_email: str,
+    customer_name: str,
+    lead_id: str,
+    png_bytes: bytes,
+    incomplete: bool = False,
+) -> Tuple[bool, Optional[str]]:
+    """Email the review contact sheet. Does not mark a package final."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        logger.error("RESEND_API_KEY not configured — skipping contact sheet email")
+        return False, "RESEND_API_KEY is not configured on this server"
+    recipient = (to_email or "").strip()
+    if not recipient:
+        return False, "Review recipient is missing"
+
+    resend.api_key = api_key
+    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
+    try:
+        await asyncio.to_thread(
+            resend.Emails.send,
+            {
+                "from": _from_email(),
+                "to": [recipient],
+                "subject": f"FlowSpace review sheet — not final ({customer_name or lead_id})",
+                "html": _review_sheet_html(customer_name or "the customer", lead_id, incomplete=incomplete),
+                "attachments": [
+                    {
+                        "filename": f"FlowSpace_Contact_Sheet_{safe_name}.png",
+                        "content": base64.b64encode(png_bytes).decode("utf-8"),
+                        "content_type": "image/png",
+                    }
+                ],
+            },
+        )
+        logger.info("Contact sheet sent to %s for lead %s (not final)", recipient, lead_id)
+        return True, None
+    except Exception as exc:
+        logger.exception("Contact sheet email failed: %s", exc)
+        return False, f"Resend contact sheet send failed: {exc}"

@@ -37,6 +37,8 @@ class TestShouldAutoStart:
     def test_blocks_in_flight_and_delivered(self):
         assert should_auto_start_automation("processing") is False
         assert should_auto_start_automation("delivered") is False
+        assert should_auto_start_automation("review") is False
+        assert should_auto_start_automation("incomplete") is False
 
     def test_allows_retryable(self):
         for status in ("new", "paid", "pdf_ready", "error", None):

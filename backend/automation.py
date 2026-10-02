@@ -3,27 +3,34 @@ FlowSpace Automation Pipeline
 
 Triggered after Stripe payment is confirmed.
 Full flow:
-  1. AI draft the design plan (Claude)
-  2. Generate room rendering (OpenAI Images)
-  3. Build the image board and the companion PDF
-  4. Email both to the customer (Resend)
+  1. AI draft the design plan (Claude), using the first room photo
+  2. OpenAI Images edit on each required room photo (same camera)
+  3. Build the image board, companion PDF, and a review contact sheet
+  4. Email the customer board + PDF only when the package is final
   5. Update lead status in MongoDB
+
+A lead with room photos stops at ``review`` until an admin sends the final
+package. If any required source fails QA or generation, the package is
+``incomplete`` and is not emailed as final. Leads with no room photo keep the
+single text-to-image path and may still email that result.
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
 from ai_image_generator import (
+    SAME_CAMERA_CONSTRAINT,
     WALL_RETRY_CONSTRAINT,
     generate_front_view,
     generate_supporting_views,
 )
+from contact_sheet import build_contact_sheet
 from email_service import send_blueprint
 from image_orientation import (
     UnreadableImage,
@@ -35,6 +42,12 @@ from image_board import build_image_board
 from pdf_generator import build_pdf
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from render_qa import RenderQAResult, review_organized_render
+from source_photos import (
+    classify_upload,
+    photo_filename,
+    photo_id_from_url,
+    photo_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +56,39 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-async def _fetch_gridfs_bytes(fs_bucket, url: Optional[str]) -> Optional[bytes]:
-    """Read a GridFS photo from a relative ``/api/uploads/photo/{id}`` URL."""
+async def _fetch_gridfs(fs_bucket, url: Optional[str]) -> tuple[Optional[bytes], str]:
+    """Read a GridFS photo and its stored filename."""
     if not url or "/api/uploads/photo/" not in str(url):
-        return None
+        return None, ""
     try:
         photo_id = str(url).rsplit("/", 1)[-1]
         try:
             oid = ObjectId(photo_id)
         except Exception:
             logger.warning("[automation] Invalid GridFS photo id in %s", url)
-            return None
+            return None, ""
         stream = await fs_bucket.open_download_stream(oid)
         data = await stream.read()
-        return data or None
+        filename = str(getattr(stream, "filename", "") or "")
+        return (data or None), filename
     except NoFile:
         logger.warning("[automation] GridFS file missing for %s", url)
-        return None
+        return None, ""
     except Exception as exc:
         logger.warning("[automation] Could not fetch image %s: %s", url, exc)
-        return None
+        return None, ""
+
+
+async def _fetch_gridfs_bytes(fs_bucket, url: Optional[str]) -> Optional[bytes]:
+    """Read a GridFS photo from a relative ``/api/uploads/photo/{id}`` URL."""
+    data, _filename = await _fetch_gridfs(fs_bucket, url)
+    return data
+
+
+def _replace_photo_url(photo: Any, new_url: str) -> Any:
+    if isinstance(photo, dict):
+        return {**photo, "url": new_url}
+    return new_url
 
 
 async def _persist_upright_original(
@@ -71,8 +97,9 @@ async def _persist_upright_original(
     db,
     fs_bucket,
     raw_bytes: bytes,
+    index: int = 0,
 ) -> tuple[bytes, Optional[str]]:
-    """Gravity-correct the stored original so retries share the same upright source."""
+    """Gravity-correct one stored original so retries share the same upright source."""
     try:
         upright, info = normalize_photo_bytes(raw_bytes)
     except UnreadableImage as exc:
@@ -85,7 +112,7 @@ async def _persist_upright_original(
     lead_id = lead.get("id", "unknown")
     try:
         file_id = await fs_bucket.upload_from_stream(
-            f"original_upright_{lead_id}.jpg",
+            f"original_upright_{lead_id}_{index}.jpg",
             as_gridfs_source(upright),
             metadata={
                 "content_type": "image/jpeg",
@@ -98,12 +125,10 @@ async def _persist_upright_original(
         )
         new_url = f"/api/uploads/photo/{file_id}"
         photos = list(lead.get("photos") or [])
-        if photos:
-            first = photos[0]
-            if isinstance(first, dict):
-                photos[0] = {**first, "url": new_url}
-            else:
-                photos[0] = new_url
+        if 0 <= index < len(photos):
+            photos[index] = _replace_photo_url(photos[index], new_url)
+        elif photos:
+            photos[0] = _replace_photo_url(photos[0], new_url)
         else:
             photos = [new_url]
         await db.leads.update_one(
@@ -112,14 +137,56 @@ async def _persist_upright_original(
         )
         lead["photos"] = photos
         logger.info(
-            "[automation] Persisted EXIF-corrected original for lead %s (orientation=%s)",
+            "[automation] Persisted EXIF-corrected original for lead %s photo %s (orientation=%s)",
             lead_id,
+            index,
             info.get("exif_orientation"),
         )
         return upright, new_url
     except Exception as exc:
         logger.warning("[automation] Could not persist upright original: %s", exc)
         return upright, None
+
+
+async def _load_lead_photos(lead: Dict[str, Any], db, fs_bucket) -> List[Dict[str, Any]]:
+    """Upright every upload and mark which ones are required room photos."""
+    loaded: List[Dict[str, Any]] = []
+    for index, photo in enumerate(list(lead.get("photos") or [])):
+        url = photo_url(photo)
+        raw, stored_name = await _fetch_gridfs(fs_bucket, url)
+        filename = stored_name or photo_filename(photo)
+        upright = raw
+        if raw:
+            upright, new_url = await _persist_upright_original(
+                lead=lead,
+                db=db,
+                fs_bucket=fs_bucket,
+                raw_bytes=raw,
+                index=index,
+            )
+            if new_url:
+                url = new_url
+                photo = _replace_photo_url(photo, new_url)
+        kind, reason = classify_upload(photo, upright, filename=filename)
+        loaded.append(
+            {
+                "index": index,
+                "url": url,
+                "photo_id": photo_id_from_url(url),
+                "filename": filename,
+                "bytes": upright,
+                "kind": kind,
+                "reason": reason,
+            }
+        )
+        logger.info(
+            "[automation] Upload %s classified %s (%s) id=%s",
+            index,
+            kind,
+            reason,
+            photo_id_from_url(url),
+        )
+    return loaded
 
 
 def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> Optional[bytes]:
@@ -143,6 +210,14 @@ def _qa_retry_extra(qa: RenderQAResult) -> str:
     return " ".join(bits)
 
 
+def _same_camera_extra(extra: str) -> str:
+    """Keep each source edit on that photo's camera. QA text is appended."""
+    extra = (extra or "").strip()
+    if SAME_CAMERA_CONSTRAINT in extra:
+        return extra
+    return f"{SAME_CAMERA_CONSTRAINT} {extra}".strip()
+
+
 async def _generate_organized_with_qa(
     *,
     lead: Dict[str, Any],
@@ -161,6 +236,7 @@ async def _generate_organized_with_qa(
             deliverable=plan,
             fs_bucket=fs_bucket,
             reference_photo_bytes=original_bytes,
+            extra_constraint=_same_camera_extra("") if original_bytes else "",
         )
         logger.info(
             "[automation] OpenAI organized render ready: %d bytes (%s)",
@@ -198,7 +274,7 @@ async def _generate_organized_with_qa(
             fs_bucket=fs_bucket,
             reference_photo_bytes=retry_ref,
             stronger_rails=True,
-            extra_constraint=extra,
+            extra_constraint=_same_camera_extra(extra) if original_bytes else extra,
         )
     except Exception as img_err:
         logger.warning("[automation] OpenAI image QA retry failed: %s", img_err)
@@ -232,6 +308,94 @@ async def _generate_organized_with_qa(
     return organized_bytes, image_mime, qa2
 
 
+async def _clear_stale_render_slots(db, lead_id: str) -> None:
+    """Drop previous afters and extra views so this run cannot mix them in."""
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {
+            "$set": {
+                "front_view_url": None,
+                "view_1_url": None,
+                "view_2_url": None,
+                "view_3_url": None,
+                "front_view_kind": None,
+                "source_afters": [],
+                "non_room_uploads": [],
+                "contact_sheet_url": None,
+                "package_status": None,
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
+        },
+        upsert=True,
+    )
+
+
+async def _store_bytes(
+    fs_bucket,
+    *,
+    filename: str,
+    data: bytes,
+    mime: str,
+    lead_id: str,
+    **meta: Any,
+) -> Optional[str]:
+    try:
+        file_id = await fs_bucket.upload_from_stream(
+            filename,
+            as_gridfs_source(data),
+            metadata={
+                "content_type": mime,
+                "uploaded_at": _iso(datetime.now(timezone.utc)),
+                "source": "automation",
+                "lead_id": lead_id,
+                **meta,
+            },
+        )
+        return f"/api/uploads/photo/{file_id}"
+    except Exception as exc:
+        logger.warning("[automation] GridFS upload failed for %s: %s", filename, exc)
+        return None
+
+
+def _public_source_after(outcome: Dict[str, Any]) -> Dict[str, Any]:
+    """Durable mapping. Image bytes stay in GridFS, not in the document."""
+    return {
+        "source_photo_id": outcome.get("source_photo_id") or "",
+        "source_url": outcome.get("source_url"),
+        "label": outcome.get("label"),
+        "after_label": outcome.get("after_label"),
+        "after_url": outcome.get("after_url"),
+        "status": outcome.get("status"),
+        "kind": "room",
+        "qa": outcome.get("qa") or {},
+    }
+
+
+async def _store_supporting_views(
+    *,
+    supporting: Dict[str, bytes],
+    db,
+    fs_bucket,
+    lead_id: str,
+) -> None:
+    for slot, blob in supporting.items():
+        ext = "jpg" if blob[:2] == b"\xff\xd8" else "png"
+        mime = "image/jpeg" if ext == "jpg" else "image/png"
+        url = await _store_bytes(
+            fs_bucket,
+            filename=f"ai_{slot}_{lead_id}.{ext}",
+            data=blob,
+            mime=mime,
+            lead_id=lead_id,
+            slot=slot,
+        )
+        if url:
+            await db.deliverables.update_one(
+                {"lead_id": lead_id},
+                {"$set": {f"{slot}_url": url}},
+            )
+
+
 async def run_automation(
     *,
     lead: Dict[str, Any],
@@ -241,7 +405,9 @@ async def run_automation(
     """
     Run the full automation pipeline for a lead.
 
-    Returns True if the pipeline completed and email was sent, False on failure.
+    Returns True when the customer email was sent, or when every required room
+    photo has an approved after and the package is waiting in review.
+    Returns False when a required source failed, or the pipeline raised.
     """
     lead_id = lead.get("id", "unknown")
     customer_name = lead.get("name", "there")
@@ -250,34 +416,29 @@ async def run_automation(
 
     logger.info("[automation] Starting pipeline for lead %s (%s)", lead_id, customer_email)
 
-    # Mark as processing
     await db.leads.update_one(
         {"id": lead_id},
         {"$set": {"status": "processing", "updated_at": _iso(datetime.now(timezone.utc))}},
     )
 
     try:
-        # ── Step 0: Gravity-correct the customer photo ───────────────────
-        # EXIF must be applied before Claude vision, OpenAI image edit, or the board.
-        original_bytes: Optional[bytes] = None
-        first_photo = (lead.get("photos") or [None])[0]
-        if first_photo:
-            photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
-            raw_original = await _fetch_gridfs_bytes(fs_bucket, photo_url)
-            if raw_original:
-                original_bytes, _persisted = await _persist_upright_original(
-                    lead=lead,
-                    db=db,
-                    fs_bucket=fs_bucket,
-                    raw_bytes=raw_original,
-                )
-                logger.info("[automation] Using customer's uploaded photo as render reference")
+        # ── Step 0: Upright uploads and separate room photos from screenshots ─
+        loaded = await _load_lead_photos(lead, db, fs_bucket)
+        room = [photo for photo in loaded if photo.get("kind") == "room"]
+        non_room = [photo for photo in loaded if photo.get("kind") != "room"]
+        draft_bytes = next((photo.get("bytes") for photo in room if photo.get("bytes")), None)
+        if room:
+            logger.info(
+                "[automation] %d required room photo(s), %d non-room upload(s)",
+                len(room),
+                len(non_room),
+            )
+        elif loaded:
+            logger.info("[automation] No room photos among %d upload(s); skipping per-source edits", len(loaded))
 
-        # ── Step 1: AI Draft (Claude + layers, with upright photo) ───────
+        # ── Step 1: AI Draft (Claude + layers, with the first room photo) ──
         logger.info("[automation] Step 1: AI drafting plan...")
-        plan = await draft_deliverable(lead, reference_photo_bytes=original_bytes)
-
-        # Save draft to deliverables collection
+        plan = await draft_deliverable(lead, reference_photo_bytes=draft_bytes)
         plan["lead_id"] = lead_id
         plan["updated_at"] = _iso(datetime.now(timezone.utc))
         await db.deliverables.update_one(
@@ -287,164 +448,280 @@ async def run_automation(
         )
         logger.info("[automation] Plan drafted and saved")
 
-        # ── Step 2: AI Image Generation + QA safety net ──────────────────
-        logger.info("[automation] Step 2: Generating room rendering via OpenAI...")
-        organized_bytes, image_mime, render_qa = await _generate_organized_with_qa(
-            lead=lead,
-            plan=plan,
-            fs_bucket=fs_bucket,
-            original_bytes=original_bytes,
-        )
-        await db.deliverables.update_one(
-            {"lead_id": lead_id},
-            {"$set": {"render_qa": render_qa.as_dict(), "updated_at": _iso(datetime.now(timezone.utc))}},
-        )
-        if render_qa.failed and not organized_bytes:
-            logger.error(
-                "[automation] Discarded broken organized after for lead %s: %s",
-                lead_id,
-                render_qa.reasons,
+        # Old view_* / after URLs must not survive into this run.
+        await _clear_stale_render_slots(db, lead_id)
+
+        supporting: Dict[str, bytes] = {}
+        outcomes: List[Dict[str, Any]] = []
+        organized_bytes: Optional[bytes] = None
+        original_bytes: Optional[bytes] = draft_bytes
+        multi = len(room) >= 2
+
+        if room:
+            logger.info("[automation] Step 2: Editing %d room photo(s) via OpenAI...", len(room))
+            for number, src in enumerate(room, start=1):
+                label = f"SOURCE_{number:02d}"
+                after_label = f"AFTER_{number:02d}"
+                if not src.get("bytes"):
+                    outcomes.append(
+                        {
+                            "source_photo_id": src.get("photo_id") or "",
+                            "source_url": src.get("url"),
+                            "label": label,
+                            "after_label": after_label,
+                            "after_url": None,
+                            "status": "failed",
+                            "qa": RenderQAResult(
+                                ok=False,
+                                reasons=["source photo could not be read"],
+                                error="missing_source",
+                            ).as_dict(),
+                            "after_bytes": None,
+                            "before_bytes": None,
+                        }
+                    )
+                    logger.warning("[automation] %s has no readable photo; source failed", label)
+                    continue
+                after_bytes, mime, qa = await _generate_organized_with_qa(
+                    lead=lead,
+                    plan=plan,
+                    fs_bucket=fs_bucket,
+                    original_bytes=src.get("bytes"),
+                )
+                after_url = None
+                if after_bytes:
+                    ext = "jpg" if "jpeg" in (mime or "") else "png"
+                    after_url = await _store_bytes(
+                        fs_bucket,
+                        filename=f"ai_{label.lower()}_{lead_id}.{ext}",
+                        data=after_bytes,
+                        mime=mime or "image/jpeg",
+                        lead_id=lead_id,
+                        slot=label.lower(),
+                        source_photo_id=src.get("photo_id") or "",
+                    )
+                approved = bool(after_bytes and after_url)
+                if after_bytes and not after_url:
+                    logger.warning(
+                        "[automation] %s render could not be stored; source stays incomplete",
+                        label,
+                    )
+                outcomes.append(
+                    {
+                        "source_photo_id": src.get("photo_id") or "",
+                        "source_url": src.get("url"),
+                        "label": label,
+                        "after_label": after_label,
+                        "after_url": after_url,
+                        "status": "approved" if approved else "failed",
+                        "qa": qa.as_dict(),
+                        "after_bytes": after_bytes if approved else None,
+                        "before_bytes": src.get("bytes"),
+                    }
+                )
+                logger.info(
+                    "[automation] %s → %s status=%s photo=%s",
+                    label,
+                    after_label,
+                    "approved" if approved else "failed",
+                    src.get("photo_id"),
+                )
+
+            failed = [item for item in outcomes if item["status"] != "approved"]
+            render_qa_source = failed[0] if failed else outcomes[-1]
+            summary_qa = dict(render_qa_source.get("qa") or {})
+            approved_afters = [item for item in outcomes if item.get("after_bytes")]
+            organized_bytes = approved_afters[0]["after_bytes"] if approved_afters else None
+            incomplete = bool(failed)
+
+            # Hero-derived extras are optional details for a single source.
+            # Several room photos already are the angles — do not invent more.
+            if len(room) == 1 and organized_bytes and not incomplete:
+                try:
+                    supporting = await generate_supporting_views(
+                        lead=lead,
+                        deliverable=plan,
+                        reference_photo_bytes=original_bytes,
+                        organized_bytes=organized_bytes,
+                    )
+                except Exception as view_err:
+                    logger.warning(
+                        "[automation] Optional detail views failed (soft-fail): %s",
+                        view_err,
+                    )
+                    supporting = {}
+                await _store_supporting_views(
+                    supporting=supporting,
+                    db=db,
+                    fs_bucket=fs_bucket,
+                    lead_id=lead_id,
+                )
+            elif multi:
+                logger.info(
+                    "[automation] Not inventing supporting angles from the hero (%d source photos)",
+                    len(room),
+                )
+                supporting = {}
+
+            source_pairs = [
+                {
+                    "label": item["label"],
+                    "after_label": item["after_label"],
+                    "source_photo_id": item["source_photo_id"],
+                    "status": item["status"],
+                    "before": item.get("before_bytes"),
+                    "after": item.get("after_bytes"),
+                }
+                for item in outcomes
+            ]
+            if organized_bytes:
+                hero_bytes, hero_kind = organized_bytes, "organized"
+            elif original_bytes:
+                hero_bytes, hero_kind = original_bytes, "original"
+            else:
+                hero_bytes, hero_kind = None, "placeholder"
+
+            customer_photos = [item["before_bytes"] for item in outcomes if item.get("before_bytes")]
+            images = assemble_pdf_images(
+                hero_bytes=hero_bytes,
+                hero_kind=hero_kind,
+                before=original_bytes,
+                after=organized_bytes,
+                view_1=None if multi else supporting.get("view_1"),
+                view_2=None if multi else supporting.get("view_2"),
+                view_3=None if multi else supporting.get("view_3"),
+                customer_photos=customer_photos,
+                source_pairs=source_pairs,
+                fetched={},
             )
-            # A previous regen may have left an organized GridFS URL. If we
-            # keep it, choose_hero / admin PDF will reuse the stale after.
+            package_status = "incomplete" if incomplete else "review"
+            contact_bytes = build_contact_sheet(
+                source_pairs,
+                customer_name=customer_name,
+                incomplete=incomplete,
+            )
+            contact_sheet_url = await _store_bytes(
+                fs_bucket,
+                filename=f"contact_sheet_{lead_id}.png",
+                data=contact_bytes,
+                mime="image/png",
+                lead_id=lead_id,
+                slot="contact_sheet",
+            )
+            front_view_url = approved_afters[0]["after_url"] if approved_afters else None
             await db.deliverables.update_one(
                 {"lead_id": lead_id},
                 {
                     "$set": {
-                        "front_view_url": None,
-                        "view_1_url": None,
-                        "view_2_url": None,
-                        "view_3_url": None,
-                        "front_view_kind": "original" if original_bytes else "placeholder",
+                        "render_qa": summary_qa,
+                        "source_afters": [_public_source_after(item) for item in outcomes],
+                        "non_room_uploads": [
+                            {
+                                "photo_id": photo.get("photo_id") or "",
+                                "url": photo.get("url"),
+                                "filename": photo.get("filename") or "",
+                                "reason": photo.get("reason") or "",
+                            }
+                            for photo in non_room
+                        ],
+                        "package_status": package_status,
+                        "contact_sheet_url": contact_sheet_url,
+                        "front_view_url": front_view_url,
+                        "front_view_kind": hero_kind,
                         "updated_at": _iso(datetime.now(timezone.utc)),
                     }
                 },
             )
-            logger.info(
-                "[automation] Cleared stale organized front_view_url after QA discard for lead %s",
-                lead_id,
+        else:
+            logger.info("[automation] Step 2: No room photo — text-to-image fallback...")
+            organized_bytes, _image_mime, render_qa = await _generate_organized_with_qa(
+                lead=lead,
+                plan=plan,
+                fs_bucket=fs_bucket,
+                original_bytes=None,
             )
-
-        # Persist the organized render when we have one. Upload failure must
-        # NOT discard in-memory bytes — those still go into the board and PDF.
-        # Extra views and the practical top-down are produced only after QA passes.
-        supporting: Dict[str, bytes] = {}
-        if organized_bytes:
-            try:
-                ext = "jpg" if "jpeg" in image_mime else "png"
-                file_id = await fs_bucket.upload_from_stream(
-                    f"ai_front_view_{lead_id}.{ext}",
-                    as_gridfs_source(organized_bytes),
-                    metadata={
-                        "content_type": image_mime,
-                        "uploaded_at": _iso(datetime.now(timezone.utc)),
-                        "source": "automation",
-                        "lead_id": lead_id,
-                    },
+            summary_qa = render_qa.as_dict()
+            if organized_bytes:
+                ext = "jpg" if organized_bytes[:2] == b"\xff\xd8" else "png"
+                mime = "image/jpeg" if ext == "jpg" else "image/png"
+                front_view_url = await _store_bytes(
+                    fs_bucket,
+                    filename=f"ai_front_view_{lead_id}.{ext}",
+                    data=organized_bytes,
+                    mime=mime,
+                    lead_id=lead_id,
+                    slot="front_view",
                 )
-                front_view_url = f"/api/uploads/photo/{file_id}"
-                await db.deliverables.update_one(
-                    {"lead_id": lead_id},
-                    {"$set": {"front_view_url": front_view_url, "front_view_kind": "organized"}},
-                )
-                logger.info("[automation] Rendering saved: %s", front_view_url)
-            except Exception as upload_err:
-                logger.warning(
-                    "[automation] GridFS upload failed; keeping in-memory organized render bytes: %s",
-                    upload_err,
-                )
-            try:
-                supporting = await generate_supporting_views(
-                    lead=lead,
-                    deliverable=plan,
-                    reference_photo_bytes=original_bytes,
-                    organized_bytes=organized_bytes,
-                )
-            except Exception as view_err:
-                logger.warning(
-                    "[automation] Supporting views failed (soft-fail, board keeps hero crops): %s",
-                    view_err,
-                )
-                supporting = {}
-            for slot, blob in supporting.items():
-                try:
-                    ext = "jpg" if blob[:2] == b"\xff\xd8" else "png"
-                    file_id = await fs_bucket.upload_from_stream(
-                        f"ai_{slot}_{lead_id}.{ext}",
-                        as_gridfs_source(blob),
-                        metadata={
-                            "content_type": "image/jpeg" if ext == "jpg" else "image/png",
-                            "uploaded_at": _iso(datetime.now(timezone.utc)),
-                            "source": "automation",
-                            "lead_id": lead_id,
-                            "slot": slot,
-                        },
-                    )
+                if front_view_url:
                     await db.deliverables.update_one(
                         {"lead_id": lead_id},
-                        {"$set": {f"{slot}_url": f"/api/uploads/photo/{file_id}"}},
+                        {"$set": {"front_view_url": front_view_url, "front_view_kind": "organized"}},
                     )
-                except Exception as upload_err:
+                try:
+                    supporting = await generate_supporting_views(
+                        lead=lead,
+                        deliverable=plan,
+                        reference_photo_bytes=None,
+                        organized_bytes=organized_bytes,
+                    )
+                except Exception as view_err:
                     logger.warning(
-                        "[automation] Could not store supporting view %s: %s",
-                        slot,
-                        upload_err,
+                        "[automation] Supporting views failed (soft-fail, board keeps hero crops): %s",
+                        view_err,
                     )
-
-        # ── Step 3: Image board + companion PDF ─────────────────────────
-        logger.info("[automation] Step 3: Building image board and companion PDF...")
-        deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
-
-        # This-run bytes only. A previous organized hero or extra view must not
-        # fill the board after QA discards the after.
-        customer_photos = []
-        for p in (lead.get("photos") or [])[:6]:
-            url = p if isinstance(p, str) else (p.get("url") if isinstance(p, dict) else None)
-            b = upright_bytes(await _fetch_gridfs_bytes(fs_bucket, url))
-            if b:
-                customer_photos.append(b)
-
-        # This-run organized render only. Never fall back to a previously stored
-        # organized image — QA-discarded afters used to leak that stale GridFS
-        # image into the hero even after discard.
-        hero_bytes, hero_kind = choose_hero(
-            organized_bytes=organized_bytes,
-            original_bytes=original_bytes,
-        )
-        if hero_kind == "original":
-            logger.warning(
-                "[automation] Organized render unavailable — using labeled customer original as interim hero (%d bytes)",
-                len(hero_bytes or b""),
+                    supporting = {}
+                await _store_supporting_views(
+                    supporting=supporting,
+                    db=db,
+                    fs_bucket=fs_bucket,
+                    lead_id=lead_id,
+                )
+            else:
+                await db.deliverables.update_one(
+                    {"lead_id": lead_id},
+                    {
+                        "$set": {
+                            "front_view_url": None,
+                            "view_1_url": None,
+                            "view_2_url": None,
+                            "view_3_url": None,
+                            "front_view_kind": "placeholder",
+                            "updated_at": _iso(datetime.now(timezone.utc)),
+                        }
+                    },
+                )
+            await db.deliverables.update_one(
+                {"lead_id": lead_id},
+                {"$set": {"render_qa": summary_qa, "updated_at": _iso(datetime.now(timezone.utc))}},
             )
-        elif hero_kind == "placeholder":
-            logger.warning("[automation] No organized render and no original photo — branded placeholder hero")
-        else:
-            logger.info("[automation] Hero source=organized (%d bytes)", len(hero_bytes or b""))
+            hero_bytes, hero_kind = choose_hero(
+                organized_bytes=organized_bytes,
+                original_bytes=None,
+            )
+            images = assemble_pdf_images(
+                hero_bytes=hero_bytes,
+                hero_kind=hero_kind,
+                before=None,
+                after=organized_bytes,
+                view_1=supporting.get("view_1"),
+                view_2=supporting.get("view_2"),
+                view_3=supporting.get("view_3"),
+                customer_photos=[],
+                fetched={},
+            )
 
-        images = assemble_pdf_images(
-            hero_bytes=hero_bytes,
-            hero_kind=hero_kind,
-            before=original_bytes,
-            after=organized_bytes,
-            view_1=supporting.get("view_1"),
-            view_2=supporting.get("view_2"),
-            view_3=supporting.get("view_3"),
-            customer_photos=customer_photos,
-            fetched={},
-        )
         logger.info(
-            "[automation] PDF images: hero=%s (%s bytes) before=%s after=%s views=%s/%s/%s floor_plan=%s photos=%d",
+            "[automation] PDF images: hero=%s before=%s after=%s pairs=%d views=%s/%s/%s",
             images.get("front_view_kind"),
-            len(images.get("front_view") or b""),
             "y" if images.get("before") else "n",
             "y" if images.get("after") else "n",
+            len(images.get("source_pairs") or []),
             "y" if images.get("view_1") else "n",
             "y" if images.get("view_2") else "n",
             "y" if images.get("view_3") else "n",
-            "y" if images.get("floor_plan") else "n",
-            len(customer_photos),
         )
 
+        deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
         pdf_bytes = build_pdf(lead=lead, deliverable=deliverable_doc, images=images)
         board_bytes = build_image_board(lead=lead, deliverable=deliverable_doc, images=images)
         logger.info(
@@ -453,7 +730,31 @@ async def run_automation(
             len(board_bytes),
         )
 
-        # ── Step 4: Send Email ───────────────────────────────────────────
+        if room:
+            # Review sheet is ready. The customer board and PDF stay unsent
+            # until an admin marks the package final. Incomplete never emails.
+            note = (
+                "Package incomplete: a required room photo failed generation or QA. Not emailed as final."
+                if package_status == "incomplete"
+                else "Contact sheet ready for review. Customer board and PDF are not final until approved."
+            )
+            await db.leads.update_one(
+                {"id": lead_id},
+                {
+                    "$set": {
+                        "status": package_status,
+                        "package_status": package_status,
+                        "email_sent": False,
+                        "email_error": None,
+                        "automation_error": None if package_status == "review" else note,
+                        "automation_note": note,
+                        "updated_at": _iso(datetime.now(timezone.utc)),
+                    }
+                },
+            )
+            logger.info("[automation] Lead %s package_status=%s (no final email)", lead_id, package_status)
+            return package_status == "review"
+
         logger.info("[automation] Step 4: Sending email to %s...", customer_email)
         sent, email_error = await send_blueprint(
             customer_name=customer_name,
@@ -463,8 +764,6 @@ async def run_automation(
             pdf_bytes=pdf_bytes,
             board_bytes=board_bytes,
         )
-
-        # ── Step 5: Update status ────────────────────────────────────────
         final_status = "delivered" if sent else "pdf_ready"
         update = {
             "status": final_status,

@@ -25,10 +25,15 @@ floor_plan : bytes | None
     Optional. Embed only a real plan the pipeline actually produced.
     Never invent a floor plan or measured drawing.
 view_1, view_2, view_3 : bytes | None
-    Additional after views from this run, only after the hero passes QA.
-    Unused slots stay empty — the board may crop the organized hero, and it
-    does not invent a new angle. Stale GridFS views are not reused after a
-    QA discard.
+    Optional labeled details from a single-photo hero, only after that hero
+    passes QA. They are not substitutes for a missing source angle. Multi-photo
+    leads leave these empty — each room photo has its own after in
+    ``source_pairs``. Stale GridFS views are not reused after a QA discard.
+source_pairs : list[dict]
+    One entry per required room photo: ``label`` (SOURCE_0N), ``after_label``
+    (AFTER_0N), ``before``, ``after``, ``status``, ``source_photo_id``.
+    When two or more pairs are present, the board and PDF show those afters
+    and do not fill a gap with a crop of another angle.
 customer_photos : list[bytes]
     Original customer uploads. The first upload is also ``before``. Extra
     photos are not given their own magazine pages.
@@ -128,6 +133,27 @@ def as_gridfs_source(data: bytes) -> io.BytesIO:
     return io.BytesIO(coerce_image_bytes(data) or b"")
 
 
+def coerce_source_pairs(src: Any) -> List[Dict[str, Any]]:
+    """Keep per-source before/after bytes. Drop anything that is not a pair dict."""
+    if not src or isinstance(src, (bytes, str)):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in src:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "label": str(item.get("label") or ""),
+                "after_label": str(item.get("after_label") or ""),
+                "source_photo_id": str(item.get("source_photo_id") or ""),
+                "status": str(item.get("status") or ""),
+                "before": coerce_image_bytes(item.get("before")),
+                "after": coerce_image_bytes(item.get("after")),
+            }
+        )
+    return out
+
+
 def assemble_pdf_images(
     *,
     hero_bytes: Optional[bytes] = None,
@@ -139,6 +165,7 @@ def assemble_pdf_images(
     before: Optional[bytes] = None,
     after: Optional[bytes] = None,
     customer_photos: Optional[Iterable[Any]] = None,
+    source_pairs: Optional[Sequence[Any]] = None,
     fetched: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -189,6 +216,9 @@ def assemble_pdf_images(
         "before": before_b,
         "after": after_b,
         "customer_photos": photos,
+        "source_pairs": coerce_source_pairs(
+            source_pairs if source_pairs is not None else fetched.get("source_pairs")
+        ),
     }
 
 
@@ -205,4 +235,5 @@ def normalize_pdf_images(images: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         before=images.get("before"),
         after=images.get("after"),
         customer_photos=images.get("customer_photos"),
+        source_pairs=images.get("source_pairs"),
     )

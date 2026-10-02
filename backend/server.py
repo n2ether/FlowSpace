@@ -22,6 +22,9 @@ import httpx
 from image_board import build_image_board
 from pdf_generator import build_pdf, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from contact_sheet import build_contact_sheet
+from email_service import send_blueprint, send_contact_sheet
+from source_photos import final_email_block_reason
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view
@@ -247,6 +250,10 @@ class Deliverable(BaseModel):
     view_1_url: Optional[str] = None
     view_2_url: Optional[str] = None
     view_3_url: Optional[str] = None
+    source_afters: List[Dict[str, Any]] = []
+    non_room_uploads: List[Dict[str, Any]] = []
+    package_status: Optional[str] = None
+    contact_sheet_url: Optional[str] = None
     include_customer_photos: bool = True
     blueprint_layers: Optional[Dict[str, Any]] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -483,7 +490,7 @@ async def _start_automation_for_lead(
         logging.info("Skipping automation for lead %s — status=%s", lead_id, lead.get("status"))
         return False
     if not force:
-        query["status"] = {"$nin": ["processing", "delivered"]}
+        query["status"] = {"$nin": ["processing", "delivered", "review", "incomplete"]}
     res = await db.leads.update_one(
         query,
         {"$set": {**extra_fields, "status": "processing", "updated_at": now}},
@@ -908,16 +915,43 @@ async def _blueprint_render_inputs(lead_id: str, request: Request):
         if first_photo:
             url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
             first_original = await _resolve_image_bytes(url, request)
+    source_pairs = []
+    for index, entry in enumerate(d.get("source_afters") or []):
+        if not isinstance(entry, dict):
+            continue
+        source_pairs.append(
+            {
+                "label": entry.get("label") or f"SOURCE_{index + 1:02d}",
+                "after_label": entry.get("after_label") or f"AFTER_{index + 1:02d}",
+                "source_photo_id": entry.get("source_photo_id") or "",
+                "status": entry.get("status") or "",
+                "before": await _resolve_image_bytes(entry.get("source_url"), request),
+                "after": await _resolve_image_bytes(entry.get("after_url"), request) if entry.get("after_url") else None,
+            }
+        )
+    # Several source afters are the angles. Stale hero crops must not fill a gap.
+    if len(source_pairs) >= 2:
+        fetched["view_1"] = None
+        fetched["view_2"] = None
+        fetched["view_3"] = None
+    organized = fetched.get("front_view")
+    before = first_original
+    if source_pairs:
+        before = source_pairs[0].get("before") or before
+        approved = next((pair.get("after") for pair in source_pairs if pair.get("after")), None)
+        if approved:
+            organized = approved
     hero_bytes, hero_kind = choose_hero(
-        organized_bytes=fetched.get("front_view"),
-        original_bytes=first_original,
+        organized_bytes=organized,
+        original_bytes=before,
     )
     images = assemble_pdf_images(
         hero_bytes=hero_bytes,
         hero_kind=hero_kind,
-        before=first_original,
-        after=fetched.get("front_view"),
+        before=before,
+        after=organized,
         customer_photos=customer_photos,
+        source_pairs=source_pairs,
         fetched=fetched,
     )
     return lead, d, images
@@ -974,6 +1008,114 @@ async def render_deliverable_package(lead_id: str, request: Request, _: bool = D
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{package_name}"', "Cache-Control": "no-store"},
     )
+
+
+async def _contact_sheet_png(lead_id: str, request: Request):
+    """Build the review sheet from persisted source → after mappings. Does not mark final."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+    _lead, _deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    pairs = images.get("source_pairs") or []
+    if not pairs:
+        raise HTTPException(
+            status_code=404,
+            detail="No per-source afters yet. Retry automation before requesting a contact sheet.",
+        )
+    incomplete = str(d.get("package_status") or "") == "incomplete" or any(not pair.get("after") for pair in pairs)
+    png = build_contact_sheet(
+        pairs,
+        customer_name=lead.get("name") or "",
+        incomplete=incomplete,
+    )
+    return lead, d, png, incomplete
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/contact-sheet")
+async def render_contact_sheet(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """SOURCE_01→AFTER_01 review sheet. Does not email the customer or mark the package final."""
+    lead, _deliverable, png, _incomplete = await _contact_sheet_png(lead_id, request)
+    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client"))
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'inline; filename="FlowSpace_Contact_Sheet_{safe_name}.png"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/contact-sheet/send")
+async def send_review_contact_sheet(
+    lead_id: str,
+    request: Request,
+    to: Optional[str] = None,
+    _: bool = Depends(require_admin),
+):
+    """Email the review sheet to Flo or Camila. The customer final package is not sent."""
+    lead, deliverable, png, incomplete = await _contact_sheet_png(lead_id, request)
+    recipient = (to or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
+    sent, error = await send_contact_sheet(
+        to_email=recipient,
+        customer_name=lead.get("name") or "",
+        lead_id=lead_id,
+        png_bytes=png,
+        incomplete=incomplete,
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail=error or "Contact sheet was not sent")
+    return {
+        "sent": True,
+        "final": False,
+        "package_status": deliverable.get("package_status"),
+        "to": recipient,
+    }
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/send-final")
+async def send_final_package(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Email the customer board and companion PDF. Refuses an incomplete package."""
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    reason = final_email_block_reason(deliverable)
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    sent, error = await send_blueprint(
+        customer_name=lead.get("name") or "there",
+        customer_email=lead.get("email") or "",
+        space_type=lead.get("space_type") or "space",
+        lead_id=lead_id,
+        pdf_bytes=pdf_bytes,
+        board_bytes=board_bytes,
+    )
+    now = _iso(datetime.now(timezone.utc))
+    if not sent:
+        await db.leads.update_one(
+            {"id": lead_id},
+            {"$set": {"status": "pdf_ready", "email_sent": False, "email_error": error, "updated_at": now}},
+        )
+        raise HTTPException(status_code=502, detail=error or "Final email was not sent")
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {"package_status": "final", "updated_at": now}},
+    )
+    await db.leads.update_one(
+        {"id": lead_id},
+        {
+            "$set": {
+                "status": "delivered",
+                "package_status": "final",
+                "email_sent": True,
+                "email_error": None,
+                "automation_error": None,
+                "updated_at": now,
+            }
+        },
+    )
+    return {"sent": True, "final": True, "package_status": "final", "status": "delivered"}
 
 
 # ──────────────────────────── Stripe ─────────────────────────────
