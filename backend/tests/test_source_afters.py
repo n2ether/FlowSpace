@@ -203,9 +203,16 @@ def test_pdf_prints_one_before_after_pair_per_source():
     pdf = build_pdf(lead=LEAD, deliverable=PLAN, images=images)
     reader = PdfReader(io.BytesIO(pdf))
     text = "\n".join((page.extract_text() or "") for page in reader.pages)
-    assert "SOURCE_01" in text and "AFTER_01" in text
-    assert "SOURCE_02" in text and "AFTER_02" in text
-    assert "same camera" in text.lower()
-    pair_pages = [page for page in reader.pages if "SOURCE_" in (page.extract_text() or "")]
+    flat = " ".join(text.split())
+    assert "Window and crib" in flat
+    assert "Crib wall" in flat
+    assert "same camera" in flat.lower()
+    assert "SOURCE_" not in flat
+    assert "AFTER_" not in flat
+    pair_pages = [
+        page
+        for page in reader.pages
+        if "same camera" in " ".join((page.extract_text() or "").split()).lower()
+    ]
     assert len(pair_pages) == 2
     assert all(len(page.images) >= 2 for page in pair_pages)

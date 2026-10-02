@@ -130,7 +130,7 @@ def test_sends_image_board_and_companion(monkeypatch):
             customer_name="Camila",
             customer_email="camila@example.com",
             space_type="kids_room",
-            lead_id="9dbedfba",
+            lead_id="9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
             pdf_bytes=PDF,
             board_bytes=b"\x89PNG\r\n\x1a\nboard",
         )
@@ -150,6 +150,10 @@ def test_sends_image_board_and_companion(monkeypatch):
     assert "draft" not in html
     assert "qa" not in html
     assert "lead" not in html
+    assert "SOURCE_" not in calls[0]["html"]
+    assert "AFTER_" not in calls[0]["html"]
+    assert "9dbedfba-81fc-45e0-b99d-36e0a1de01bb" not in calls[0]["html"]
+    assert "9dbedfba-81fc-45e0-b99d-36e0a1de01bb" in calls[1]["html"]
 
 
 def test_send_draft_package_not_final(monkeypatch):

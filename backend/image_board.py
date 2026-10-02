@@ -11,7 +11,10 @@ field of view, never cover-cropped into a wide fixed slot. When several room
 photos were required, the hero is the first complete after and each remaining
 after is a full frame. A missing after stays empty — it is not a crop of
 another angle. Detail crops are extras for a single organized photo only.
-The room plan is a zone diagram, not a measured drawing.
+The room plan is a top-down sketch of this room — window, door, and the
+furniture already in it — not a stack of bars and not a measured drawing.
+Customer pixels never carry SOURCE_/AFTER_ codes or a lead id. Those stay
+on the review contact sheet.
 """
 from __future__ import annotations
 
@@ -334,6 +337,58 @@ def _zone_labels(deliverable: Dict[str, Any]) -> List[str]:
     return labels[:4]
 
 
+_NURSERY_VIEW_NAMES = (
+    "Window and crib",
+    "Crib wall",
+    "Rocker",
+    "Dresser and door",
+)
+
+# Wall-anchored blocks. None spans the room, so the plan cannot become bars.
+_NURSERY_PLACES = (
+    {"id": "sleep", "label": "CRIB", "role": "SLEEP", "box": (0.34, 0.16, 0.86, 0.42)},
+    {"id": "change", "label": "DRESSER", "role": "CHANGE", "box": (0.68, 0.48, 0.94, 0.84)},
+    {"id": "comfort", "label": "ROCKER", "role": "COMFORT", "box": (0.05, 0.60, 0.32, 0.93)},
+    {"id": "play", "label": "PLAY", "role": "STORAGE", "box": (0.36, 0.70, 0.62, 0.93)},
+)
+_GENERIC_PLACE_BOXES = (
+    (0.42, 0.08, 0.92, 0.36),
+    (0.06, 0.44, 0.40, 0.78),
+    (0.50, 0.48, 0.92, 0.84),
+)
+
+
+def customer_view_caption(index: int, lead: Optional[Dict[str, Any]], *, missing: bool = False) -> str:
+    """Short customer label for one room photo. Never a SOURCE_/AFTER_ code."""
+    from space_rails import is_nursery_space
+
+    if is_nursery_space(lead) and 0 <= index < len(_NURSERY_VIEW_NAMES):
+        name = _NURSERY_VIEW_NAMES[index]
+    elif index <= 0:
+        name = "Organized view"
+    else:
+        name = f"Room view {index + 1}"
+    if missing:
+        return f"{name} — still coming"
+    return name
+
+
+def _board_phrase(title: str, body: str, words: int = 8) -> str:
+    """One short clause for the board. The full sentence stays in the guide."""
+    body = _clean(body)
+    title = _clean(title)
+    rest = body
+    if title and rest.lower().startswith(title.lower()):
+        rest = rest[len(title) :].lstrip(" .,;:—-")
+    picked = rest.split()[:words]
+    if not picked:
+        return ""
+    phrase = " ".join(picked)
+    if len(rest.split()) > words and not phrase.endswith((".", "!", "?")):
+        phrase = phrase.rstrip(".,;:") + "."
+    return phrase
+
+
 def _role_label(title: str) -> str:
     low = title.lower()
     if any(key in low for key in ("sleep", "crib")):
@@ -354,24 +409,35 @@ def _role_label(title: str) -> str:
     return " ".join(words[:2]).upper() or "ZONE"
 
 
-def topdown_layout(deliverable: Dict[str, Any], *, organized: bool, space_theme: bool = False) -> Dict[str, Any]:
-    """Practical approximate plan: furniture, window, door, circulation.
+def topdown_layout(
+    deliverable: Dict[str, Any],
+    *,
+    organized: bool,
+    space_theme: bool = False,
+    lead: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Approximate top-down plan of this room: window, door, furniture, path.
 
-    This is a diagram, not a generated floor-plan photo and not a measured drawing.
+    A diagram, not a generated floor-plan photo and not a measured drawing.
+    Places sit on walls. They are not full-width bars.
     """
-    zones = _zone_labels(deliverable)
-    furniture: List[str] = []
-    circulation = "CLEAR PATH"
-    for zone in zones:
-        label = _role_label(zone)
-        if label == "CLEAR PATH":
-            circulation = "CLEAR PATH"
-            continue
-        if label not in furniture:
-            furniture.append(label)
-    if not furniture:
-        furniture = ["DAILY", "STORAGE", "COMFORT"]
-    furniture = furniture[:3]
+    from space_rails import is_nursery_space
+
+    if is_nursery_space(lead):
+        places = [dict(place) for place in _NURSERY_PLACES]
+    else:
+        roles: List[str] = []
+        for zone in _zone_labels(deliverable):
+            label = _role_label(zone)
+            if label == "CLEAR PATH" or label in roles:
+                continue
+            roles.append(label)
+        if not roles:
+            roles = ["DAILY", "STORAGE", "COMFORT"]
+        places = []
+        for role, box in zip(roles[:3], _GENERIC_PLACE_BOXES):
+            places.append({"id": role.lower().replace(" ", "-"), "label": role, "role": role, "box": box})
+    furniture = [str(place["role"]) for place in places]
     if space_theme:
         caption = (
             "Approximate plan. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
@@ -388,11 +454,65 @@ def topdown_layout(deliverable: Dict[str, Any], *, organized: bool, space_theme:
         "window": "WINDOW",
         "door": "DOOR",
         "furniture": furniture,
-        "circulation": circulation,
+        "places": places,
+        "circulation": "CLEAR PATH",
         "approximate": True,
         "matches_after": organized,
         "space_theme": space_theme,
+        "drawing": "room",
         "caption": caption,
+        "board_caption": "Approximate plan of this room. Not measured.",
+    }
+
+
+def plan_geometry(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Dict[str, Any]:
+    """Room rectangle and wall-anchored furniture inside a plan card.
+
+    The room stays recognizably a room (not a thin strip). Each furniture
+    block stays under 58% of the room width, so it cannot become a bar.
+    """
+    x0, y0, x1, y1 = box
+    title_h = 42
+    caption_h = 28
+    inner_l, inner_t = x0 + 14, y0 + title_h
+    inner_r, inner_b = x1 - 14, max(inner_t + 48, y1 - caption_h)
+    iw = max(48, inner_r - inner_l)
+    ih = max(48, inner_b - inner_t)
+    room_w, room_h = iw, ih
+    # A very wide card stays a room, not a ribbon. A tall card stays a room too.
+    if room_w > int(room_h * 2.35):
+        room_w = int(room_h * 2.35)
+    if room_h > int(room_w * 1.2):
+        room_h = int(room_w * 1.2)
+    rx0 = inner_l + max(0, (iw - room_w) // 2)
+    ry0 = inner_t + max(0, (ih - room_h) // 2)
+    room = (rx0, ry0, rx0 + room_w, ry0 + room_h)
+    placed = []
+    for place in topdown.get("places") or []:
+        l, t, r, b = place.get("box") or (0.08, 0.08, 0.32, 0.28)
+        rect = (
+            rx0 + int(l * room_w),
+            ry0 + int(t * room_h),
+            rx0 + int(r * room_w),
+            ry0 + int(b * room_h),
+        )
+        max_w = max(24, int(room_w * 0.56))
+        if rect[2] - rect[0] > max_w:
+            rect = (rect[0], rect[1], rect[0] + max_w, rect[3])
+        if rect[2] <= rect[0] + 8:
+            rect = (rect[0], rect[1], rect[0] + 12, rect[3])
+        if rect[3] <= rect[1] + 8:
+            rect = (rect[0], rect[1], rect[2], rect[1] + 12)
+        placed.append({**place, "rect": rect})
+    win_w = max(36, room_w // 3)
+    win_x = rx0 + (room_w - win_w) // 2
+    door_h = max(28, room_h // 5)
+    door_y = ry0 + int(room_h * 0.22)
+    return {
+        "room": room,
+        "window": (win_x, ry0, win_x + win_w, ry0 + max(10, room_h // 18)),
+        "door": (rx0, door_y, rx0 + max(16, room_w // 28), door_y + door_h),
+        "places": placed,
     }
 
 
@@ -420,31 +540,21 @@ def _source_pairs(images: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [pair for pair in pairs if isinstance(pair, dict)]
 
 
-def _pair_slots(pairs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _pair_slots(pairs: Sequence[Dict[str, Any]], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """One slot per required source. A missing after stays empty — never a crop."""
     slots = []
     for index, pair in enumerate(pairs):
         label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
-        after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
         img = _open_image(pair.get("after"))
-        if img is None:
-            slots.append(
-                {
-                    "image": None,
-                    "caption": f"{label} — after missing",
-                    "source": label,
-                    "missing": True,
-                }
-            )
-        else:
-            slots.append(
-                {
-                    "image": img,
-                    "caption": f"{label} → {after_label}",
-                    "source": label,
-                    "missing": False,
-                }
-            )
+        missing = img is None
+        slots.append(
+            {
+                "image": img,
+                "caption": customer_view_caption(index, lead, missing=missing),
+                "source": label,
+                "missing": missing,
+            }
+        )
     return slots
 
 
@@ -458,7 +568,7 @@ def _detail_slots(images: Dict[str, Any], lead: Optional[Dict[str, Any]] = None)
 
     pairs = _source_pairs(images)
     if len(pairs) >= 2:
-        return _pair_slots(pairs)
+        return _pair_slots(pairs, lead)
 
     after = _open_image(images.get("after"))
     real = []
@@ -484,10 +594,10 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     before = coerce_image_bytes(images.get("before"))
     if after:
         hero_mode = "before_after" if before else "after_only"
-        hero_label = "AFTER — ORGANIZED VIEW"
+        hero_label = "Organized view"
     elif before or kind == "original":
         hero_mode = "before_only"
-        hero_label = "YOUR PHOTO — ORGANIZED VIEW UNAVAILABLE"
+        hero_label = "Your photo"
     else:
         hero_mode = "placeholder"
         hero_label = HERO_PLACEHOLDER_LABEL
@@ -500,9 +610,11 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     themed = is_space_theme(lead, doc)
     if multi:
         complete = all(not slot.get("missing") for slot in details) and bool(details)
-        # One strong hero (AFTER_01) + remaining full-room afters as supporting views.
+        # One strong hero plus the remaining full-room afters. Customer captions
+        # name the view. SOURCE_/AFTER_ codes stay off the board.
         hero_mode = "hero_plus_afters"
-        hero_label = "AFTER — ORGANIZED VIEW" if complete else "INCOMPLETE — MISSING SOURCE AFTER"
+        hero_missing = bool(details and details[0].get("missing"))
+        hero_label = customer_view_caption(0, lead, missing=hero_missing)
         claims_organized = complete
     else:
         claims_organized = hero_mode in {"before_after", "after_only"}
@@ -533,6 +645,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
             doc,
             organized=claims_organized,
             space_theme=themed,
+            lead=lead,
         ),
         "safety": safety_guidance(lead, doc),
         "placeholder_label": HERO_PLACEHOLDER_LABEL,
@@ -546,11 +659,11 @@ def _text(draw: ImageDraw.ImageDraw, xy, text, font, fill, max_width=None) -> No
 
 def _caption_bar(base: Image.Image, box: Tuple[int, int, int, int], label: str) -> None:
     x0, y0, x1, y1 = box
-    bar_h = 34 if (y1 - y0) >= 80 else 22
+    bar_h = 30 if (y1 - y0) >= 140 else 22
     overlay = Image.new("RGBA", (max(1, x1 - x0), bar_h), (31, 61, 44, 214))
     base.paste(overlay, (x0, y1 - bar_h), overlay)
     draw = ImageDraw.Draw(base)
-    size = 14 if bar_h >= 30 else 11
+    size = 16 if bar_h >= 30 else 12
     font = _font("sans-bold", size)
     while size > 9 and draw.textlength(label, font=font) > max(8, x1 - x0 - 16):
         size -= 1
@@ -590,13 +703,12 @@ def _draw_source_grid(base: Image.Image, box: Tuple[int, int, int, int], pairs: 
         cx = x0 + col * (cell_w + gap)
         cy = y0 + row * (cell_h + gap)
         cell = (cx, cy, cx + cell_w, cy + cell_h)
-        label = str(pair.get("label") or f"SOURCE_{index + 1:02d}")
-        after_label = str(pair.get("after_label") or f"AFTER_{index + 1:02d}")
         after = _open_image(pair.get("after"))
+        label = customer_view_caption(index, None, missing=after is None)
         if after is None:
-            _empty_panel(base, cell, f"{label} — after missing", "Not filled from another angle.")
+            _empty_panel(base, cell, label, "Not filled from another angle.")
         else:
-            _photo_or_empty(base, after, cell, f"{label} → {after_label}", f"{label} — after missing", "Not filled from another angle.")
+            _photo_or_empty(base, after, cell, label, label, "Not filled from another angle.")
 
 
 def _photo_or_empty(base: Image.Image, img: Optional[Image.Image], box: Tuple[int, int, int, int], label: str, empty_title: str, empty_sub: str) -> None:
@@ -625,54 +737,78 @@ def _draw_space_glyphs(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
     draw.polygon([(x + 50, y), (x + 58, y + 16), (x + 42, y + 16)], fill=CLAY)
 
 
+def _section_kicker(draw: ImageDraw.ImageDraw, x: int, y: int, number: str, title: str) -> None:
+    """Numbered section mark, matching the editorial reference."""
+    draw.ellipse((x, y, x + 26, y + 26), outline=CLAY, width=2)
+    num_font = _font("sans-bold", 13)
+    nw = draw.textlength(number, font=num_font)
+    draw.text((x + (26 - nw) / 2, y + 4), number, font=num_font, fill=CLAY)
+    draw.text((x + 34, y + 3), title, font=_font("sans-bold", 16), fill=GREEN)
+
+
 def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> None:
-    """Furniture, window, door, and a clear path. Approximate — no dimensions."""
+    """Top-down sketch of this room. Furniture sits on walls. No dimensions."""
     draw = ImageDraw.Draw(base)
     _rounded(draw, box, 16, CARD)
     x0, y0, x1, y1 = box
-    draw.text((x0 + 16, y0 + 12), "ROOM PLAN", font=_font("sans-bold", 14), fill=GREEN)
-    draw.text((x0 + 118, y0 + 14), "APPROXIMATE", font=_font("sans", 12), fill=MUTED)
+    _section_kicker(draw, x0 + 14, y0 + 10, "4", "ROOM PLAN")
+    approx = "APPROXIMATE"
+    afont = _font("sans", 13)
+    aw = draw.textlength(approx, font=afont)
+    draw.text((x1 - 16 - aw, y0 + 14), approx, font=afont, fill=MUTED)
     if topdown.get("space_theme"):
-        draw.text((x0 + 220, y0 + 14), "PLANETS · MOON · ROCKETS", font=_font("sans-bold", 11), fill=CLAY)
-        _draw_space_glyphs(draw, x1 - 78, y0 + 10)
-    room = (x0 + 18, y0 + 46, x1 - 18, y1 - 52)
-    draw.rounded_rectangle(room, radius=10, outline=GREEN, width=3)
-    rx0, ry0, rx1, ry1 = room
-    win_w = max(80, (rx1 - rx0) // 3)
-    win_x = rx0 + (rx1 - rx0 - win_w) // 2
-    draw.line((win_x, ry0 + 10, win_x + win_w, ry0 + 10), fill=CLAY, width=4)
-    draw.line((win_x, ry0 + 16, win_x + win_w, ry0 + 16), fill=CLAY, width=2)
+        _draw_space_glyphs(draw, x1 - 16 - aw - 78, y0 + 12)
+    geo = plan_geometry(box, topdown)
+    rx0, ry0, rx1, ry1 = geo["room"]
+    floor = (250, 246, 239)
+    draw.rounded_rectangle(geo["room"], radius=12, fill=floor, outline=GREEN, width=4)
+    wx0, _wy0, wx1, _wy1 = geo["window"]
+    draw.rectangle((wx0, ry0 - 1, wx1, ry0 + 7), fill=floor)
+    draw.line((wx0, ry0 - 8, wx1, ry0 - 8), fill=CLAY, width=4)
+    draw.line((wx0, ry0 - 2, wx1, ry0 - 2), fill=CLAY, width=2)
+    rw, rh = max(1, rx1 - rx0), max(1, ry1 - ry0)
+
+    def _at(fx: float, fy: float) -> Tuple[int, int]:
+        return (rx0 + int(fx * rw), ry0 + int(fy * rh))
+
     window_label = str(topdown.get("window") or "WINDOW")
-    draw.text((win_x + 8, ry0 + 22), window_label, font=_font("sans-bold", 12), fill=CLAY)
-    door_top = ry0 + 36
-    draw.rectangle((rx0 - 1, door_top, rx0 + 10, door_top + 54), fill=PAPER)
-    draw.text((rx0 + 16, door_top + 16), str(topdown.get("door") or "DOOR"), font=_font("sans-bold", 12), fill=GREEN)
-    furniture = list(topdown.get("furniture") or [])[:3]
-    slots = (
-        (0.40, 0.18, 0.92, 0.48),
-        (0.08, 0.46, 0.48, 0.78),
-        (0.52, 0.50, 0.92, 0.80),
-    )
-    rw, rh = rx1 - rx0, ry1 - ry0
-    for label, (l, t, r, b) in zip(furniture, slots):
-        pill = (rx0 + int(l * rw), ry0 + int(t * rh), rx0 + int(r * rw), ry0 + int(b * rh))
-        draw.rounded_rectangle(pill, radius=10, fill=GREEN_SOFT, outline=GREEN, width=2)
-        lines = _fit(draw, str(label), _font("sans-bold", 14), pill[2] - pill[0] - 16, 2)
-        ty = pill[1] + max(8, (pill[3] - pill[1] - 16 * len(lines)) // 2)
-        for line in lines:
-            draw.text((pill[0] + 10, ty), line, font=_font("sans-bold", 14), fill=GREEN)
-            ty += 16
+    wfont = _font("sans-bold", 15)
+    ww = draw.textlength(window_label, font=wfont)
+    label_y = ry0 - 22 if ry0 - 22 > y0 + 34 else ry0 + 8
+    draw.text(((wx0 + wx1 - ww) / 2, label_y), window_label, font=wfont, fill=CLAY)
+    dx0, dy0, _dx1, dy1 = geo["door"]
+    draw.rectangle((rx0 - 1, dy0, rx0 + 10, dy1), fill=floor)
+    swing = max(26, dy1 - dy0)
+    draw.arc((rx0 - 2, dy0, rx0 + swing, dy0 + swing), start=280, end=10, fill=GREEN, width=2)
+    door_at = _at(0.08, 0.30)
+    draw.text(door_at, str(topdown.get("door") or "DOOR"), font=_font("sans-bold", 14), fill=GREEN)
+    for place in geo["places"]:
+        rect = place["rect"]
+        draw.rounded_rectangle(rect, radius=8, fill=GREEN_SOFT, outline=GREEN, width=2)
+        label = str(place.get("label") or place.get("role") or "")
+        pw = max(12, rect[2] - rect[0] - 10)
+        ph = max(12, rect[3] - rect[1] - 8)
+        size = 18 if ph >= 48 else 14
+        font = _font("sans-bold", size)
+        while size > 11 and draw.textlength(label, font=font) > pw:
+            size -= 1
+            font = _font("sans-bold", size)
+        tw = draw.textlength(label, font=font)
+        tx = rect[0] + max(4, (rect[2] - rect[0] - tw) / 2)
+        ty = rect[1] + max(2, (rect[3] - rect[1] - size) / 2)
+        draw.text((tx, ty), label, font=font, fill=GREEN)
     path = str(topdown.get("circulation") or "CLEAR PATH")
-    arrow_y = ry1 - 22
-    draw.line((rx0 + 24, arrow_y, rx1 - 28, arrow_y), fill=CLAY, width=3)
-    draw.polygon([(rx1 - 22, arrow_y), (rx1 - 34, arrow_y - 6), (rx1 - 34, arrow_y + 6)], fill=CLAY)
-    draw.text((rx0 + 28, arrow_y - 18), path, font=_font("sans-bold", 11), fill=CLAY)
-    caption = str(topdown.get("caption") or "Not a measured floor plan.")
-    fitted = _fit(draw, caption, _font("sans", 11), x1 - x0 - 32, 2)
-    ty = y1 - 36
-    for line in fitted:
-        draw.text((x0 + 16, ty), line, font=_font("sans", 11), fill=MUTED)
-        ty += 13
+    # Open floor, from the door toward the crib. A stroke, not a filled bar.
+    # Stop in the open floor, short of the crib, so the arrow is not a bar and not on the furniture.
+    start, mid, end = _at(0.10, 0.38), _at(0.30, 0.50), _at(0.46, 0.46)
+    draw.line([start, mid, end], fill=CLAY, width=3)
+    draw.polygon([(end[0] + 9, end[1] - 2), (end[0] - 2, end[1] - 8), (end[0] - 2, end[1] + 4)], fill=CLAY)
+    path_at = _at(0.12, 0.44)
+    draw.text(path_at, path, font=_font("sans-bold", 13), fill=CLAY)
+    caption = str(topdown.get("board_caption") or "Approximate plan of this room. Not measured.")
+    fitted = _fit(draw, caption, _font("sans", 15), x1 - x0 - 32, 1)
+    if fitted:
+        draw.text((x0 + 16, y1 - 28), fitted[0], font=_font("sans", 15), fill=MUTED)
 
 
 def _draw_moves(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves: Sequence[Dict[str, str]]) -> None:
@@ -745,87 +881,158 @@ def _fitted_frame(aspect: Optional[float], max_w: int, max_h: int, *, missing_h:
     return frame_size(aspect, max_w, max_h)
 
 
+def _source_aspects(pairs: Sequence[Dict[str, Any]]) -> List[float]:
+    aspects = []
+    for pair in pairs:
+        aspect = _image_aspect(pair.get("after"))
+        aspects.append(aspect if aspect and aspect > 0 else 0.75)
+    return aspects
+
+
+def _row_height_for_width(aspects: Sequence[float], width: int, gap: int, max_h: int) -> int:
+    """Tallest row whose natural-ratio frames still fit in ``width``."""
+    if not aspects or max_h <= 0 or width <= 0:
+        return max(1, min(40, max_h))
+    lo, hi = 1, max(1, max_h)
+    best = 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        total = gap * (len(aspects) - 1)
+        for aspect in aspects:
+            fw, _fh = frame_size(aspect, width, mid)
+            total += fw
+        if total <= width:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _place_row(
+    pairs: Sequence[Dict[str, Any]],
+    x: int,
+    y: int,
+    width: int,
+    max_h: int,
+) -> Tuple[List[Tuple[int, int, int, int]], int]:
+    """Pack each photo at its own aspect. Frames are not stretched into a wide cell."""
+    if not pairs:
+        return [], 0
+    gap = 12
+    aspects = _source_aspects(pairs)
+    row_h = _row_height_for_width(aspects, width, gap, max_h)
+    frames = [frame_size(aspect, width, row_h) for aspect in aspects]
+    used = sum(item[0] for item in frames) + gap * (len(frames) - 1)
+    cursor = x + max(0, (width - used) // 2)
+    boxes: List[Tuple[int, int, int, int]] = []
+    for fw, fh in frames:
+        top = y + max(0, (row_h - fh) // 2)
+        boxes.append((cursor, top, cursor + fw, top + fh))
+        cursor += fw + gap
+    return boxes, row_h
+
+
 def board_layout(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Shared portrait boxes so the PNG and the tests describe the same frames.
 
-    Room-photo frames follow each file's aspect ratio inside a max box. They
-    are not stretched into one wide hero or a row of short 16:9 cells.
+    Room-photo frames follow each file's aspect ratio. A landscape hero is
+    given enough height to reach across the page. A portrait hero sits beside
+    the other views and the short copy, so the side of the photo is not blank.
+    Nothing is cover-cropped.
     """
     width, height = PORTRAIT_W, PORTRAIT_H
-    margin = 40
+    margin = 36
     content_w = width - 2 * margin
     images = spec.get("images") or {}
     pairs = _source_pairs(images)
     multi = spec.get("hero_mode") == "hero_plus_afters" and len(pairs) >= 2
     rest = pairs[1:] if multi else []
-
-    header = (margin, 24, width - margin, 214)
-    footer = (margin, height - 54, width - margin, height - 22)
-    y_start = header[3] + 16
-    bottom = footer[1] - 12
-    outcome_h = 86
-    palette_h = 128
-    roadmap_h = 168
-    changes_min = 156
-    plan_min = 176
-    gap_after_hero = 14
-    gap_after_row = 14 if rest else 0
-    gap_after_outcome = 12
-    section_gap = 10
-    text_fixed = outcome_h + changes_min + plan_min + palette_h + roadmap_h
-    gaps = gap_after_hero + gap_after_row + gap_after_outcome + section_gap * 3
-    photo_max = max(240, bottom - y_start - text_fixed - gaps)
-
-    if rest:
-        hero_max_h = min(int(photo_max * 0.58), photo_max - gap_after_row - 150)
-        hero_max_h = max(200, hero_max_h)
+    aspect = _hero_aspect(spec)
+    header = (margin, 16, width - margin, 204)
+    footer = (margin, height - 40, width - margin, height - 16)
+    y_start = header[3] + 12
+    bottom = footer[1] - 8
+    editorial = bool(multi and aspect is not None and aspect < 1.0)
+    if editorial:
+        laid = _layout_editorial(
+            width, height, margin, content_w, y_start, bottom, rest, aspect, header, footer
+        )
     else:
-        hero_max_h = photo_max
-    hero_w, hero_h = _fitted_frame(_hero_aspect(spec), content_w, hero_max_h, missing_h=420)
+        laid = _layout_stacked(
+            width, height, margin, content_w, y_start, bottom, rest, aspect, header, footer
+        )
+    laid["multi"] = multi
+    laid["editorial"] = editorial
+    return laid
+
+
+def _stack_bands(
+    x0: int,
+    y0: int,
+    x1: int,
+    height: int,
+    weights: Sequence[float],
+) -> Tuple[Tuple[int, int, int, int], ...]:
+    """Split a column into boxes. A zero weight yields an empty box."""
+    gap = 8
+    active = [(i, w) for i, w in enumerate(weights) if w > 0]
+    if not active or height <= 0 or x1 <= x0:
+        return tuple((x0, y0, x1, y0) for _ in weights)
+    gaps = gap * (len(active) - 1)
+    usable = max(len(active), height - gaps)
+    total = sum(w for _i, w in active) or 1.0
+    boxes: List[Tuple[int, int, int, int]] = [(x0, y0, x1, y0) for _ in weights]
+    y = y0
+    for n, (index, weight) in enumerate(active):
+        if n == len(active) - 1:
+            band_h = max(1, y0 + height - y)
+        else:
+            band_h = max(1, int(usable * (weight / total)))
+        boxes[index] = (x0, y, x1, y + band_h)
+        y += band_h + gap
+    return tuple(boxes)
+
+
+def _layout_stacked(
+    width: int,
+    height: int,
+    margin: int,
+    content_w: int,
+    y_start: int,
+    bottom: int,
+    rest: Sequence[Dict[str, Any]],
+    aspect: Optional[float],
+    header: Tuple[int, int, int, int],
+    footer: Tuple[int, int, int, int],
+) -> Dict[str, Any]:
+    gap = 12
+    # The lower band is a room sketch beside the short copy, so the plan
+    # has enough height to read as this room.
+    lower_min = 500
+    photo_budget = max(280, bottom - y_start - lower_min)
+    support_max = 0
+    if rest:
+        support_max = max(140, min(240, int(photo_budget * 0.28)))
+    hero_max_h = max(200, photo_budget - (support_max + gap if rest else 0))
+    if aspect and aspect > 0:
+        fill_h = int(round(content_w / float(aspect)))
+        hero_max_h = min(hero_max_h, fill_h)
+    hero_w, hero_h = _fitted_frame(aspect, content_w, hero_max_h, missing_h=min(480, hero_max_h))
     y = y_start
     hx = margin + max(0, (content_w - hero_w) // 2)
     hero = (hx, y, hx + hero_w, y + hero_h)
-    y = hero[3] + gap_after_hero
-
+    y = hero[3] + gap
     sources: List[Tuple[int, int, int, int]] = []
     if rest:
-        row_max_h = max(140, photo_max - hero_h - gap_after_row)
-        count = len(rest)
-        gap = 12
-        col_w = max(1, (content_w - gap * (count - 1)) // count)
-        fitted: List[Tuple[int, int]] = []
-        for pair in rest:
-            aspect = _image_aspect(pair.get("after"))
-            if aspect is None:
-                fitted.append((col_w, min(row_max_h, 200)))
-            else:
-                fitted.append(frame_size(aspect, col_w, row_max_h))
-        row_h = max(item[1] for item in fitted)
-        for index, (fw, fh) in enumerate(fitted):
-            col_x = margin + index * (col_w + gap)
-            x = col_x + max(0, (col_w - fw) // 2)
-            y_img = y + max(0, (row_h - fh) // 2)
-            sources.append((x, y_img, x + fw, y_img + fh))
-        y += row_h + gap_after_row
-
-    outcome = (margin, y, width - margin, y + outcome_h)
-    y = outcome[3] + gap_after_outcome
-    palette_top = bottom - roadmap_h - section_gap - palette_h
-    roadmap_top = bottom - roadmap_h
-    middle_bottom = palette_top - section_gap
-    middle = max(0, middle_bottom - y)
-    if middle <= section_gap + 2:
-        changes_h = 1
-        plan_h = 1
-    else:
-        usable = middle - section_gap
-        changes_h = max(1, int(usable * 0.48))
-        plan_h = max(1, usable - changes_h)
-    changes = (margin, y, width - margin, y + changes_h)
-    y = changes[3] + section_gap
-    plan = (margin, y, width - margin, y + plan_h)
-    palette = (margin, palette_top, width - margin, palette_top + palette_h)
-    roadmap = (margin, roadmap_top, width - margin, roadmap_top + roadmap_h)
+        sources, used = _place_row(rest, margin, y, content_w, max(120, photo_budget - hero_h - gap))
+        y += used + gap
+    lower_h = max(160, bottom - y)
+    plan_w = max(280, int(content_w * 0.62))
+    plan = (margin, y, margin + plan_w, y + lower_h)
+    right_x = plan[2] + 10
+    bands = _stack_bands(right_x, y, width - margin, lower_h, (0.24, 0.32, 0.22, 0.22))
+    outcome, changes, palette, roadmap = bands
     return {
         "size": (width, height),
         "header": header,
@@ -837,7 +1044,64 @@ def board_layout(spec: Dict[str, Any]) -> Dict[str, Any]:
         "palette": palette,
         "roadmap": roadmap,
         "footer": footer,
-        "multi": multi,
+    }
+
+
+def _layout_editorial(
+    width: int,
+    height: int,
+    margin: int,
+    content_w: int,
+    y_start: int,
+    bottom: int,
+    rest: Sequence[Dict[str, Any]],
+    aspect: Optional[float],
+    header: Tuple[int, int, int, int],
+    footer: Tuple[int, int, int, int],
+) -> Dict[str, Any]:
+    """Portrait hero on the left. Copy and the other photos fill the right.
+
+    The plan sits under the photos, tall enough to read as the room, with
+    palette and roadmap beside it.
+    """
+    gap = 12
+    lower_h = 520
+    photo_h = max(480, bottom - y_start - lower_h - gap)
+    hero_max_w = max(240, int(content_w * 0.48))
+    hero_w, hero_h = _fitted_frame(aspect, hero_max_w, photo_h, missing_h=photo_h)
+    hero = (margin, y_start, margin + hero_w, y_start + hero_h)
+    right_x = hero[2] + 12
+    right_w = max(140, width - margin - right_x)
+    photo_bottom = y_start + max(photo_h, hero_h)
+    row_max = max(100, photo_bottom - y_start - 220)
+    sources, _used = _place_row(rest, right_x, y_start, right_w, row_max)
+    if sources:
+        shift = photo_bottom - max(box[3] for box in sources)
+        if shift > 0:
+            sources = [(a, b + shift, c, d + shift) for a, b, c, d in sources]
+        row_top = min(box[1] for box in sources) - 8
+    else:
+        row_top = photo_bottom
+    outcome_h = min(118, max(88, int((row_top - y_start) * 0.28)))
+    outcome = (right_x, y_start, right_x + right_w, y_start + outcome_h)
+    changes = (right_x, outcome[3] + 8, right_x + right_w, max(outcome[3] + 48, row_top))
+    y = photo_bottom + gap
+    lower_h = max(180, bottom - y)
+    plan_w = max(300, int(content_w * 0.64))
+    plan = (margin, y, margin + plan_w, y + lower_h)
+    bands = _stack_bands(plan[2] + 10, y, width - margin, lower_h, (0.0, 0.0, 0.48, 0.52))
+    _skip_a, _skip_b, palette, roadmap = bands
+    return {
+        "size": (width, height),
+        "header": header,
+        "hero": hero,
+        "sources": sources,
+        "outcome": outcome,
+        "changes": changes,
+        "plan": plan,
+        "palette": palette,
+        "roadmap": roadmap,
+        "footer": footer,
     }
 
 
@@ -854,101 +1118,112 @@ def _draw_header(base: Image.Image, spec: Dict[str, Any], box: Tuple[int, int, i
     draw.text((badge[0] + 22, badge[1] + 28), "BLUEPRINT", font=_font("serif-bold", 22), fill=WHITE)
     draw.text((badge[0] + 22, badge[1] + 54), "Your space. Your flow. Your life.", font=_font("sans", 11), fill=(207, 226, 215))
 
-    headline = _fit(draw, spec.get("headline") or "Your space", _font("serif-bold", 34), x1 - x0, 1)
-    draw.text((x0, y0 + 92), headline[0] if headline else "Your space", font=_font("serif-bold", 34), fill=INK)
-    brand = _fit(draw, BRAND_LINE, _font("sans-bold", 12), x1 - x0, 1)
-    draw.text((x0, y0 + 138), brand[0] if brand else BRAND_LINE, font=_font("sans-bold", 12), fill=GREEN)
+    headline = _fit(draw, spec.get("headline") or "Your space", _font("serif-bold", 38), x1 - x0, 1)
+    draw.text((x0, y0 + 88), headline[0] if headline else "Your space", font=_font("serif-bold", 38), fill=INK)
+    brand = _fit(draw, BRAND_LINE, _font("sans-bold", 14), x1 - x0, 1)
+    draw.text((x0, y0 + 134), brand[0] if brand else BRAND_LINE, font=_font("sans-bold", 14), fill=GREEN)
     personal = spec.get("tagline") or ""
     if spec.get("theme_line"):
         personal = f"{personal}   {spec['theme_line']}".strip()
-    fitted = _fit(draw, personal, _font("sans", 13), x1 - x0, 1)
+    fitted = _fit(draw, personal, _font("sans", 15), x1 - x0, 1)
     if fitted:
-        draw.text((x0, y0 + 160), fitted[0], font=_font("sans", 13), fill=MUTED)
+        draw.text((x0, y0 + 156), fitted[0], font=_font("sans", 15), fill=MUTED)
     draw.rectangle((x0, y0 + 184, x1, y0 + 187), fill=GREEN)
 
 
 def _draw_outcome(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], text: str) -> None:
     _rounded(draw, box, 16, CARD)
-    x0, y0, x1, _y1 = box
-    draw.text((x0 + 16, y0 + 12), "THE OUTCOME", font=_font("sans-bold", 12), fill=GREEN)
-    lines = _fit(draw, text, _font("serif-italic", 18), x1 - x0 - 32, 2)
-    y = y0 + 36
+    x0, y0, x1, y1 = box
+    _section_kicker(draw, x0 + 12, y0 + 10, "2", "THE OUTCOME")
+    size = 24 if (y1 - y0) >= 108 else 20
+    lines = _fit(draw, text, _font("serif-italic", size), x1 - x0 - 28, 2)
+    y = y0 + 42
     for line in lines:
-        draw.text((x0 + 16, y), line, font=_font("serif-italic", 18), fill=INK)
-        y += 24
+        if y > y1 - size:
+            break
+        draw.text((x0 + 14, y), line, font=_font("serif-italic", size), fill=INK)
+        y += size + 4
 
 
 def _draw_changes(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves: Sequence[Dict[str, str]]) -> None:
     x0, y0, x1, y1 = box
     _rounded(draw, box, 16, CARD)
-    draw.text((x0 + 16, y0 + 12), "WHAT'S NEW & WHY", font=_font("sans-bold", 13), fill=GREEN)
+    _section_kicker(draw, x0 + 12, y0 + 10, "3", "WHAT'S NEW & WHY")
     items = list(moves)[:4]
     if not items:
-        draw.text((x0 + 16, y0 + 40), "The companion guide lists each change.", font=_font("sans", 14), fill=MUTED)
+        draw.text((x0 + 14, y0 + 44), "The companion guide lists each change.", font=_font("sans", 16), fill=MUTED)
         return
     cols = 2 if len(items) > 1 else 1
     rows = (len(items) + cols - 1) // cols
-    gap_x, gap_y = 10, 8
-    inner_top = y0 + 40
-    cell_w = (x1 - x0 - 32 - gap_x * (cols - 1)) // cols
-    cell_h = max(36, (y1 - inner_top - 12 - gap_y * (rows - 1)) // rows)
+    gap_x, gap_y = 8, 6
+    inner_top = y0 + 44
+    cell_w = max(40, (x1 - x0 - 24 - gap_x * (cols - 1)) // cols)
+    cell_h = max(28, (y1 - inner_top - 10 - gap_y * (rows - 1)) // rows)
+    title_size = 16 if cell_h >= 48 else 14
+    body_size = 15 if cell_h >= 64 else 13
+    body_lines = 2 if cell_h >= 72 else 1
     for index, move in enumerate(items):
         col, row = index % cols, index // cols
-        cx = x0 + 16 + col * (cell_w + gap_x)
+        cx = x0 + 12 + col * (cell_w + gap_x)
         cy = inner_top + row * (cell_h + gap_y)
-        draw.ellipse((cx, cy + 2, cx + 22, cy + 24), outline=CLAY, width=2)
-        num = str(index + 1)
-        draw.text((cx + 7, cy + 4), num, font=_font("sans-bold", 12), fill=CLAY)
-        title = _fit(draw, move.get("title") or "", _font("sans-bold", 12), cell_w - 32, 1)
-        draw.text((cx + 28, cy + 4), title[0] if title else "", font=_font("sans-bold", 12), fill=INK)
-        body = _fit(draw, move.get("body") or "", _font("sans", 13), cell_w - 8, 3)
-        ty = cy + 30
+        draw.ellipse((cx, cy + 1, cx + 22, cy + 23), outline=CLAY, width=2)
+        draw.text((cx + 6, cy + 3), str(index + 1), font=_font("sans-bold", 12), fill=CLAY)
+        title = _fit(draw, move.get("title") or "", _font("sans-bold", title_size), cell_w - 30, 1)
+        draw.text((cx + 28, cy + 2), title[0] if title else "", font=_font("sans-bold", title_size), fill=INK)
+        phrase = _board_phrase(move.get("title") or "", move.get("body") or "")
+        body = _fit(draw, phrase, _font("sans", body_size), cell_w - 4, body_lines)
+        ty = cy + title_size + 10
         for line in body:
             if ty > cy + cell_h - 4:
                 break
-            draw.text((cx, ty), line, font=_font("sans", 13), fill=MUTED)
-            ty += 16
+            draw.text((cx, ty), line, font=_font("sans", body_size), fill=MUTED)
+            ty += body_size + 2
 
 
 def _draw_palette_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], swatches: Sequence[Dict[str, str]]) -> None:
     _rounded(draw, box, 16, CARD)
-    x0, y0, x1, _y1 = box
-    draw.text((x0 + 16, y0 + 12), "PALETTE & MATERIALS", font=_font("sans-bold", 13), fill=GREEN)
+    x0, y0, x1, y1 = box
+    _section_kicker(draw, x0 + 12, y0 + 8, "5", "PALETTE")
     items = list(swatches)[:5] or [{"name": "Cream", "hex": "#F3EEE6", "note": "Textile"}]
-    gap = 10
-    avail = x1 - x0 - 32
-    sw = min(96, (avail - gap * (len(items) - 1)) // max(1, len(items)))
+    gap = 8
+    avail = x1 - x0 - 24
+    sw = max(28, min(72, (avail - gap * (len(items) - 1)) // max(1, len(items))))
+    y = y0 + 40
+    swatch_h = max(22, min(36, y1 - y - 36))
     for index, swatch in enumerate(items):
-        x = x0 + 16 + index * (sw + gap)
-        y = y0 + 40
-        draw.rounded_rectangle((x, y, x + sw, y + 36), radius=8, fill=_rgb(swatch.get("hex") or "#C5C8C6"))
-        name = _fit(draw, swatch.get("name") or "", _font("sans", 12), sw + 4, 1)
-        draw.text((x, y + 42), name[0] if name else "", font=_font("sans", 12), fill=INK)
-        note = _fit(draw, swatch.get("note") or "", _font("sans", 11), sw + 4, 1)
-        if note:
-            draw.text((x, y + 58), note[0], font=_font("sans", 11), fill=MUTED)
+        x = x0 + 12 + index * (sw + gap)
+        draw.rounded_rectangle((x, y, x + sw, y + swatch_h), radius=8, fill=_rgb(swatch.get("hex") or "#C5C8C6"))
+        if y + swatch_h + 16 <= y1 - 2:
+            name = _fit(draw, swatch.get("name") or "", _font("sans", 13), sw + 6, 1)
+            draw.text((x, y + swatch_h + 4), name[0] if name else "", font=_font("sans", 13), fill=INK)
 
 
 def _draw_roadmap_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], steps: Sequence[Dict[str, str]], budget: str) -> None:
     _rounded(draw, box, 16, CARD)
-    x0, y0, x1, _y1 = box
-    draw.text((x0 + 16, y0 + 12), "ROADMAP", font=_font("sans-bold", 13), fill=GREEN)
+    x0, y0, x1, y1 = box
+    _section_kicker(draw, x0 + 12, y0 + 8, "6", "ROADMAP")
     label = budget or "—"
     font = _font("serif-bold", 22)
     tw = draw.textlength(label, font=font)
-    draw.text((x1 - 16 - tw, y0 + 8), label, font=font, fill=GREEN)
-    hint = _font("sans", 11)
-    hw = draw.textlength("LIST TOTAL", font=hint)
-    draw.text((x1 - 16 - hw, y0 + 32), "LIST TOTAL", font=hint, fill=MUTED)
-    for index, step in enumerate(list(steps)[:3]):
-        y = y0 + 52 + index * 34
-        draw.ellipse((x0 + 16, y, x0 + 36, y + 20), fill=GREEN)
-        draw.text((x0 + 22, y + 2), str(index + 1), font=_font("sans-bold", 12), fill=WHITE)
-        title = step.get("title") or ""
-        draw.text((x0 + 44, y), title, font=_font("sans-bold", 13), fill=INK)
-        body = _fit(draw, step.get("body") or "", _font("sans", 12), x1 - x0 - 70, 1)
-        if body:
-            draw.text((x0 + 44, y + 16), body[0], font=_font("sans", 12), fill=MUTED)
+    draw.text((x1 - 12 - tw, y0 + 8), label, font=font, fill=GREEN)
+    steps = list(steps)[:3]
+    if not steps:
+        return
+    top = y0 + 42
+    step_h = max(18, (y1 - top - 8) // len(steps))
+    for index, step in enumerate(steps):
+        y = top + index * step_h
+        if y > y1 - 16:
+            break
+        draw.ellipse((x0 + 12, y, x0 + 30, y + 18), fill=GREEN)
+        draw.text((x0 + 17, y + 1), str(index + 1), font=_font("sans-bold", 11), fill=WHITE)
+        title = _fit(draw, step.get("title") or "", _font("sans-bold", 14), x1 - x0 - 52, 1)
+        draw.text((x0 + 36, y), title[0] if title else "", font=_font("sans-bold", 14), fill=INK)
+        if step_h >= 34:
+            phrase = _board_phrase(step.get("title") or "", step.get("body") or "", words=6)
+            body = _fit(draw, phrase, _font("sans", 13), x1 - x0 - 52, 1)
+            if body and y + 16 <= y1 - 4:
+                draw.text((x0 + 36, y + 16), body[0], font=_font("sans", 13), fill=MUTED)
 
 
 def _draw_board_footer(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int]) -> None:
@@ -970,10 +1245,10 @@ def _hero_frame(spec: Dict[str, Any], images: Dict[str, Any]) -> Tuple[Optional[
     if spec["hero_mode"] == "hero_plus_afters":
         pair = pairs[0] if pairs else {}
         hero_after = _open_image(pair.get("after")) if pair else after
-        label = f"{pair.get('label') or 'SOURCE_01'} → {pair.get('after_label') or 'AFTER_01'}"
-        return hero_after, label, "Organized view unavailable", "We do not invent an after photo."
+        label = spec.get("hero_label") or "Organized view"
+        return hero_after, label, "This view is still coming", "We do not invent an after photo."
     if spec["hero_mode"] in {"before_after", "after_only"}:
-        return after, "AFTER — ORGANIZED VIEW", "Organized view unavailable", "We do not invent an after photo."
+        return after, spec.get("hero_label") or "Organized view", "Organized view unavailable", "We do not invent an after photo."
     if spec["hero_mode"] == "before_only":
         return before, spec["hero_label"], spec["hero_label"], "We do not invent an organized after."
     return None, spec.get("hero_label") or HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB
@@ -998,6 +1273,51 @@ def _empty_thumb(base: Image.Image, box: Tuple[int, int, int, int], title: str, 
         y += 16
 
 
+def customer_board_text(spec: Dict[str, Any]) -> str:
+    """Every customer-facing string the portrait board is allowed to paint.
+
+    Review codes (SOURCE_, AFTER_, lead ids) are not part of this text.
+    """
+    parts: List[str] = [
+        spec.get("headline") or "",
+        spec.get("plan_title") or "",
+        spec.get("subtitle") or "",
+        spec.get("tagline") or "",
+        spec.get("theme_line") or "",
+        spec.get("hero_label") or "",
+        BRAND_LINE,
+        "FlowSpace",
+        "Clear space. Create flow. Live better.",
+        "Your space. Your flow. Your life.",
+        "The outcome",
+        "What's new & why",
+        "Room plan",
+        "Palette",
+        "Roadmap",
+        "Companion guide: steps, shopping, safety, climate, and the weekly reset.",
+        spec.get("budget_display") or "",
+    ]
+    for caption in spec.get("detail_captions") or []:
+        parts.append(str(caption))
+    for move in spec.get("moves") or []:
+        parts.append(str(move.get("title") or ""))
+        parts.append(_board_phrase(str(move.get("title") or ""), str(move.get("body") or "")))
+    topdown = spec.get("topdown") or {}
+    parts.append(str(topdown.get("board_caption") or ""))
+    parts.append(str(topdown.get("window") or ""))
+    parts.append(str(topdown.get("door") or ""))
+    parts.append(str(topdown.get("circulation") or ""))
+    for place in topdown.get("places") or []:
+        parts.append(str(place.get("label") or ""))
+    for swatch in spec.get("palette") or []:
+        parts.append(str(swatch.get("name") or ""))
+        parts.append(str(swatch.get("note") or ""))
+    for step in spec.get("roadmap") or []:
+        parts.append(str(step.get("title") or ""))
+        parts.append(_board_phrase(str(step.get("title") or ""), str(step.get("body") or ""), words=6))
+    return "\n".join(parts)
+
+
 def build_image_board(
     *,
     lead: Dict[str, Any],
@@ -1018,14 +1338,13 @@ def build_image_board(
         _photo_or_empty(base, hero_img, layout["hero"], hero_label, empty_title, empty_sub)
 
     pairs = _source_pairs(spec["images"])
-    for box, pair in zip(layout["sources"], pairs[1:]):
-        label = str(pair.get("label") or "SOURCE")
-        after_label = str(pair.get("after_label") or "AFTER")
+    for index, (box, pair) in enumerate(zip(layout["sources"], pairs[1:]), start=1):
         after = _open_image(pair.get("after"))
+        label = customer_view_caption(index, lead, missing=after is None)
         if after is None:
-            _empty_thumb(base, box, f"{label} — after missing", "Not filled from another angle.")
+            _empty_thumb(base, box, label, "Not filled from another angle.")
         else:
-            _photo_or_empty(base, after, box, f"{label} → {after_label}", f"{label} — after missing", "Not filled from another angle.")
+            _photo_or_empty(base, after, box, label, label, "Not filled from another angle.")
 
     draw = ImageDraw.Draw(base)
     _draw_outcome(draw, layout["outcome"], spec.get("subtitle") or "")

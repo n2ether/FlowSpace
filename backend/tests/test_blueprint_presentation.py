@@ -36,6 +36,9 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert view["review"]["final"] is False
     assert len(view["gallery"]) == 2
     assert view["gallery"][0]["missing"] is False
+    assert view["gallery"][0]["caption"] == "Window and crib"
+    assert "SOURCE_" not in view["gallery"][0]["caption"]
+    assert "AFTER_" not in view["gallery"][1]["caption"]
     assert view["gallery"][1]["missing"] is True
     assert view["gallery"][1]["after_url"] is None
     assert view["safety"]

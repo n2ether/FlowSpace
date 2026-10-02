@@ -701,8 +701,11 @@ def test_each_room_photo_is_edited_and_a_failure_blocks_final_email(monkeypatch)
         (page.extract_text() or "")
         for page in PdfReader(io.BytesIO(build_pdf(lead=lead, deliverable=PLAN, images=images))).pages
     )
-    assert "SOURCE_01" in text and "AFTER_04" in text
-    assert "SOURCE_03" in text
+    assert "Organized view" in text
+    assert "Room view 4" in text
+    assert "Room view 3" in text
+    assert "SOURCE_" not in text
+    assert "AFTER_" not in text
     assert "not replaced" in text.lower() or "incomplete" in text.lower()
 
 

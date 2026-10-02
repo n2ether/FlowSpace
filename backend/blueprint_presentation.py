@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from blueprint_consistency import companion_sections
-from image_board import _clean, board_spec
+from image_board import _clean, board_spec, customer_view_caption
 
 
 def _shopping(deliverable: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -42,7 +42,11 @@ def _shopping(deliverable: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _gallery(spec: Dict[str, Any], media: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def _gallery(
+    spec: Dict[str, Any],
+    media: Optional[List[Dict[str, Any]]],
+    lead: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     images = spec.get("images") or {}
     pairs = images.get("source_pairs") or []
     media = media or []
@@ -63,7 +67,7 @@ def _gallery(spec: Dict[str, Any], media: Optional[List[Dict[str, Any]]]) -> Lis
                     "before_url": extra.get("before_url") or extra.get("source_url") or None,
                     "after_url": after_url,
                     "missing": not has_after,
-                    "caption": f"{label} → {after_label}",
+                    "caption": customer_view_caption(index, lead, missing=not has_after),
                 }
             )
         return gallery
@@ -79,7 +83,7 @@ def _gallery(spec: Dict[str, Any], media: Optional[List[Dict[str, Any]]]) -> Lis
                 "before_url": (media[0].get("before_url") if media and isinstance(media[0], dict) else None),
                 "after_url": hero_url,
                 "missing": not (spec.get("claims_organized_photo") or hero_url),
-                "caption": spec.get("hero_label") or "AFTER — ORGANIZED VIEW",
+                "caption": spec.get("hero_label") or "Organized view",
             }
         )
     return gallery
@@ -110,7 +114,7 @@ def build_presentation(
         "hero_mode": spec["hero_mode"],
         "hero_label": spec["hero_label"],
         "claims_organized_photo": bool(spec.get("claims_organized_photo")),
-        "gallery": _gallery(spec, media),
+        "gallery": _gallery(spec, media, lead),
         "changes": spec.get("moves") or [],
         "plan": spec.get("topdown") or {},
         "palette": spec.get("palette") or [],

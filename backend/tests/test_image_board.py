@@ -1,12 +1,13 @@
 """Image board is the visual file. It must not invent an after or a floor plan."""
 import io
 import json
+import re
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
-from image_board import board_layout, board_spec, build_image_board
+from image_board import board_layout, board_spec, build_image_board, customer_board_text, plan_geometry
 from pdf_generator import build_pdf
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json"
@@ -172,3 +173,145 @@ def test_companion_keeps_the_full_zone_sentence_and_one_total():
     assert "climate" in text.lower()
     assert "68" in text
     assert "weekly reset" in text.lower() or "ten minutes" in text.lower()
+
+
+def _png(color, size):
+    img = Image.new("RGB", size, color)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _quadrant(width, height):
+    img = Image.new("RGB", (width, height), (220, 20, 20))
+    draw = ImageDraw.Draw(img)
+    mid_x, mid_y = width // 2, height // 2
+    draw.rectangle((0, 0, mid_x - 1, mid_y - 1), fill=(220, 20, 20))
+    draw.rectangle((mid_x, 0, width - 1, mid_y - 1), fill=(20, 20, 220))
+    draw.rectangle((0, mid_y, mid_x - 1, height - 1), fill=(20, 180, 40))
+    draw.rectangle((mid_x, mid_y, width - 1, height - 1), fill=(220, 200, 20))
+    return img
+
+
+def _near(pixel, expected, tol=22) -> bool:
+    return all(abs(int(pixel[i]) - expected[i]) <= tol for i in range(3))
+
+
+LEAD_ID = "9dbedfba-81fc-45e0-b99d-36e0a1de01bb"
+
+
+def test_portrait_hero_is_larger_without_cropping_and_board_hides_internal_codes(monkeypatch):
+    """The old multi-photo board capped a 1:2 hero near 417px and captioned SOURCE_/AFTER_."""
+    lead, deliverable = _load()
+    lead = {**lead, "id": LEAD_ID}
+    frames = []
+    for _ in range(4):
+        buf = io.BytesIO()
+        _quadrant(240, 480).save(buf, format="PNG")
+        frames.append(buf.getvalue())
+    images = {
+        "front_view": frames[0],
+        "front_view_kind": "organized",
+        "before": frames[0],
+        "after": frames[0],
+        "source_pairs": [
+            {
+                "label": f"SOURCE_{i + 1:02d}",
+                "after_label": f"AFTER_{i + 1:02d}",
+                "before": frames[i],
+                "after": frames[i],
+                "status": "approved",
+            }
+            for i in range(4)
+        ],
+    }
+    drawn = []
+    original = ImageDraw.ImageDraw.text
+
+    def _record(self, xy, text, *args, **kwargs):
+        drawn.append(str(text))
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", _record)
+    png = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    blob = "\n".join(drawn)
+    assert "SOURCE_" not in blob
+    assert "AFTER_" not in blob
+    assert LEAD_ID not in blob
+    assert not re.search(r"\bDRAFT\b", blob, re.I)
+    assert not re.search(r"\bQA\b", blob)
+    spec = board_spec(lead, deliverable, images)
+    assert "SOURCE_" not in customer_board_text(spec)
+    assert "AFTER_" not in customer_board_text(spec)
+    layout = board_layout(spec)
+    hero = layout["hero"]
+    hw, hh = hero[2] - hero[0], hero[3] - hero[1]
+    assert hh >= 560
+    assert hw * hh >= int(208 * 417 * 1.5)
+    assert 0.45 <= hw / hh <= 0.58
+    board = Image.open(io.BytesIO(png))
+    assert _near(board.getpixel((hero[0] + 14, hero[1] + 14)), (220, 20, 20))
+    assert _near(board.getpixel((hero[2] - 14, hero[1] + 14)), (20, 20, 220))
+    assert _near(board.getpixel((hero[0] + 14, hero[3] - 48)), (20, 180, 40))
+    assert _near(board.getpixel((hero[2] - 14, hero[3] - 48)), (220, 200, 20))
+    assert b"SOURCE_" not in png
+    assert LEAD_ID.encode() not in png
+
+
+def test_room_plan_is_a_topdown_room_not_only_horizontal_bars():
+    lead, deliverable = _load()
+    spec = board_spec(lead, deliverable, {})
+    topdown = spec["topdown"]
+    assert topdown["drawing"] == "room"
+    ids = {place["id"] for place in topdown["places"]}
+    assert {"sleep", "change", "comfort", "play"} <= ids
+    assert "SLEEP" in topdown["furniture"]
+    # Even inside a short wide card, furniture stays on walls instead of spanning the room.
+    geo = plan_geometry((36, 900, 1164, 1220), topdown)
+    room = geo["room"]
+    rw, rh = room[2] - room[0], room[3] - room[1]
+    assert rh >= 140
+    assert rw / rh <= 2.4
+    for place in geo["places"]:
+        rect = place["rect"]
+        assert rect[2] - rect[0] <= int(rw * 0.58) + 1
+        assert rect[0] >= room[0] and rect[2] <= room[2]
+    png = build_image_board(lead=lead, deliverable=deliverable, images={})
+    board = Image.open(io.BytesIO(png))
+    laid = plan_geometry(board_layout(spec)["plan"], topdown)
+    floor = (250, 246, 239)
+    soft = (207, 226, 215)
+    open_hits = 0
+    block_hits = 0
+    rx0, ry0, rx1, ry1 = laid["room"]
+    rects = [place["rect"] for place in laid["places"]]
+    for y in range(ry0 + 16, ry1 - 16, 6):
+        for x in range(rx0 + 16, rx1 - 16, 6):
+            inside = any(r[0] + 2 <= x <= r[2] - 2 and r[1] + 2 <= y <= r[3] - 2 for r in rects)
+            pixel = board.getpixel((x, y))
+            if inside and _near(pixel, soft, tol=28):
+                block_hits += 1
+            if not inside and _near(pixel, floor, tol=12):
+                open_hits += 1
+    assert block_hits > 20
+    assert open_hits > 20
+
+
+def test_landscape_hero_reaches_across_the_board():
+    lead, deliverable = _load()
+    frame = _png((30, 90, 70), (900, 600))
+    images = {
+        "front_view": frame,
+        "front_view_kind": "organized",
+        "before": frame,
+        "after": frame,
+        "source_pairs": [
+            {"label": f"SOURCE_{i + 1:02d}", "after_label": f"AFTER_{i + 1:02d}", "before": frame, "after": frame}
+            for i in range(4)
+        ],
+    }
+    layout = board_layout(board_spec(lead, deliverable, images))
+    hero = layout["hero"]
+    content_w = 1200 - 72
+    assert (hero[2] - hero[0]) >= int(content_w * 0.78)
+    assert abs(((hero[2] - hero[0]) / (hero[3] - hero[1])) - 1.5) < 0.05
