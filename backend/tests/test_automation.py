@@ -1,4 +1,4 @@
-"""Automation pipeline: FLUX bytes must reach build_pdf (no live APIs)."""
+"""Automation pipeline: organized-render bytes must reach the board and PDF (no live APIs)."""
 import asyncio
 import io
 from typing import Any, Dict, Optional
@@ -131,8 +131,13 @@ def _run(
 
         return real_build(lead=lead, deliverable=deliverable, images=images)
 
+    async def _views(**kwargs):
+        captured.setdefault("supporting_calls", []).append(kwargs)
+        return dict(captured.get("supporting_result") or {})
+
     monkeypatch.setattr("automation.draft_deliverable", fake_draft)
     monkeypatch.setattr("automation.generate_front_view", _gen)
+    monkeypatch.setattr("automation.generate_supporting_views", _views)
     monkeypatch.setattr("automation.send_blueprint", fake_send)
     monkeypatch.setattr("automation.build_pdf", fake_build_pdf)
 
@@ -479,3 +484,84 @@ def test_qa_discard_clears_stale_organized_hero(monkeypatch):
     qa = doc.get("render_qa") or {}
     assert qa.get("ok") is False
     assert qa.get("walls_repainted") is True
+    assert doc.get("view_1_url") is None
+    assert images["view_1"] is None
+    assert not captured.get("supporting_calls")
+
+
+def test_supporting_views_attach_only_after_qa_passes(monkeypatch):
+    from render_qa import RenderQAResult
+
+    original = _jpeg((110, 90, 60))
+    organized = _jpeg((10, 90, 50))
+    extra = _jpeg((30, 40, 50), size=(80, 60))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    captured: Dict[str, Any] = {
+        "supporting_result": {"view_1": extra, "view_2": extra, "view_3": extra}
+    }
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **k: RenderQAResult(ok=True),
+    )
+    sent, captured, _db, _fs = _run(
+        monkeypatch,
+        generate=lambda **k: (organized, "image/jpeg"),
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+    )
+    assert sent is True
+    images = captured["images"]
+    assert images["after"] == organized
+    assert images["front_view_kind"] == "organized"
+    assert images["view_1"] == extra
+    assert images["view_2"] == extra
+    assert images["view_3"] == extra
+    assert len(captured["supporting_calls"]) == 1
+
+
+def test_discarded_after_does_not_keep_a_stale_extra_view(monkeypatch):
+    from render_qa import RenderQAResult
+
+    original = _jpeg((160, 190, 220))
+    failed = _jpeg((200, 170, 140))
+    stale_view = _jpeg((210, 175, 145), size=(90, 60))
+    extra = _jpeg((1, 2, 3), size=(40, 40))
+    view_id = "cccccccccccccccccccccccc"
+    fs = _FakeFS(
+        store={
+            "aaaaaaaaaaaaaaaaaaaaaaaa": original,
+            view_id: stale_view,
+        }
+    )
+    captured: Dict[str, Any] = {"supporting_result": {"view_1": extra}}
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **k: RenderQAResult(
+            ok=False,
+            walls_repainted=True,
+            reasons=["Walls shifted from light blue to taupe"],
+            attempt=k.get("attempt", 1),
+        ),
+    )
+    sent, captured, db, _fs = _run(
+        monkeypatch,
+        generate=lambda **k: (failed, "image/jpeg"),
+        fs=fs,
+        lead=_lead(with_photo=True),
+        capture=captured,
+        seed_deliverable={
+            "lead_id": "lead-img-1",
+            "view_1_url": f"/api/uploads/photo/{view_id}",
+            "front_view_kind": "organized",
+        },
+    )
+    assert sent is True
+    images = captured["images"]
+    assert images["after"] is None
+    assert images["view_1"] is None
+    assert images["view_1"] != stale_view
+    assert images["view_1"] != extra
+    assert images["front_view_kind"] == "original"
+    assert not captured.get("supporting_calls")
+    assert db.deliverables.docs["lead-img-1"].get("view_1_url") is None

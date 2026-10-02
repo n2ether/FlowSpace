@@ -55,7 +55,7 @@ def _synthetic_original_jpeg(width: int = 960, height: int = 640) -> bytes:
 
 
 def _synthetic_organized_jpeg(width: int = 960, height: int = 640) -> bytes:
-    """Stand-in for a FLUX organized render — not a customer photo."""
+    """Stand-in for an organized render — not a customer photo."""
     img = Image.new("RGB", (width, height), (236, 253, 245))
     draw = ImageDraw.Draw(img)
     # Floor / wall

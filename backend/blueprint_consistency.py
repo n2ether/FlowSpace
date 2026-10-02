@@ -1,11 +1,15 @@
 """Make a Blueprint agree with itself before it is drawn or emailed.
 
-The rejected kids' room PDF showed two kit prices ($124–$154 and a $174
-line-item total) and storage advice that would replace a dresser. This
-module is the single place that:
+The rejected kids' room PDF showed two kit prices and storage advice that
+would replace a dresser. A later pass also priced the kit at $150 in the
+prose while a blanket line pushed the shopping list to $230, and it mixed
+"add a heater / blanket layer" with "do not add a heater or a crib blanket".
 
-- drops nursery recommendations that swap drawers for baskets or add large cubbies
-- rewrites a budget note whose stated kit range is below the shopping-list total
+This module is the single place that:
+
+- drops nursery recommendations that swap drawers for baskets, add large cubbies, or sell a blanket
+- rewrites every kit-price claim so it matches the shopping-list total
+- keeps one safety story for the board and the companion PDF
 - builds the companion-guide sections from the cleaned plan
 """
 from __future__ import annotations
@@ -120,6 +124,103 @@ def item_forbidden(name: str) -> bool:
     return False
 
 
+def item_is_blanket_sku(name: str) -> bool:
+    """Bedding blankets are not a shopping line. A window treatment is not a blanket."""
+    n = (name or "").lower()
+    if "blanket" not in n:
+        return False
+    if any(word in n for word in ("curtain", "window", "shade", "drape")):
+        return False
+    return True
+
+
+def clarify_item_name(name: str) -> str:
+    if "blanket" in (name or "").lower() and any(
+        word in name.lower() for word in ("curtain", "window", "shade", "drape")
+    ):
+        return re.sub(r"blanket[-\s]?layer", "thermal window layer", name, flags=re.I)
+    return name
+
+
+def clarify_blanket_wording(text: str) -> str:
+    """A warmer window is a thermal window layer, not a blanket product.
+
+    Safety lines that forbid a blanket ("not a blanket", "no loose blankets") stay put.
+    """
+    if not text:
+        return ""
+    text = re.sub(r"\bblanket[-\s]?layer\b", "thermal window layer", str(text), flags=re.I)
+
+    def repl(match: re.Match) -> str:
+        chunk = match.group(0)
+        if re.search(r"\b(not a|no|do not|don't|never)\b", chunk, re.I):
+            return chunk
+        return re.sub(r"\bblanket\b", "thermal window layer", chunk, count=1, flags=re.I)
+
+    return re.sub(
+        r"\b(?:window|curtain|shade|drape)s?\b[^.]{0,60}\bblanket\b",
+        repl,
+        text,
+        flags=re.I,
+    )
+
+
+_SENTENCE_SPLIT = re.compile(r"[^.!?\n]+[.!?]?")
+_DO_NOT_LINE = re.compile(r"\b(do not|don't|never|no loose|no portable)\b", re.I)
+_ADD_HEATER = re.compile(r"\b(add|install|use|consider|place|buy|mount|get)\b", re.I)
+_HEATER_WORD = re.compile(r"\b(heaters?|space heater)\b", re.I)
+_BUY_BLANKET = re.compile(r"\b(buy|purchase|shop|include|add)\b[^.]{0,48}\bblanket\b", re.I)
+_PRICE_CLAIM = re.compile(
+    r"\b(total|budget|estimated|estimate|approx(?:imately)?|about|around|typical|kit|refresh)\b",
+    re.I,
+)
+_BLANKET_NOTE = (
+    "We left bedding blankets off the shopping list. The crib stays bare except a fitted sheet, "
+    "and a warmer window is a thermal curtain or shade, not a blanket."
+)
+
+NURSERY_SAFETY = (
+    "Anchor the dresser to the wall and keep every drawer.",
+    "The crib stays bare except a fitted sheet — no loose blankets, pillows, or bumpers.",
+    "Do not add a portable heater, wall heater, or electric blanket near the sleep area.",
+    "Keep window cords out of reach.",
+    "Keep a clear floor path to the door.",
+)
+
+
+def _drop_recommendation_sentences(text: str) -> str:
+    kept: List[str] = []
+    for match in _SENTENCE_SPLIT.findall(text or ""):
+        sentence = " ".join(match.split()).strip()
+        if not sentence:
+            continue
+        if _DO_NOT_LINE.search(sentence):
+            kept.append(sentence)
+            continue
+        if _HEATER_WORD.search(sentence) and _ADD_HEATER.search(sentence):
+            continue
+        if _BUY_BLANKET.search(sentence):
+            continue
+        kept.append(sentence)
+    return " ".join(kept).strip()
+
+
+def clarify_plan_text(text: str) -> str:
+    return _drop_recommendation_sentences(clarify_blanket_wording(scrub_text(text)))
+
+
+def _keep_safety_line(text: str) -> bool:
+    if "blanket layer" in text.lower():
+        return False
+    if _DO_NOT_LINE.search(text):
+        return True
+    if _HEATER_WORD.search(text) and _ADD_HEATER.search(text):
+        return False
+    if _BUY_BLANKET.search(text):
+        return False
+    return True
+
+
 def scrub_text(text: str) -> str:
     if not text:
         return ""
@@ -174,35 +275,43 @@ def apply_nursery_rules(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Li
     issues: List[str] = []
     kept = []
     removed: List[str] = []
+    removed_blanket = False
     for item in deliverable.get("shopping_list") or []:
         if not isinstance(item, dict):
             continue
-        name = str(item.get("name") or "")
-        if item_forbidden(name):
+        item = dict(item)
+        name = clarify_item_name(str(item.get("name") or ""))
+        item["name"] = name
+        if item_forbidden(name) or item_is_blanket_sku(name):
             removed.append(name)
+            if item_is_blanket_sku(name):
+                removed_blanket = True
         elif name:
             kept.append(item)
     if removed:
         deliverable["shopping_list"] = kept
+    if any(item_forbidden(name) for name in removed):
         issues.append(
             "removed storage that would replace dresser drawers or add large open cubbies"
         )
+    if removed_blanket:
+        issues.append("removed a blanket product so the shopping list matches the crib safety rule")
 
     for key in ("intro", "summary", "notes", "budget_note"):
         if deliverable.get(key):
-            deliverable[key] = scrub_text(str(deliverable.get(key) or ""))
+            deliverable[key] = clarify_plan_text(str(deliverable.get(key) or ""))
     for key in ("needs", "strategy", "action_plan", "benefits"):
         deliverable[key] = _dedupe(
             [
-                scrub_text(str(item))
+                clarify_plan_text(str(item))
                 for item in (deliverable.get(key) or [])
-                if scrub_text(str(item))
+                if clarify_plan_text(str(item))
             ]
         )
     for zone in deliverable.get("zones") or []:
         if isinstance(zone, dict):
-            zone["title"] = scrub_text(str(zone.get("title") or ""))
-            zone["desc"] = scrub_text(str(zone.get("desc") or ""))
+            zone["title"] = clarify_plan_text(str(zone.get("title") or ""))
+            zone["desc"] = clarify_plan_text(str(zone.get("desc") or ""))
 
     strategy = list(deliverable.get("strategy") or [])
     keep = dresser_keep_line(lead, deliverable)
@@ -223,24 +332,31 @@ def apply_nursery_rules(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Li
             _append_unique(dont, line)
         instruction["do_not"] = dont
         instruction["do_this_week"] = [
-            scrub_text(str(x))
+            clarify_plan_text(str(x))
             for x in (instruction.get("do_this_week") or [])
-            if scrub_text(str(x))
+            if clarify_plan_text(str(x))
         ]
         if instruction.get("start_here"):
-            instruction["start_here"] = scrub_text(str(instruction.get("start_here") or ""))
+            instruction["start_here"] = clarify_plan_text(str(instruction.get("start_here") or ""))
         if instruction.get("weekly_reset"):
-            instruction["weekly_reset"] = scrub_text(str(instruction.get("weekly_reset") or ""))
+            instruction["weekly_reset"] = clarify_plan_text(str(instruction.get("weekly_reset") or ""))
     else:
         extra = [str(x) for x in (deliverable.get("safety_lines") or []) if str(x).strip()]
         for line in NURSERY_DO_NOT:
             _append_unique(extra, line)
         deliverable["safety_lines"] = extra
 
-    if removed:
+    if removed and not removed_blanket:
         notes = str(deliverable.get("notes") or "").strip()
         if _REMOVED_NOTE not in notes:
             deliverable["notes"] = (notes + " " + _REMOVED_NOTE).strip()
+    if removed_blanket:
+        notes = str(deliverable.get("notes") or "").strip()
+        if _BLANKET_NOTE not in notes:
+            deliverable["notes"] = (notes + " " + _BLANKET_NOTE).strip()
+        if any(item_forbidden(name) for name in removed):
+            if _REMOVED_NOTE not in notes and _REMOVED_NOTE not in str(deliverable.get("notes") or ""):
+                deliverable["notes"] = (str(deliverable.get("notes") or "") + " " + _REMOVED_NOTE).strip()
     return issues
 
 
@@ -254,21 +370,125 @@ def _record(deliverable: Dict[str, Any], issues: List[str]) -> None:
     deliverable["consistency_notes"] = notes
 
 
+def _strip_stated_band(text: str, stated: str) -> str:
+    if not stated:
+        return text
+    variants = {
+        stated,
+        stated.replace("–", "-"),
+        stated.replace("—", "-"),
+        stated.replace("-", "–"),
+    }
+    out = text
+    for variant in variants:
+        if variant:
+            out = re.sub(re.escape(variant), " ", out, flags=re.I)
+    return out
+
+
+def _stated_band_only(text: str, stated: str, total: float) -> bool:
+    """True when the only money in the sentence is the customer's stated budget band."""
+    if not stated or not text:
+        return False
+    folded = re.sub(r"\s+", "", text.lower().replace("–", "-").replace("—", "-"))
+    band = re.sub(r"\s+", "", stated.lower().replace("–", "-").replace("—", "-"))
+    if band not in folded:
+        return False
+    return not note_conflicts(_strip_stated_band(text, stated), total)
+
+
+def rewrite_kit_prices(text: str, total: float, display: str, stated: str, *, aggressive: bool = False) -> str:
+    """Replace a kit price that is not the shopping-list total.
+
+    A stated budget band the kit sits inside is left alone. Line-item prices
+    in strategy copy are left alone unless the sentence claims a kit total.
+    ``aggressive`` rewrites intro, summary, and notes even without a claim word.
+    """
+    if not text or total <= 0 or not display:
+        return text
+    if _stated_band_only(text, stated, total):
+        return text
+    if not note_conflicts(text, total):
+        return text
+    if not aggressive and not _PRICE_CLAIM.search(text):
+        return text
+
+    def repl_range(match: re.Match) -> str:
+        lo = float(match.group(1).replace(",", ""))
+        hi = float(match.group(2).replace(",", ""))
+        if total > max(lo, hi) + 1:
+            return display
+        return match.group(0)
+
+    updated = _RANGE.sub(repl_range, text)
+    ranges_left = [match.span() for match in _RANGE.finditer(updated)]
+
+    def repl_single(match: re.Match) -> str:
+        if any(start <= match.start() < end for start, end in ranges_left):
+            return match.group(0)
+        amount = float(match.group(1).replace(",", ""))
+        if abs(amount - total) <= 1:
+            return match.group(0)
+        return display
+
+    return _MONEY.sub(repl_single, updated)
+
+
+def _rewrite_doc_prices(deliverable: Dict[str, Any], total: float, display: str, stated: str) -> bool:
+    changed = False
+    for key in ("intro", "summary", "notes", "budget_note"):
+        raw = str(deliverable.get(key) or "")
+        if not raw:
+            continue
+        updated = rewrite_kit_prices(raw, total, display, stated, aggressive=True)
+        if updated != raw:
+            deliverable[key] = updated
+            changed = True
+    for key in ("needs", "strategy", "action_plan", "benefits"):
+        rows = []
+        field_changed = False
+        for item in deliverable.get(key) or []:
+            raw = str(item)
+            updated = rewrite_kit_prices(raw, total, display, stated, aggressive=False)
+            rows.append(updated)
+            if updated != raw:
+                field_changed = True
+        if field_changed:
+            deliverable[key] = rows
+            changed = True
+    for zone in deliverable.get("zones") or []:
+        if not isinstance(zone, dict):
+            continue
+        for key in ("title", "desc"):
+            raw = str(zone.get(key) or "")
+            updated = rewrite_kit_prices(raw, total, display, stated, aggressive=False)
+            if updated != raw:
+                zone[key] = updated
+                changed = True
+    return changed
+
+
 def align_budget(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[str]:
-    """Set budget_display from the shopping list. Rewrite a note that under-prices it."""
+    """Set budget_display from the shopping list. Rewrite copy that prices the kit differently."""
     issues: List[str] = []
     total = shopping_total(deliverable)
     display = format_money(total) if total else ""
     deliverable["budget_display"] = display
-    deliverable["stated_budget"] = stated_budget_label(lead)
+    stated = stated_budget_label(lead)
+    deliverable["stated_budget"] = stated
     if not total:
         return issues
-    note = str(deliverable.get("budget_note") or "")
-    if note_conflicts(note, total):
-        deliverable["budget_note"] = canonical_budget_note(display)
+    if _rewrite_doc_prices(deliverable, total, display, stated):
         issues.append(
             "budget figures did not match the shopping list; the list total is now the only kit price"
         )
+    note = str(deliverable.get("budget_note") or "")
+    if note and note_conflicts(note, total) and not _stated_band_only(note, stated, total):
+        deliverable["budget_note"] = canonical_budget_note(display)
+        if "budget figures did not match the shopping list; the list total is now the only kit price" not in issues:
+            issues.append(
+                "budget figures did not match the shopping list; the list total is now the only kit price"
+            )
     elif not note:
         deliverable["budget_note"] = canonical_budget_note(display)
 
@@ -279,14 +499,18 @@ def align_budget(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[str]
             band = validation.get("budget_band")
             if isinstance(band, dict):
                 band_text = str(band.get("band") or "")
-                stated = deliverable.get("stated_budget") or ""
                 if (
                     band_text
                     and note_conflicts(band_text, total)
                     and not _same_phrase(band_text, stated)
+                    and not _stated_band_only(band_text, stated, total)
                 ):
                     band["band"] = display
                     issues.append("budget band was below the shopping-list total and was corrected")
+                band_note = str(band.get("note") or "")
+                updated_note = rewrite_kit_prices(band_note, total, display, stated, aggressive=True)
+                if updated_note != band_note:
+                    band["note"] = updated_note
     return issues
 
 
@@ -346,14 +570,18 @@ def _climate_lines(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[st
     if deliverable.get("notes"):
         blobs.append(str(deliverable.get("notes")))
     lines: List[str] = []
+    nursery = is_nursery_space(lead)
     for blob in blobs:
         text = " ".join(blob.split())
-        if text and _CLIMATE.search(text) and text not in lines:
+        if nursery:
+            text = clarify_plan_text(text)
+        if text and _CLIMATE.search(text) and text not in lines and _keep_safety_line(text):
             lines.append(text)
-    if is_nursery_space(lead):
+    if nursery:
         standing = (
             "Keep sleep comfort in a normal nursery range, about 68–72°F, using the heating you already have. "
-            "Do not add a portable heater, electric blanket, or loose cord near the crib."
+            "Warm the window with a thermal curtain or shade — a thermal window layer, not a blanket. "
+            "Do not add a portable heater, wall heater, or electric blanket."
         )
     else:
         standing = (
@@ -382,6 +610,32 @@ def _maintenance(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
     )
 
 
+def safety_guidance(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> List[str]:
+    """One safety list for the image board and the companion PDF."""
+    lead = lead or {}
+    deliverable = deliverable or {}
+    lines: List[str] = []
+    if is_nursery_space(lead):
+        lines.extend(NURSERY_SAFETY)
+    layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
+    instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
+    extras: List[str] = []
+    for source in (instruction.get("do_not") or []), (deliverable.get("safety_lines") or []):
+        for line in source:
+            text = clarify_blanket_wording(str(line).strip())
+            if text and _keep_safety_line(text):
+                extras.append(text)
+    for text in extras:
+        if text not in lines:
+            lines.append(text)
+    if not lines:
+        lines = [
+            "Do not add walls, windows, or doors.",
+            "Do not invent room dimensions.",
+        ]
+    return lines
+
+
 def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Long-form companion copy plus the prepared deliverable."""
     lead = lead or {}
@@ -395,17 +649,7 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
     ]
     if not steps:
         steps = ["Start with a clear floor path, then give everyday items a home you already have."]
-    safety: List[str] = []
-    for source in (instruction.get("do_not") or []), (doc.get("safety_lines") or []):
-        for line in source:
-            text = str(line).strip()
-            if text and text not in safety:
-                safety.append(text)
-    if not safety:
-        safety = [
-            "Do not add walls, windows, or doors.",
-            "Do not invent room dimensions.",
-        ]
+    safety = safety_guidance(lead, doc)
     needs = [str(x).strip() for x in (doc.get("needs") or []) if str(x).strip()]
     if not needs:
         needs = ["A clear floor path", "A home for everyday items"]

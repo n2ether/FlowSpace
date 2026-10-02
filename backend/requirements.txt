@@ -14,8 +14,8 @@ dnspython==2.8.0
 # AI — Anthropic (plan drafting)
 anthropic>=0.116.0
 
-# AI — Replicate (image generation via FLUX)
-replicate>=1.0.7
+# AI — OpenAI Images (organized after: edit when a photo exists, else text-to-image)
+openai>=1.99.0
 
 # HTTP
 httpx==0.28.1

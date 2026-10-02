@@ -1,6 +1,9 @@
 """Budget and nursery storage must agree before a Blueprint is drawn."""
+import io
 import json
 from pathlib import Path
+
+from pypdf import PdfReader
 
 from blueprint_consistency import (
     item_forbidden,
@@ -70,3 +73,109 @@ def test_item_forbidden_targets_drawer_swaps_not_every_basket():
     assert item_forbidden("Basket set to replace dresser drawers")
     assert not item_forbidden("Felt frame bumpers")
     assert not item_forbidden("Lidded bins")
+
+
+def test_blanket_sku_and_150_vs_230_cannot_disagree():
+    """A $80 blanket made the list $230 while the prose still said $150."""
+    from blueprint_consistency import companion_sections, safety_guidance
+    from image_board import board_spec
+    from pdf_generator import build_pdf
+
+    lead = {
+        "name": "Camila Sales",
+        "space_type": "kids_room",
+        "budget": "100_300",
+        "goals": "Keep the space theme",
+        "must_stay": "Six-drawer dresser",
+        "desired_feeling": ["calm"],
+        "color_prefs": ["earth"],
+    }
+    deliverable = {
+        "intro": "Shop this refresh for about $150.",
+        "summary": "The kit total is $150.",
+        "needs": ["Anchor the dresser"],
+        "zones": [
+            {"title": "Safe Sleep Zone", "desc": "Crib stays clear."},
+            {"title": "Diaper & Dress Zone", "desc": "Six-drawer dresser stays."},
+            {"title": "Play & Movement Zone", "desc": "Clear floor path to the door."},
+            {"title": "Comfort & Feed Zone", "desc": "Rocker by the window."},
+        ],
+        "shopping_list": [
+            {"name": "Furniture anchor kit", "qty": 1, "price": 30},
+            {"name": "Blackout thermal curtain panels", "qty": 2, "price": 40},
+            {"name": "Nursery blanket", "qty": 1, "price": 80},
+            {"name": "Under-door draft sweep", "qty": 1, "price": 40},
+        ],
+        "budget_note": "Kit total about $150.",
+        "strategy": [
+            "Add a blanket layer over the window.",
+            "Consider a wall-mounted heater if the room stays cold.",
+            "Anchor the six-drawer dresser.",
+        ],
+        "action_plan": ["Anchor the dresser before anything else."],
+        "notes": "Windows stay ~95% true to the photo.",
+    }
+    assert shopping_total(deliverable) == 230
+    prepared = prepare_deliverable(lead, deliverable)
+    names = [item["name"].lower() for item in prepared["shopping_list"]]
+    assert all("blanket" not in name for name in names)
+    assert shopping_total(prepared) == 150
+    assert prepared["budget_display"] == "$150"
+    blob = " ".join(
+        [
+            prepared["intro"],
+            prepared["summary"],
+            prepared["budget_note"],
+            " ".join(prepared["strategy"]),
+        ]
+    ).lower()
+    assert "$230" not in blob
+    assert "150" in blob
+    assert "blanket layer" not in blob
+    assert "thermal window layer" in blob
+    assert "wall-mounted heater" not in blob
+    assert "six-drawer" in blob or "dresser" in blob
+
+    sections, _doc = companion_sections(lead, deliverable)
+    spec = board_spec(lead, deliverable, {})
+    assert sections["list_total"] == "$150"
+    assert spec["budget_display"] == "$150"
+    assert sections["safety"] == spec["safety"]
+    safety = " ".join(sections["safety"]).lower()
+    assert "no loose blankets" in safety
+    assert "heater" in safety and "do not" in safety
+    assert "window cords" in safety
+    climate = " ".join(sections["climate"]).lower()
+    assert "68" in climate
+    assert "thermal window layer" in climate
+    assert "blanket layer" not in climate
+
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    low = text.lower()
+    assert "nursery blanket" not in low
+    assert "$230" not in text
+    assert "$150" in text
+    assert "blanket layer" not in low
+    assert "list total" in low
+    assert safety_guidance(lead, prepared)[0] in text or "anchor the dresser" in low
+
+
+def test_prose_kit_price_follows_the_list_when_nothing_is_removed():
+    lead = {"space_type": "kids_room", "budget": "100_300", "must_stay": "Six-drawer dresser"}
+    deliverable = {
+        "intro": "The refresh is about $150.",
+        "shopping_list": [
+            {"name": "Furniture anchor kit", "qty": 1, "price": 150},
+            {"name": "Cord clips", "qty": 1, "price": 80},
+        ],
+        "budget_note": "Kit total $150.",
+        "strategy": ["Anchor the six-drawer dresser."],
+    }
+    prepared = prepare_deliverable(lead, deliverable)
+    assert shopping_total(prepared) == 230
+    assert prepared["budget_display"] == "$230"
+    assert "$150" not in prepared["intro"]
+    assert "230" in prepared["intro"]
+    assert "$150" not in prepared["budget_note"]
+    assert "230" in prepared["budget_note"]

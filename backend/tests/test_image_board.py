@@ -66,8 +66,20 @@ def test_board_claims_after_only_when_the_render_exists():
     )
     assert spec["hero_mode"] == "before_after"
     assert spec["claims_organized_photo"] is True
-    assert spec["detail_sources"] == ["after_crop", "after_crop"]
+    assert spec["detail_sources"] == ["after_crop", "after_crop", "after_crop"]
+    assert 2 <= len(spec["detail_sources"]) <= 4
     assert all("organized view" in caption.lower() for caption in spec["detail_captions"])
+    assert spec["topdown"]["window"] == "WINDOW"
+    assert spec["topdown"]["door"] == "DOOR"
+    assert "CLEAR PATH" == spec["topdown"]["circulation"]
+    assert "SLEEP" in spec["topdown"]["furniture"]
+    assert spec["topdown"]["matches_after"] is True
+    assert spec["topdown"]["approximate"] is True
+    names = [swatch["name"] for swatch in spec["palette"]]
+    assert "Existing walls" in names
+    assert "Natural oak" in names
+    assert any(swatch["note"] == "Not repainted" for swatch in spec["palette"])
+    assert any(swatch["note"] == "Space theme" for swatch in spec["palette"])
     png = build_image_board(
         lead=lead,
         deliverable=deliverable,
@@ -75,8 +87,9 @@ def test_board_claims_after_only_when_the_render_exists():
     )
     img = Image.open(io.BytesIO(png))
     # Right half of the hero is the organized after (solid test color).
-    pixel = img.getpixel((980, 500))
-    assert abs(pixel[0] - 20) < 8 and abs(pixel[1] - 90) < 8 and abs(pixel[2] - 70) < 8
+    for point in ((200, 400), (980, 500)):
+        pixel = img.getpixel(point)
+        assert abs(pixel[0] - 20) < 8 and abs(pixel[1] - 90) < 8 and abs(pixel[2] - 70) < 8
 
 
 def test_companion_keeps_the_full_zone_sentence_and_one_total():

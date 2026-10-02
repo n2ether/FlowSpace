@@ -1,13 +1,12 @@
-"""FLUX Kontext must stay the primary path when a customer photo exists."""
+"""OpenAI image edit must stay the primary path when a customer photo exists."""
 from ai_image_generator import (
-    KONTEXT_MODEL,
-    KONTEXT_PROMPT_UPSAMPLING,
-    TEXT_TO_IMAGE_MODEL,
+    IMAGE_MODEL,
     WALL_PRESERVE_RAILS,
     WALL_RETRY_CONSTRAINT,
     _build_kontext_prompt,
     _build_text_to_image_prompt,
-    _kontext_model_input,
+    edit_api_params,
+    generate_api_params,
     _soft_goods_colors,
 )
 
@@ -43,7 +42,11 @@ def test_kontext_prompt_keeps_windows_and_skips_paint():
     assert "window" in prompt and "door" in prompt
     assert "ceiling fan" in prompt or "ceiling fans" in prompt
     assert "gravity" in prompt
-    assert KONTEXT_MODEL == "black-forest-labs/flux-kontext-pro"
+    assert IMAGE_MODEL == "gpt-image-2.5-sunburst"
+    assert "flux" not in IMAGE_MODEL
+    assert "kontext" not in IMAGE_MODEL
+    assert "six-drawer" not in prompt
+    assert "image_prompt" not in prompt
 
 
 def test_kontext_prompt_applies_color_prefs_only_to_soft_goods():
@@ -106,19 +109,24 @@ def test_text_to_image_does_not_force_a_paint_makeover():
     assert "sea salt" not in prompt
     assert "over windows" in prompt or "over windows or doors" in prompt
     assert "ceiling" in prompt
-    assert TEXT_TO_IMAGE_MODEL == "black-forest-labs/flux-1.1-pro"
-    assert KONTEXT_MODEL != TEXT_TO_IMAGE_MODEL
+    assert generate_api_params(prompt)["model"] == IMAGE_MODEL
+    assert generate_api_params(prompt)["size"] == "1536x1152"
     assert "warm neutrals with soft sage accents" not in prompt
 
 
-def test_kontext_model_input_has_no_guidance_and_disables_upsampling():
-    payload = _kontext_model_input("keep the walls", "data:image/jpeg;base64,xx")
-    assert payload["prompt_upsampling"] is False
-    assert KONTEXT_PROMPT_UPSAMPLING is False
+def test_openai_edit_params_match_the_source_and_skip_replicate_knobs():
+    payload = edit_api_params("keep the walls")
+    assert payload["model"] == "gpt-image-2.5-sunburst"
+    assert payload["size"] == "auto"
+    assert payload["output_format"] == "jpeg"
+    assert payload["quality"] == "high"
+    assert "input_fidelity" not in payload
+    assert "prompt_upsampling" not in payload
     assert "guidance" not in payload
     assert "guidance_scale" not in payload
     assert "prompt_strength" not in payload
-    assert payload["aspect_ratio"] == "match_input_image"
+    assert "aspect_ratio" not in payload
+    assert "flux" not in payload["model"]
 
 
 def test_nursery_prompt_keeps_the_dresser_and_skips_cubbies():
@@ -141,6 +149,21 @@ def test_garage_prompt_still_allows_bins():
     prompt = _build_kontext_prompt({"space_type": "garage", "storage_needs": ["tools"]}).lower()
     assert "labeled bins" in prompt
     assert "nursery / kids room lock" not in prompt
+
+
+def test_supporting_prompt_keeps_nursery_rails_and_wall_lock():
+    from ai_image_generator import SUPPORTING_VIEWS, _supporting_prompt
+
+    prompt = _supporting_prompt(
+        {"space_type": "kids_room", "must_stay": "Six-drawer dresser, crib"},
+        {},
+        SUPPORTING_VIEWS[1][1],
+    ).lower()
+    assert "six-drawer" in prompt or "six drawer" in prompt
+    assert "do not replace drawers with baskets" in prompt or "do not add baskets in place of drawers" in prompt
+    assert "wall paint" in prompt
+    assert "additional after view" in prompt
+    assert "measured floor plan" not in prompt or "invent a new floor plan" in prompt
 
 
 def test_drafter_system_prompt_includes_window_and_fixture_rails():

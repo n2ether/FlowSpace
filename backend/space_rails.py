@@ -1,8 +1,8 @@
 """Space-specific prompt rails.
 
 Kids' room / nursery rules are enforced here so plan drafting and image
-generation share one wording. Image-provider swaps (FLUX today, OpenAI
-Images on the in-flight branch) should keep calling ``image_prompt_rails``.
+generation share one wording. The OpenAI image path keeps calling
+``image_prompt_rails``.
 """
 from __future__ import annotations
 
@@ -39,13 +39,19 @@ Kids' room / nursery rules (only when space_type is a kids' room, nursery, or th
 - Storage must simplify the day (fewer decisions), not add a sorting or labeling chore.
 - Keep the real room, furniture, proportions, and any space theme already there. The refresh should still look meaningfully calmer.
 - Shopping-list prices must add up to the budget figure you state. One kit total only.
+- The customer's budget band is their stated budget. Do not write a second kit price.
+- Do not put a blanket, electric blanket, or crib blanket on the shopping list. Warm the window with a thermal curtain or shade (a thermal window layer), not a blanket.
+- Do not recommend a portable heater, space heater, or wall-mounted heater. Use the heating already in the room, about 68–72°F.
+- "No loose blankets in the crib" is a safety rule, not a product to buy.
 - Write every customer-facing sentence in full. Do not leave a thought half-finished.
 """
 
 NURSERY_DO_NOT = (
     "Do not replace dresser drawers with baskets.",
     "Do not add large open cubbies or cube storage.",
-    "Do not place a portable heater or loose cord near the sleep area.",
+    "Do not place a portable heater, wall heater, or electric blanket near the sleep area.",
+    "Do not put loose blankets, pillows, or bumpers in the crib.",
+    "Keep window cords out of reach.",
 )
 
 _NURSERY_TEXT = re.compile(
@@ -113,5 +119,6 @@ def nursery_draft_addon(lead: Dict[str, Any] | None) -> str:
         "If the dresser has six drawers, all six stay. Do not replace drawers with baskets. "
         "Do not add large open cubbies. Storage must reduce daily effort, not add a chore. "
         "State one shopping total that equals qty × price for every line. "
+        "Do not add a blanket product or a heater. "
         "Finish every sentence."
     )
