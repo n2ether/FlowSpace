@@ -263,12 +263,55 @@ def test_generator_does_not_call_flux_kontext():
     assert "import replicate" not in text
 
 
+class _QueueImages:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.edits = []
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+        payload = self.payloads.pop(0)
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(payload).decode("ascii"), url=None)])
+
+
+def test_renders_too_similar_flags_the_same_framing_only():
+    from ai_image_generator import renders_too_similar
+
+    same_a = _jpeg(size=(80, 48), color=(20, 90, 70))
+    same_b = _jpeg(size=(96, 64), color=(20, 90, 70))
+    other = _jpeg(size=(80, 48), color=(210, 40, 30))
+    assert renders_too_similar(same_a, same_b)
+    assert not renders_too_similar(same_a, other)
+
+    left = Image.new("RGB", (80, 48), (20, 90, 70))
+    right = Image.new("RGB", (80, 48), (210, 40, 30))
+    combo = Image.new("RGB", (80, 48))
+    combo.paste(left, (0, 0))
+    combo.paste(right.crop((0, 0, 40, 48)), (40, 0))
+    flipped = Image.new("RGB", (80, 48))
+    flipped.paste(right, (0, 0))
+    flipped.paste(left.crop((0, 0, 40, 48)), (40, 0))
+
+    def _save(img: Image.Image) -> bytes:
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+
+    assert not renders_too_similar(_save(combo), _save(flipped))
+
+
 def test_supporting_views_edit_the_organized_after_and_drop_qa_failures(monkeypatch):
     from render_qa import RenderQAResult
 
     organized = _jpeg(size=(40, 30), color=(20, 90, 70))
     original = _jpeg(size=(40, 30), color=(160, 190, 220))
-    images = _Images(payload=_jpeg(size=(24, 16), color=(20, 90, 70)))
+    images = _QueueImages(
+        [
+            _jpeg(size=(40, 30), color=(30, 40, 200)),
+            _jpeg(size=(40, 30), color=(200, 40, 40)),
+            _jpeg(size=(40, 30), color=(40, 180, 60)),
+        ]
+    )
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("ai_image_generator._openai_client", lambda api_key: SimpleNamespace(images=images))
     calls = {"n": 0}
@@ -291,13 +334,70 @@ def test_supporting_views_edit_the_organized_after_and_drop_qa_failures(monkeypa
     assert set(found) == {"view_1", "view_3"}
     assert "view_2" not in found
     assert len(images.edits) == 3
-    assert images.generates == []
     uploaded = images.edits[0]["image"][0][1]
     assert uploaded == organized
     prompt = images.edits[0]["prompt"].lower()
     assert "six-drawer" in prompt or "six drawer" in prompt
     assert "wall paint" in prompt
     assert "additional after view" in prompt
+    assert "dresser and changing station" in prompt
+    assert "teddy" in prompt
+
+
+def test_supporting_views_regenerate_then_drop_near_duplicates(monkeypatch):
+    from render_qa import RenderQAResult
+
+    organized = _jpeg(size=(48, 32), color=(20, 90, 70))
+    same = _jpeg(size=(64, 40), color=(20, 90, 70))
+    images = _Images(payload=same)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("ai_image_generator._openai_client", lambda api_key: SimpleNamespace(images=images))
+    monkeypatch.setattr(
+        "render_qa.review_organized_render",
+        lambda **kwargs: RenderQAResult(ok=True),
+    )
+    found = asyncio.run(
+        generate_supporting_views(
+            lead={"space_type": "kids_room", "must_stay": "crib"},
+            deliverable={},
+            reference_photo_bytes=organized,
+            organized_bytes=organized,
+        )
+    )
+    assert found == {}
+    assert len(images.edits) == 6
+    assert "too similar" in images.edits[1]["prompt"].lower()
+
+
+def test_supporting_views_keep_a_distinct_retry(monkeypatch):
+    from render_qa import RenderQAResult
+
+    organized = _jpeg(size=(48, 32), color=(20, 90, 70))
+    images = _QueueImages(
+        [
+            _jpeg(size=(48, 32), color=(20, 90, 70)),
+            _jpeg(size=(48, 32), color=(30, 40, 200)),
+            _jpeg(size=(48, 32), color=(200, 160, 20)),
+            _jpeg(size=(48, 32), color=(40, 180, 60)),
+        ]
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("ai_image_generator._openai_client", lambda api_key: SimpleNamespace(images=images))
+    monkeypatch.setattr(
+        "render_qa.review_organized_render",
+        lambda **kwargs: RenderQAResult(ok=True),
+    )
+    found = asyncio.run(
+        generate_supporting_views(
+            lead={"space_type": "kids_room"},
+            deliverable={},
+            reference_photo_bytes=None,
+            organized_bytes=organized,
+        )
+    )
+    assert set(found) == {"view_1", "view_2", "view_3"}
+    assert len(images.edits) == 4
+    assert "too similar" in images.edits[1]["prompt"].lower()
 
 
 def test_supporting_views_skip_when_there_is_no_after(monkeypatch):

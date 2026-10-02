@@ -199,7 +199,7 @@ def test_pdf_embeds_detail_card_views_when_provided():
 
     spec = board_spec(LEAD, DELIVERABLE, {"front_view": hero, "view_1": v1, "view_2": v2, "view_3": v3})
     assert spec["detail_sources"] == ["view_1", "view_2", "view_3"]
-    assert all(caption == "Additional after view" for caption in spec["detail_captions"])
+    assert spec["detail_captions"] == ["Main storage", "Daily-use zone", "Door and circulation"]
 
 
 def test_pdf_omits_additional_views_when_missing():
@@ -243,6 +243,11 @@ def test_pdf_before_after_when_both_present_stays_compact():
     assert "ORGANIZED VIEW" in text
     assert COMPARE_BEFORE_EMPTY not in text
     assert COMPARE_AFTER_EMPTY not in text
+    low = text.lower()
+    assert "final organized view" in low
+    assert "do not invent an after" not in low
+    assert "organized view unavailable" not in low
+    assert "we do not invent an organized after" not in low
     # Comparison photos are on page 2 (or a short page 3), not a 5-page magazine
     compare_page = reader.pages[-1]
     assert len(compare_page.images) >= 2
@@ -260,6 +265,10 @@ def test_pdf_honest_empty_when_only_after():
     assert COMPARE_BEFORE_EMPTY in text
     assert COMPARE_AFTER_EMPTY not in text
     assert "ORGANIZED VIEW" in text
+    low = text.lower()
+    assert "final organized view" in low
+    assert "do not invent an after" not in low
+    assert "we do not invent an organized after" not in low
     assert len(PdfReader(io.BytesIO(pdf)).pages) <= 6
 
 
