@@ -1,7 +1,7 @@
 """Unit tests for Resend delivery (API mocked — no network, no secrets)."""
 import asyncio
 
-from email_service import send_blueprint
+from email_service import send_blueprint, send_draft_package
 
 
 PDF = b"%PDF-1.4 fake-pdf-bytes"
@@ -145,3 +145,37 @@ def test_sends_image_board_and_companion(monkeypatch):
     assert attachments[1]["filename"].endswith("_Companion_Camila.pdf")
     assert "image board" in calls[0]["html"].lower()
     assert "companion" in calls[0]["html"].lower()
+
+
+def test_send_draft_package_not_final(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "FlowSpace <blueprints@flowspace.solutions>")
+    calls = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return {"id": "msg_draft"}
+
+    monkeypatch.setattr("email_service.resend.Emails.send", fake_send)
+    sent, err = asyncio.run(
+        send_draft_package(
+            to_email="reviewer@example.com",
+            customer_name="Camila Sales",
+            space_type="kids_room",
+            lead_id="lead-9",
+            pdf_bytes=PDF,
+            board_bytes=b"PNG",
+            cc_emails=["rb@example.com"],
+        )
+    )
+    assert sent is True
+    assert err is None
+    assert len(calls) == 1
+    payload = calls[0]
+    assert payload["to"] == ["reviewer@example.com"]
+    assert payload["cc"] == ["rb@example.com"]
+    assert "DRAFT" in payload["subject"]
+    assert "not final" in payload["subject"].lower()
+    assert "not final" in payload["html"].lower()
+    assert len(payload["attachments"]) == 2
+    assert "DRAFT" in payload["attachments"][0]["filename"]

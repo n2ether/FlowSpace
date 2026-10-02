@@ -23,7 +23,7 @@ from image_board import build_image_board
 from pdf_generator import build_pdf, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
-from email_service import send_blueprint, send_contact_sheet
+from email_service import send_blueprint, send_contact_sheet, send_draft_package
 from source_photos import final_email_block_reason
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
@@ -1071,6 +1071,44 @@ async def send_review_contact_sheet(
         "final": False,
         "package_status": deliverable.get("package_status"),
         "to": recipient,
+    }
+
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/send-draft")
+async def send_draft_package_endpoint(
+    lead_id: str,
+    request: Request,
+    to: Optional[str] = None,
+    _: bool = Depends(require_admin),
+):
+    """Email DRAFT board + companion PDF for Flo/Camila review. Does not mark final."""
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    reason = final_email_block_reason(deliverable)
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    recipient = (to or lead.get("email") or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
+    cc_raw = (request.query_params.get("cc") or "").strip()
+    cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
+    sent, error = await send_draft_package(
+        to_email=recipient,
+        customer_name=lead.get("name") or "",
+        space_type=lead.get("space_type") or "space",
+        lead_id=lead_id,
+        pdf_bytes=pdf_bytes,
+        board_bytes=board_bytes,
+        cc_emails=cc_emails or None,
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
+    return {
+        "sent": True,
+        "final": False,
+        "package_status": deliverable.get("package_status"),
+        "to": recipient,
+        "cc": cc_emails,
     }
 
 

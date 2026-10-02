@@ -308,3 +308,81 @@ async def send_contact_sheet(
     except Exception as exc:
         logger.exception("Contact sheet email failed: %s", exc)
         return False, f"Resend contact sheet send failed: {exc}"
+
+def _draft_package_html(customer_name: str, lead_id: str, space_type: str) -> str:
+    space = plan_title(space_type)
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
+  <h2 style="color:#1F3D2C;">FlowSpace DRAFT board + companion — not final</h2>
+  <p>Hi {customer_name},</p>
+  <p>Attached is the <strong>DRAFT</strong> image board and companion guide for lead <code>{lead_id}</code> ({space}).</p>
+  <p><strong>This is for your review only.</strong> It is not the customer final package. Please reply with any notes before we send final.</p>
+  <ul>
+    <li>Image board — hero + full-room afters, room plan, design moves, palette, roadmap</li>
+    <li>Companion guide — steps, shopping list, safety, climate, weekly reset, and per-source before/after pages</li>
+  </ul>
+  <p>Warmly,<br>The FlowSpace Team</p>
+</body>
+</html>
+"""
+
+
+async def send_draft_package(
+    *,
+    to_email: str,
+    customer_name: str,
+    space_type: str,
+    lead_id: str,
+    pdf_bytes: bytes,
+    board_bytes: Optional[bytes] = None,
+    cc_emails: Optional[list] = None,
+) -> Tuple[bool, Optional[str]]:
+    """Email DRAFT board + companion PDF for review. Does not mark a package final."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        logger.error("RESEND_API_KEY not configured — skipping draft package email")
+        return False, "RESEND_API_KEY is not configured on this server"
+    recipient = (to_email or "").strip()
+    if not recipient:
+        return False, "Draft recipient is missing"
+
+    resend.api_key = api_key
+    space = plan_title(space_type)
+    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
+    stem = space.replace(" ", "_")
+    attachments = []
+    if board_bytes:
+        attachments.append(
+            {
+                "filename": f"FlowSpace_{stem}_DRAFT_Image_Board_{safe_name}.png",
+                "content": base64.b64encode(board_bytes).decode("utf-8"),
+                "content_type": "image/png",
+            }
+        )
+    attachments.append(
+        {
+            "filename": f"FlowSpace_{stem}_DRAFT_Companion_{safe_name}.pdf",
+            "content": base64.b64encode(pdf_bytes).decode("utf-8"),
+            "content_type": "application/pdf",
+        }
+    )
+    payload = {
+        "from": _from_email(),
+        "to": [recipient],
+        "subject": f"FlowSpace DRAFT — not final ({customer_name or lead_id})",
+        "html": _draft_package_html(customer_name or "there", lead_id, space_type),
+        "attachments": attachments,
+    }
+    cc = [e.strip() for e in (cc_emails or []) if (e or "").strip()]
+    if cc:
+        payload["cc"] = cc
+    try:
+        await asyncio.to_thread(resend.Emails.send, payload)
+        logger.info("Draft package sent to %s for lead %s (not final)", recipient, lead_id)
+        return True, None
+    except Exception as exc:
+        logger.exception("Draft package email failed: %s", exc)
+        return False, f"Resend draft package send failed: {exc}"
+

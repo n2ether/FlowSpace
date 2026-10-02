@@ -502,8 +502,9 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     themed = is_space_theme(lead, doc)
     if multi:
         complete = all(not slot.get("missing") for slot in details) and bool(details)
-        hero_mode = "source_grid"
-        hero_label = "ALL SOURCE ANGLES" if complete else "INCOMPLETE — MISSING SOURCE AFTER"
+        # One strong hero (AFTER_01) + remaining full-room afters as supporting views.
+        hero_mode = "hero_plus_afters"
+        hero_label = "AFTER — ORGANIZED VIEW" if complete else "INCOMPLETE — MISSING SOURCE AFTER"
         claims_organized = complete
     else:
         claims_organized = hero_mode in {"before_after", "after_only"}
@@ -736,7 +737,20 @@ def build_image_board(
 
     gap = 12
     pairs = _source_pairs(imgs)
-    if spec["hero_mode"] == "source_grid":
+    if spec["hero_mode"] == "hero_plus_afters":
+        # Strong hero = first after; mid column = remaining full-room afters (no crops).
+        hero_after = _open_image(pairs[0].get("after")) if pairs else after
+        hero_label = str((pairs[0].get("after_label") if pairs else None) or "AFTER_01")
+        source_label = str((pairs[0].get("label") if pairs else None) or "SOURCE_01")
+        _photo_or_empty(
+            base,
+            hero_after,
+            hero,
+            f"{source_label} → {hero_label}",
+            "Organized view unavailable",
+            "We do not invent an after photo.",
+        )
+    elif spec["hero_mode"] == "source_grid":
         _draw_source_grid(base, (hero[0], hero[1], mid[2], hero[3]), pairs)
     elif spec["hero_mode"] == "before_after":
         # The hero is the organized after only. A small before chip used to sit
@@ -757,7 +771,12 @@ def build_image_board(
     else:
         _empty_panel(base, hero, HERO_PLACEHOLDER_LABEL, HERO_PLACEHOLDER_SUB)
 
-    details = [] if spec["hero_mode"] == "source_grid" else _detail_slots(imgs, lead)
+    if spec["hero_mode"] == "hero_plus_afters":
+        details = _pair_slots(pairs[1:]) if len(pairs) > 1 else []
+    elif spec["hero_mode"] == "source_grid":
+        details = []
+    else:
+        details = _detail_slots(imgs, lead)
     mx0, my0, mx1, my1 = mid
     if spec["hero_mode"] == "source_grid":
         pass

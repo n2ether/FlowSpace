@@ -110,7 +110,7 @@ def test_board_shows_every_source_after_and_does_not_crop_fill_a_gap():
         ],
     }
     spec = board_spec(LEAD, PLAN, images)
-    assert spec["hero_mode"] == "source_grid"
+    assert spec["hero_mode"] == "hero_plus_afters"
     assert spec["claims_organized_photo"] is False
     assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02", "SOURCE_03"]
     assert "after_crop" not in spec["detail_sources"]
