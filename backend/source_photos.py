@@ -142,28 +142,118 @@ def classify_upload(photo: Any, data: Optional[bytes] = None, *, filename: str =
     return classify_image_bytes(data, filename=name)
 
 
-def final_email_block_reason(deliverable: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Why the customer board and PDF must not go out as final.
+# An after counts only when the persisted row says it was edited from that same source.
+# Crops, invented angles, and views derived from a different photo do not count.
+OWN_SOURCE_EDIT = "own_source"
+_DISQUALIFIED_EDITS = {
+    "crop",
+    "hero_crop",
+    "after_crop",
+    "invented",
+    "invented_angle",
+    "other_source",
+    "cross_source",
+    "supporting_view",
+}
 
-    ``None`` means a final send is allowed. Legacy deliverables with no
-    per-source record stay sendable. An incomplete package, or any required
-    source without an approved after URL, is blocked.
+
+def mapping_is_own_source(entry: Any) -> bool:
+    """True only for an explicit SOURCE_n → AFTER_n edit of that same photo.
+
+    The row must be approved, point at an after URL, and record
+    ``edit_kind == own_source``. A crop, an invented angle, or an after whose
+    ``derived_from_photo_id`` is a different photo does not count.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if str(entry.get("edit_kind") or "").strip().lower() != OWN_SOURCE_EDIT:
+        return False
+    if str(entry.get("status") or "").strip().lower() != "approved":
+        return False
+    if not str(entry.get("after_url") or "").strip():
+        return False
+    if entry.get("crop") or entry.get("invented_angle"):
+        return False
+    source_id = str(entry.get("source_photo_id") or "").strip()
+    derived = str(entry.get("derived_from_photo_id") or "").strip()
+    if derived and source_id and derived != source_id:
+        return False
+    if derived and not source_id:
+        return False
+    return True
+
+
+def final_email_block_reason(deliverable: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Why the customer package must not go out as final.
+
+    ``None`` means a final send is allowed. A lead with no room-photo record
+    (no ``source_afters`` and no ``required_source_ids``) stays sendable.
+    Any failed, missing, cropped, invented, or cross-source mapping blocks
+    the customer final. Contact sheets and draft sends must not claim final.
+    """
+    doc = deliverable or {}
+    status = str(doc.get("package_status") or "").strip().lower()
+    raw_entries = doc.get("source_afters") or []
+    entries = raw_entries if isinstance(raw_entries, list) else []
+    required = [
+        str(item).strip()
+        for item in (doc.get("required_source_ids") or [])
+        if str(item).strip()
+    ]
+
+    problems: List[str] = []
+    covered = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            problems.append("source")
+            continue
+        label = str(entry.get("label") or entry.get("source_photo_id") or "source")
+        if mapping_is_own_source(entry):
+            source_id = str(entry.get("source_photo_id") or "").strip()
+            if source_id:
+                covered.add(source_id)
+            continue
+        problems.append(label)
+    for source_id in required:
+        if source_id not in covered and source_id not in problems:
+            problems.append(source_id)
+
+    if problems:
+        return "Package is incomplete. Own-source edits missing: " + ", ".join(problems)
+    if status == "incomplete":
+        return "Package is incomplete. A required source after failed generation or QA."
+    return None
+
+
+def draft_send_block_reason(deliverable: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Review send. Never a customer final.
+
+    Follows the incomplete gate: a failed or missing after cannot go out.
+    An explicit crop, invented angle, or cross-source after cannot go out.
+    A legacy approved row that has not yet recorded ``edit_kind`` can still
+    be reviewed. It still cannot pass ``final_email_block_reason``.
     """
     doc = deliverable or {}
     status = str(doc.get("package_status") or "").strip().lower()
     if status == "incomplete":
         return "Package is incomplete. A required source after failed generation or QA."
-    entries = doc.get("source_afters") or []
-    if not isinstance(entries, list) or not entries:
+    raw_entries = doc.get("source_afters") or []
+    entries = raw_entries if isinstance(raw_entries, list) else []
+    if not entries:
         return None
-    missing: List[str] = []
+    problems: List[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
-            missing.append("source")
+            problems.append("source")
             continue
         label = str(entry.get("label") or entry.get("source_photo_id") or "source")
-        if entry.get("status") != "approved" or not entry.get("after_url"):
-            missing.append(label)
-    if missing:
-        return "Package is incomplete. Missing afters: " + ", ".join(missing)
+        kind = str(entry.get("edit_kind") or "").strip().lower()
+        source_id = str(entry.get("source_photo_id") or "").strip()
+        derived = str(entry.get("derived_from_photo_id") or "").strip()
+        disqualified = kind in _DISQUALIFIED_EDITS or bool(entry.get("crop") or entry.get("invented_angle"))
+        cross = bool(derived and source_id and derived != source_id)
+        if disqualified or cross or str(entry.get("status") or "").strip().lower() != "approved" or not entry.get("after_url"):
+            problems.append(label)
+    if problems:
+        return "Package is incomplete. Own-source edits missing: " + ", ".join(problems)
     return None

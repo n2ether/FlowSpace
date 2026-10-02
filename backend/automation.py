@@ -358,15 +358,24 @@ async def _store_bytes(
 
 
 def _public_source_after(outcome: Dict[str, Any]) -> Dict[str, Any]:
-    """Durable mapping. Image bytes stay in GridFS, not in the document."""
+    """Durable SOURCE_n → AFTER_n mapping. Image bytes stay in GridFS.
+
+    ``edit_kind`` is ``own_source`` only when this after was edited from that
+    same photo. A crop or a view taken from a different source must not be
+    stored under this flag.
+    """
+    source_id = outcome.get("source_photo_id") or ""
+    approved = outcome.get("status") == "approved" and bool(outcome.get("after_url"))
     return {
-        "source_photo_id": outcome.get("source_photo_id") or "",
+        "source_photo_id": source_id,
         "source_url": outcome.get("source_url"),
         "label": outcome.get("label"),
         "after_label": outcome.get("after_label"),
         "after_url": outcome.get("after_url"),
         "status": outcome.get("status"),
         "kind": "room",
+        "edit_kind": "own_source" if approved else "missing",
+        "derived_from_photo_id": source_id if approved else "",
         "qa": outcome.get("qa") or {},
     }
 
@@ -615,6 +624,11 @@ async def run_automation(
                     "$set": {
                         "render_qa": summary_qa,
                         "source_afters": [_public_source_after(item) for item in outcomes],
+                        "required_source_ids": [
+                            str(photo.get("photo_id") or "")
+                            for photo in room
+                            if str(photo.get("photo_id") or "")
+                        ],
                         "non_room_uploads": [
                             {
                                 "photo_id": photo.get("photo_id") or "",

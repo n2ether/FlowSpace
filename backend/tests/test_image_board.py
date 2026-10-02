@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image
 from pypdf import PdfReader
 
-from image_board import board_spec, build_image_board
+from image_board import board_layout, board_spec, build_image_board
 from pdf_generator import build_pdf
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json"
@@ -24,13 +24,17 @@ def _load():
     return doc["lead"], doc["deliverable"]
 
 
-def test_board_png_is_a_wide_nonblank_image():
+def test_board_png_is_a_portrait_nonblank_image():
     lead, deliverable = _load()
     png = build_image_board(lead=lead, deliverable=deliverable, images={})
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     img = Image.open(io.BytesIO(png))
-    assert img.size[0] > img.size[1]
-    assert img.size[0] >= 2000
+    assert img.size[1] > img.size[0]
+    ratio = img.size[1] / img.size[0]
+    assert 1.45 <= ratio <= 1.55
+    # Paper margin is drawn, not a full-bleed generated poster.
+    corner = img.getpixel((4, 4))
+    assert corner[0] > 220 and corner[1] > 210 and corner[2] > 200
     colors = img.getcolors(maxcolors=500000)
     assert colors is None or len(colors) > 8
 
@@ -87,14 +91,13 @@ def test_board_claims_after_only_when_the_render_exists():
     assert "Planet" in names
     assert any(swatch["note"] == "Not repainted" for swatch in spec["palette"])
     assert any(swatch["note"] == "Space theme" for swatch in spec["palette"])
-    png = build_image_board(
-        lead=lead,
-        deliverable=deliverable,
-        images={"front_view": after, "front_view_kind": "organized", "before": before, "after": after},
-    )
+    images = {"front_view": after, "front_view_kind": "organized", "before": before, "after": after}
+    png = build_image_board(lead=lead, deliverable=deliverable, images=images)
     img = Image.open(io.BytesIO(png))
-    # The hero is the organized after, including the lower-left where a before chip used to sit.
-    for point in ((200, 400), (980, 500), (120, 800)):
+    hero = board_layout(board_spec(lead, deliverable, images))["hero"]
+    x0, y0, x1, y1 = hero
+    # The hero is the organized after. A before chip must not sit on top of it.
+    for point in ((x0 + 24, y0 + 24), ((x0 + x1) // 2, (y0 + y1) // 2), (x0 + 24, y1 - 48)):
         pixel = img.getpixel(point)
         assert abs(pixel[0] - 20) < 8 and abs(pixel[1] - 90) < 8 and abs(pixel[2] - 70) < 8
         assert abs(pixel[0] - 150) > 20

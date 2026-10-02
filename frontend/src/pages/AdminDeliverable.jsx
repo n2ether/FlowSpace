@@ -8,6 +8,7 @@ import {
     Trash2,
     Image as ImageIcon,
     Loader2,
+    Smartphone,
     Sparkles,
 } from "lucide-react";
 import Header from "../components/Header";
@@ -456,6 +457,16 @@ const AdminDeliverable = () => {
                         >
                             <Save className="mr-2 h-4 w-4" />
                             {saving ? "Saving…" : "Save"}
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={() => navigate(`/admin/leads/${leadId}/blueprint`)}
+                            variant="outline"
+                            className="rounded-full"
+                            data-testid="deliverable-preview"
+                        >
+                            <Smartphone className="mr-2 h-4 w-4" />
+                            Mobile preview
                         </Button>
                         <Button
                             onClick={downloadPdf}

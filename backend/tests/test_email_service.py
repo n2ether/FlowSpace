@@ -140,11 +140,16 @@ def test_sends_image_board_and_companion(monkeypatch):
     attachments = calls[0]["attachments"]
     assert len(attachments) == 2
     assert attachments[0]["content_type"] == "image/png"
-    assert attachments[0]["filename"].endswith("_Image_Board_Camila.png")
+    assert attachments[0]["filename"].endswith("_Blueprint_Camila.png")
+    assert attachments[0].get("content_id") == "blueprint-preview"
     assert attachments[1]["content_type"] == "application/pdf"
     assert attachments[1]["filename"].endswith("_Companion_Camila.pdf")
-    assert "image board" in calls[0]["html"].lower()
-    assert "companion" in calls[0]["html"].lower()
+    html = calls[0]["html"].lower()
+    assert "cid:blueprint-preview" in html
+    assert html.find("blueprint") < html.find("companion")
+    assert "draft" not in html
+    assert "qa" not in html
+    assert "lead" not in html
 
 
 def test_send_draft_package_not_final(monkeypatch):

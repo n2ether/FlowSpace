@@ -13,6 +13,7 @@ import Account from "./pages/Account";
 import AdminLogin from "./pages/AdminLogin";
 import Admin from "./pages/Admin";
 import AdminDeliverable from "./pages/AdminDeliverable";
+import BlueprintPreview from "./pages/BlueprintPreview";
 
 function App() {
     return (
@@ -29,6 +30,7 @@ function App() {
                         <Route path="/admin/login" element={<AdminLogin />} />
                         <Route path="/admin" element={<Admin />} />
                         <Route path="/admin/leads/:leadId/design" element={<AdminDeliverable />} />
+                        <Route path="/admin/leads/:leadId/blueprint" element={<BlueprintPreview />} />
                     </Routes>
                     <Toaster position="top-right" richColors />
                 </AuthProvider>

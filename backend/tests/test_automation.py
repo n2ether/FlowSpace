@@ -670,6 +670,10 @@ def test_each_room_photo_is_edited_and_a_failure_blocks_final_email(monkeypatch)
     assert mapping["cccccccccccccccccccccccc"]["after_url"] is None
     assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["status"] == "approved"
     assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["after_url"]
+    assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["edit_kind"] == "own_source"
+    assert mapping["aaaaaaaaaaaaaaaaaaaaaaaa"]["derived_from_photo_id"] == "aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert mapping["cccccccccccccccccccccccc"]["edit_kind"] == "missing"
+    assert set(doc.get("required_source_ids") or []) == set(mapping)
     assert doc.get("view_1_url") is None
     assert doc.get("view_2_url") is None
     assert doc.get("package_status") == "incomplete"
@@ -734,6 +738,8 @@ def test_multi_photo_review_keeps_every_after_and_skips_hero_angles(monkeypatch)
     rows = db.deliverables.docs["lead-img-1"]["source_afters"]
     assert [row["label"] for row in rows] == ["SOURCE_01", "SOURCE_02"]
     assert all(row["status"] == "approved" and row["after_url"] for row in rows)
+    assert all(row["edit_kind"] == "own_source" for row in rows)
+    assert all(row["derived_from_photo_id"] == row["source_photo_id"] for row in rows)
     assert db.deliverables.docs["lead-img-1"].get("contact_sheet_url")
     assert db.deliverables.docs["lead-img-1"].get("package_status") == "review"
     from image_board import board_spec

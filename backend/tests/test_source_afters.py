@@ -5,9 +5,15 @@ from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
 from contact_sheet import build_contact_sheet
-from image_board import board_spec, build_image_board
+from image_board import board_layout, board_spec, build_image_board
 from pdf_generator import build_pdf
-from source_photos import classify_image_bytes, classify_upload, final_email_block_reason
+from source_photos import (
+    classify_image_bytes,
+    classify_upload,
+    draft_send_block_reason,
+    final_email_block_reason,
+    mapping_is_own_source,
+)
 
 
 def _jpeg(color, size=(240, 160)) -> bytes:
@@ -46,29 +52,77 @@ def test_intake_screenshot_is_not_a_required_source():
     assert classify_upload({"kind": "room"}, shot) == ("room", "override")
 
 
+def _own(label="SOURCE_01", photo_id="abc"):
+    return {
+        "label": label,
+        "source_photo_id": photo_id,
+        "derived_from_photo_id": photo_id,
+        "status": "approved",
+        "after_url": f"/api/uploads/photo/{photo_id}-after",
+        "edit_kind": "own_source",
+    }
+
+
 def test_final_email_blocks_incomplete_and_missing_after_urls():
     assert final_email_block_reason({"package_status": "incomplete"})
     assert final_email_block_reason(
         {
             "package_status": "review",
             "source_afters": [
-                {"label": "SOURCE_02", "status": "failed", "after_url": None},
+                {"label": "SOURCE_02", "status": "failed", "after_url": None, "edit_kind": "missing"},
             ],
         }
     )
     assert final_email_block_reason({"package_status": "review"}) is None
-    assert (
-        final_email_block_reason(
-            {
-                "package_status": "review",
-                "source_afters": [
-                    {"label": "SOURCE_01", "status": "approved", "after_url": "/api/uploads/photo/abc"},
-                ],
-            }
-        )
-        is None
-    )
+    assert final_email_block_reason({"package_status": "review", "source_afters": [_own()]}) is None
     assert final_email_block_reason({}) is None
+
+
+def test_final_email_requires_explicit_own_source_mapping():
+    approved_url = {
+        "label": "SOURCE_01",
+        "source_photo_id": "abc",
+        "status": "approved",
+        "after_url": "/api/uploads/photo/abc",
+    }
+    assert final_email_block_reason({"package_status": "review", "source_afters": [approved_url]})
+    assert mapping_is_own_source(approved_url) is False
+
+    crop = {**_own(), "edit_kind": "crop"}
+    invented = {**_own(), "edit_kind": "invented_angle"}
+    other = {**_own(), "derived_from_photo_id": "different-photo"}
+    for row in (crop, invented, other):
+        reason = final_email_block_reason({"package_status": "review", "source_afters": [row]})
+        assert reason
+        assert "own-source" in reason.lower()
+        assert mapping_is_own_source(row) is False
+
+    missing_required = final_email_block_reason(
+        {
+            "package_status": "review",
+            "required_source_ids": ["abc", "def"],
+            "source_afters": [_own(photo_id="abc")],
+        }
+    )
+    assert missing_required
+    assert "def" in missing_required
+
+    legacy = {
+        "package_status": "review",
+        "source_afters": [
+            {
+                "label": "SOURCE_01",
+                "source_photo_id": "abc",
+                "status": "approved",
+                "after_url": "/api/uploads/photo/abc",
+            }
+        ],
+    }
+    assert final_email_block_reason(legacy)
+    assert draft_send_block_reason(legacy) is None
+    assert draft_send_block_reason({"package_status": "incomplete", "source_afters": [_own()]})
+    assert draft_send_block_reason({"package_status": "review", "source_afters": [{**_own(), "edit_kind": "crop"}]})
+    assert draft_send_block_reason({"package_status": "review", "source_afters": [_own()]}) is None
 
 
 def test_contact_sheet_pairs_sources_with_afters_and_leaves_a_gap():
@@ -117,13 +171,19 @@ def test_board_shows_every_source_after_and_does_not_crop_fill_a_gap():
     assert "view_1" not in spec["detail_sources"]
     png = build_image_board(lead=LEAD, deliverable=PLAN, images=images)
     img = Image.open(io.BytesIO(png))
+    layout = board_layout(board_spec(LEAD, PLAN, images))
+
+    def mid(box):
+        return ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
+
     # Hero is the first full-room after (blue), not a crop of another angle.
-    assert img.getpixel((200, 280))[2] > 140
-    assert img.getpixel((200, 700))[2] > 140
-    # Supporting column is the remaining full-room after (red), then an empty gap.
-    supporting = img.getpixel((1500, 300))
+    for point in (mid(layout["hero"]), (layout["hero"][0] + 20, layout["hero"][1] + 20)):
+        assert img.getpixel(point)[2] > 140
+    # Remaining full-room afters: red, then an empty gap. Not a crop fill.
+    assert len(layout["sources"]) == 2
+    supporting = img.getpixel(mid(layout["sources"][0]))
     assert supporting[0] > 140 and supporting[1] < 80
-    missing = img.getpixel((1500, 700))
+    missing = img.getpixel(mid(layout["sources"][1]))
     assert missing[0] > 180 and missing[1] > 180
 
 
