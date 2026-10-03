@@ -222,25 +222,62 @@ def plan_title(space_type: Optional[str]) -> str:
 
 
 _CHILD_TURNING = re.compile(r"\b([A-Z][a-z]{2,})\s+is\s+turning\b")
+# "Nicholas's nursery" or "Nicholas' nursery", after curly apostrophes are flattened.
+_CHILD_POSSESSIVE = re.compile(r"\b([A-Z][a-z]{2,})(?:'s|')\s+nursery\b")
+_CURLY_APOSTROPHE = str.maketrans({"\u2018": "'", "\u2019": "'", "\u02bc": "'", "\u2032": "'"})
+
+
+def _flatten_apostrophes(text: str) -> str:
+    return str(text or "").translate(_CURLY_APOSTROPHE)
+
+
+def _plan_copy(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
+    """Customer plan and outcome text. Not image prompts or review notes."""
+    chunks = [str(lead.get(key) or "") for key in ("goals", "must_stay", "notes", "daily_improvement")]
+    for key in ("intro", "summary", "notes"):
+        chunks.append(str(deliverable.get(key) or ""))
+    for key in ("strategy", "benefits", "needs"):
+        for item in deliverable.get(key) or []:
+            chunks.append(str(item))
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict):
+            chunks.append(str(zone.get("title") or ""))
+            chunks.append(str(zone.get("desc") or ""))
+        else:
+            chunks.append(str(zone))
+    return _flatten_apostrophes("\n".join(chunks))
+
+
+def _customer_first_name(lead: Dict[str, Any]) -> str:
+    return str(lead.get("name") or "").strip().split(" ")[0]
 
 
 def _child_first_name(
     lead: Optional[Dict[str, Any]],
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Child named by the plan, such as 'Nicholas is turning one.'"""
+    """Child named by the plan.
+
+    Matches "Nicholas is turning one" and a possessive already in the
+    outcome, such as "Nicholas's nursery". A curly apostrophe counts.
+    The customer's own name is not treated as the child.
+    """
     lead = lead or {}
     explicit = str(lead.get("child_name") or "").strip()
     if explicit:
         first = explicit.split()[0]
         if first[:1].isalpha():
             return first[:1].upper() + first[1:]
-    chunks = [str(lead.get(key) or "") for key in ("goals", "must_stay", "notes", "daily_improvement")]
-    doc = deliverable or {}
-    for key in ("intro", "summary", "notes"):
-        chunks.append(str(doc.get(key) or ""))
-    match = _CHILD_TURNING.search("\n".join(chunks))
-    return match.group(1) if match else ""
+    blob = _plan_copy(lead, deliverable or {})
+    turning = _CHILD_TURNING.search(blob)
+    if turning:
+        return turning.group(1)
+    customer = _customer_first_name(lead).lower()
+    for match in _CHILD_POSSESSIVE.finditer(blob):
+        name = match.group(1)
+        if name.lower() != customer:
+            return name
+    return ""
 
 
 def customer_project_title(
@@ -249,8 +286,9 @@ def customer_project_title(
 ) -> str:
     """Nursery title the customer sees. Empty for every other room.
 
-    A nursery plan that names the child becomes \"Nicholas's Nursery\".
-    A nursery with no child name becomes \"Nursery\". Other rooms keep
+    A nursery plan that names the child — "Nicholas is turning one" or
+    "Nicholas's nursery" in the outcome — becomes "Nicholas's Nursery".
+    A nursery with no child name becomes "Nursery". Other rooms keep
     their own plan title at the call site.
     """
     from space_rails import is_nursery_space

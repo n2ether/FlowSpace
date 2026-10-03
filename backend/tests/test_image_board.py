@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
+from blueprint_presentation import build_presentation
 from image_board import (
     board_layout,
     board_spec,
@@ -15,7 +16,7 @@ from image_board import (
     customer_board_text,
     plan_geometry,
 )
-from pdf_generator import build_pdf
+from pdf_generator import build_pdf, customer_project_title
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json"
 
@@ -68,6 +69,41 @@ def test_nursery_board_copy_matches_the_cleaned_plan():
     assert len(bodies) == len(set(bodies))
     for move in spec["moves"]:
         assert move["body"].lower().startswith(move["title"].lower())
+
+
+def test_possessive_nursery_in_the_outcome_names_the_title():
+    """The live outcome says "Nicholas's nursery" and never "is turning"."""
+    lead = {
+        "name": "Camila Sales",
+        "space_type": "kids_room",
+        "goals": "Keep the space theme and make the nursery safer and calmer.",
+    }
+    outcome = (
+        "Camila, this refresh transforms Nicholas's nursery into a safer, warmer, "
+        "calmer haven without changing a single wall or replacing a single piece of furniture."
+    )
+    deliverable = {"summary": outcome, "intro": "A calmer room.", "shopping_list": []}
+    assert customer_project_title(lead, deliverable) == "Nicholas's Nursery"
+    spec = board_spec(lead, deliverable, {})
+    assert spec["headline"] == "Nicholas's Nursery"
+    assert spec["plan_title"] == "Nicholas's Nursery"
+    view = build_presentation(lead, deliverable, {})
+    assert view["headline"] == "Nicholas's Nursery"
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
+    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Nicholas's Nursery" in text
+
+    curly = outcome.replace("Nicholas's", "Nicholas\u2019s")
+    assert customer_project_title(lead, {"summary": curly}) == "Nicholas's Nursery"
+    assert customer_project_title(lead, {"summary": "This refresh is for Nicholas' nursery."}) == "Nicholas's Nursery"
+
+    # A name that is not tied to the child stays the generic nursery title.
+    assert customer_project_title(lead, {"summary": "Camila's nursery stays as it is."}) == "Nursery"
+    assert customer_project_title(lead, {"summary": "A calmer room for the toddler."}) == "Nursery"
+    assert customer_project_title(
+        {"name": "Ada", "space_type": "garage", "goals": "Park the cars."},
+        {"summary": "Nicholas's nursery is not this garage."},
+    ) == ""
 
 
 def test_board_claims_after_only_when_the_render_exists():
