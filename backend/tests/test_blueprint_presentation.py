@@ -45,6 +45,14 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert view["climate"]
     assert view["reset"]
     assert view["shopping_total"] == "$174"
+    assert view["headline"] == "Nicholas's Nursery"
+    assert [item["name"] for item in view["plan"]["legend"]] == [
+        "Sleep",
+        "Change",
+        "Comfort",
+        "Play/Storage",
+    ]
+    assert view["plan"]["path"][0][0] == 0.0
     assert "DRAFT" not in view["headline"].upper()
     assert "DRAFT" not in (view["outcome"] or "").upper()
     assert "QA" not in (view["hero_label"] or "").upper()

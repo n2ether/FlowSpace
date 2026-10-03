@@ -7,7 +7,14 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
-from image_board import board_layout, board_spec, build_image_board, customer_board_text, plan_geometry
+from image_board import (
+    board_layout,
+    board_spec,
+    build_image_board,
+    clear_path_points,
+    customer_board_text,
+    plan_geometry,
+)
 from pdf_generator import build_pdf
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json"
@@ -46,6 +53,9 @@ def test_nursery_board_copy_matches_the_cleaned_plan():
     assert spec["claims_organized_photo"] is False
     assert spec["hero_mode"] == "placeholder"
     assert spec["budget_display"] == "$174"
+    assert spec["headline"] == "Nicholas's Nursery"
+    assert spec["plan_title"] == "Nicholas's Nursery"
+    assert "Camila's Kids" not in spec["headline"]
     assert spec["zones"][1] == "Diaper & Dress Zone"
     blob = json.dumps({k: spec[k] for k in ("moves", "products", "roadmap", "headline", "zones")}).lower()
     assert "cubby" not in blob
@@ -165,6 +175,9 @@ def test_companion_keeps_the_full_zone_sentence_and_one_total():
     assert "bulky bedding" in text
     assert "Diaper & Dress Zone" in text
     assert "$174" in text
+    assert "Nicholas's Nursery" in text
+    assert "Camila's Kids" not in text
+    assert "Kids' room Organization Plan" not in text
     assert "$124" not in text
     assert "$154" not in text
     assert "Large open cubby unit" not in text
@@ -238,7 +251,8 @@ def test_portrait_hero_is_larger_without_cropping_and_board_hides_internal_codes
     assert "SOURCE_" not in blob
     assert "AFTER_" not in blob
     assert LEAD_ID not in blob
-    assert not re.search(r"\bDRAFT\b", blob, re.I)
+    # "draft sweep" is a real shopping line. A review DRAFT label is not.
+    assert not re.search(r"\bDRAFT\b", re.sub(r"draft sweep", "", blob, flags=re.I), re.I)
     assert not re.search(r"\bQA\b", blob)
     spec = board_spec(lead, deliverable, images)
     assert "SOURCE_" not in customer_board_text(spec)
@@ -266,6 +280,12 @@ def test_room_plan_is_a_topdown_room_not_only_horizontal_bars():
     ids = {place["id"] for place in topdown["places"]}
     assert {"sleep", "change", "comfort", "play"} <= ids
     assert "SLEEP" in topdown["furniture"]
+    assert [item["name"] for item in topdown["legend"]] == ["Sleep", "Change", "Comfort", "Play/Storage"]
+    door = plan_geometry((36, 900, 800, 1500), topdown)["door"]
+    path = clear_path_points(plan_geometry((36, 900, 800, 1500), topdown))
+    assert path[0][1] >= door[1] and path[0][1] <= door[3]
+    assert path[0][0] <= door[2]
+    assert path[-1][0] > path[0][0]
     # Even inside a short wide card, furniture stays on walls instead of spanning the room.
     geo = plan_geometry((36, 900, 1164, 1220), topdown)
     room = geo["room"]
@@ -315,3 +335,64 @@ def test_landscape_hero_reaches_across_the_board():
     content_w = 1200 - 72
     assert (hero[2] - hero[0]) >= int(content_w * 0.78)
     assert abs(((hero[2] - hero[0]) / (hero[3] - hero[1])) - 1.5) < 0.05
+
+
+def _drawn_text(monkeypatch, lead, deliverable, images):
+    drawn = []
+    original = ImageDraw.ImageDraw.text
+
+    def _record(self, xy, text, *args, **kwargs):
+        drawn.append(str(text))
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", _record)
+    build_image_board(lead=lead, deliverable=deliverable, images=images)
+    return "\n".join(drawn)
+
+
+def test_editorial_changes_are_a_compact_grid_and_shopping_is_itemized():
+    lead, deliverable = _load()
+    frames = []
+    for _ in range(4):
+        buf = io.BytesIO()
+        _quadrant(240, 480).save(buf, format="PNG")
+        frames.append(buf.getvalue())
+    images = {
+        "source_pairs": [
+            {"label": f"SOURCE_{i + 1:02d}", "after_label": f"AFTER_{i + 1:02d}", "before": frames[i], "after": frames[i]}
+            for i in range(4)
+        ]
+    }
+    spec = board_spec(lead, deliverable, images)
+    layout = board_layout(spec)
+    changes_h = layout["changes"][3] - layout["changes"][1]
+    assert 280 <= changes_h <= 360
+    shopping = layout["shopping"]
+    assert shopping[3] - shopping[1] >= 80
+    assert layout["changes"][3] <= shopping[1]
+    assert shopping[3] <= layout["sources"][0][1]
+    assert spec["products"]
+    assert spec["budget_display"] == "$174"
+
+
+def test_board_paints_zones_title_and_shopping_lines(monkeypatch):
+    lead, deliverable = _load()
+    blob = _drawn_text(monkeypatch, lead, deliverable, {})
+    assert "Nicholas's Nursery" in blob
+    assert "Camila's Kids" not in blob
+    assert "Play/Storage" in blob
+    assert "SHOPPING" in blob
+    assert "$174" in blob
+    assert "more in the companion guide" in blob
+    assert any("anchor" in line.lower() for line in blob.splitlines())
+    assert "SOURCE_" not in blob
+    assert "AFTER_" not in blob
+
+
+def test_board_drops_a_lone_total_when_there_are_no_line_items(monkeypatch):
+    lead, deliverable = _load()
+    deliverable = {**deliverable, "shopping_list": [], "budget_note": "Total $240.", "budget_display": "$240"}
+    blob = _drawn_text(monkeypatch, lead, deliverable, {})
+    assert "$240" not in blob
+    assert "$" not in blob
+    assert "SHOPPING" not in blob

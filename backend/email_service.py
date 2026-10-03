@@ -35,23 +35,45 @@ def _preview_url(lead_id: str) -> str:
     return f"{base}/admin/leads/{lead_id}/blueprint"
 
 
-def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> str:
-    """Final customer email. Blueprint preview first, then the guide. No internal language."""
-    space = plan_title(space_type)
-    if two_files:
-        preview = """
-              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1F3D2C;">1 · Your Blueprint</p>
-              <img src="cid:blueprint-preview" alt="Your FlowSpace Blueprint" width="400" style="width:100%;max-width:400px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
-              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">The portrait plan — hero, what changed, and how the room flows. The same image is attached.</p>
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-                <tr>
-                  <td align="center" style="background:#1F3D2C;border-radius:999px;padding:14px 18px;">
-                    <span style="color:#ffffff;font-size:16px;font-weight:700;">Open the companion guide</span>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1F3D2C;">2 · Companion guide</p>
-              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">The guide is the attached PDF. Read it on your phone for the steps, shopping list, safety, climate, and weekly reset.</p>
+def _file_stem(title: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in (title or "Blueprint"))
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned.strip("_") or "Blueprint"
+
+
+def customer_email_html(
+    customer_name: str,
+    space_type: str,
+    *,
+    project_title: str = "",
+    preview_src: str = "",
+    guide_href: str = "",
+) -> str:
+    """Customer email layout a final send uses.
+
+    The Blueprint preview is the first block in the body. The companion
+    guide follows it. No review codes, no package status.
+    ``preview_src`` is ``cid:blueprint-preview`` on a real send, or a
+    browser-readable URL or data URI when rendering the same layout locally.
+    """
+    space = (project_title or plan_title(space_type)).strip() or plan_title(space_type)
+    if preview_src:
+        guide_link = ""
+        if guide_href:
+            guide_link = f"""
+              <p style="margin:0 0 16px;">
+                <a href="{guide_href}" style="color:#1F3D2C;font-size:16px;font-weight:700;">Open the companion guide</a>
+              </p>
+            """
+        preview = f"""
+              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Your Blueprint</p>
+              <p style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#1F3D2C;font-weight:600;">{space}</p>
+              <img src="{preview_src}" alt="{space} Blueprint" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
+              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The portrait plan — hero, what changed, and how the room flows. The same image is attached.</p>
+              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Companion guide</p>
+              {guide_link}
+              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">Next, open the attached companion guide on your phone for the steps, shopping list, safety, climate, and weekly reset.</p>
         """
     else:
         preview = f"""
@@ -78,7 +100,7 @@ def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> s
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eee6;padding:24px 0;">
     <tr>
       <td align="center" style="padding:0 16px;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:16px;overflow:hidden;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;">
 
           <tr>
             <td style="background:#1F3D2C;padding:24px 20px;">
@@ -93,7 +115,7 @@ def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> s
                 Your Blueprint is ready, {customer_name}
               </h1>
               <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
-                Start with the Blueprint. The companion guide comes after it.
+                Start with the portrait plan below.
               </p>
               {preview}
               <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
@@ -125,6 +147,22 @@ def _customer_html(customer_name: str, space_type: str, *, two_files: bool) -> s
 """
 
 
+def _customer_html(
+    customer_name: str,
+    space_type: str,
+    *,
+    two_files: bool,
+    project_title: str = "",
+    preview_src: str = "cid:blueprint-preview",
+) -> str:
+    return customer_email_html(
+        customer_name,
+        space_type,
+        project_title=project_title,
+        preview_src=preview_src if two_files else "",
+    )
+
+
 def _admin_html(customer_name: str, customer_email: str, space_type: str, lead_id: str) -> str:
     return f"""
 <!DOCTYPE html>
@@ -151,6 +189,7 @@ async def send_blueprint(
     lead_id: str,
     pdf_bytes: bytes,
     board_bytes: Optional[bytes] = None,
+    project_title: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """
     Send the companion PDF and, when present, the image board.
@@ -169,10 +208,16 @@ async def send_blueprint(
 
     resend.api_key = api_key
     space = plan_title(space_type)
+    shown = (project_title or "").strip()
     safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    stem = space.replace(" ", "_")
+    stem = _file_stem(shown) if shown else space.replace(" ", "_")
     pdf_filename = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
+    subject = (
+        f"Your FlowSpace Blueprint is ready — {shown} ✨"
+        if shown
+        else f"Your FlowSpace {space} is Ready ✨"
+    )
     sender = _from_email()
     attachments = []
     if board_bytes:
@@ -198,8 +243,13 @@ async def send_blueprint(
             {
                 "from": sender,
                 "to": [customer_email.strip()],
-                "subject": f"Your FlowSpace {space} is Ready ✨",
-                "html": _customer_html(customer_name, space_type, two_files=bool(board_bytes)),
+                "subject": subject,
+                "html": _customer_html(
+                    customer_name,
+                    space_type,
+                    two_files=bool(board_bytes),
+                    project_title=shown,
+                ),
                 "attachments": attachments,
             },
         )
@@ -283,26 +333,48 @@ async def send_contact_sheet(
         logger.exception("Contact sheet email failed: %s", exc)
         return False, f"Resend contact sheet send failed: {exc}"
 
-def _draft_package_html(customer_name: str, lead_id: str, space_type: str) -> str:
-    space = plan_title(space_type)
+def _draft_package_html(
+    customer_name: str,
+    lead_id: str,
+    space_type: str,
+    *,
+    project_title: str = "",
+    preview_src: str = "",
+) -> str:
+    """Draft review uses the customer email layout, with a not-final banner.
+
+    The banner is the only draft marker. The body under it is the layout a
+    final send would use. This function does not mark a lead final.
+    """
+    inner = customer_email_html(
+        customer_name,
+        space_type,
+        project_title=project_title,
+        preview_src=preview_src,
+    )
     preview = _preview_url(lead_id)
-    return f"""
-<!DOCTYPE html>
-<html>
-<body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
-  <h2 style="color:#1F3D2C;">FlowSpace DRAFT portrait Blueprint + companion — not final</h2>
-  <p>Hi {customer_name},</p>
-  <p>Attached is the <strong>DRAFT</strong> portrait Blueprint and companion guide for lead <code>{lead_id}</code> ({space}).</p>
-  <p><strong>This is for your review only.</strong> It is not the customer final package. Please reply with any notes before we send final.</p>
-  <p>Mobile preview (review only, does not send final): <a href="{preview}">{preview}</a></p>
-  <ul>
-    <li>Portrait Blueprint — hero, what changed, room flow, palette, roadmap</li>
-    <li>Companion guide — steps, shopping list, safety, climate, weekly reset, and per-source before/after pages</li>
-  </ul>
-  <p>Warmly,<br>The FlowSpace Team</p>
-</body>
-</html>
+    banner = f"""
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1F3D2C;padding:16px 0;">
+    <tr>
+      <td align="center" style="padding:0 16px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+          <tr>
+            <td style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;">
+              <strong>DRAFT REVIEW — not final.</strong>
+              This copy is for review only. It does not mark the package final, and it is not the customer send.
+              Lead <code>{lead_id}</code>.
+              Mobile preview (review only): <a href="{preview}" style="color:#cfe2d7;">{preview}</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 """
+    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\'Helvetica Neue\',Helvetica,Arial,sans-serif;">'
+    if marker in inner:
+        return inner.replace(marker, marker + banner, 1)
+    return banner + inner
 
 
 async def send_draft_package(
@@ -314,6 +386,7 @@ async def send_draft_package(
     pdf_bytes: bytes,
     board_bytes: Optional[bytes] = None,
     cc_emails: Optional[list] = None,
+    project_title: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """Email DRAFT board + companion PDF for review. Does not mark a package final."""
     api_key = os.environ.get("RESEND_API_KEY")
@@ -326,8 +399,9 @@ async def send_draft_package(
 
     resend.api_key = api_key
     space = plan_title(space_type)
+    shown = (project_title or "").strip()
     safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
-    stem = space.replace(" ", "_")
+    stem = _file_stem(shown) if shown else space.replace(" ", "_")
     attachments = []
     if board_bytes:
         attachments.append(
@@ -335,6 +409,7 @@ async def send_draft_package(
                 "filename": f"FlowSpace_{stem}_DRAFT_Blueprint_{safe_name}.png",
                 "content": base64.b64encode(board_bytes).decode("utf-8"),
                 "content_type": "image/png",
+                "content_id": "blueprint-preview",
             }
         )
     attachments.append(
@@ -348,7 +423,13 @@ async def send_draft_package(
         "from": _from_email(),
         "to": [recipient],
         "subject": f"FlowSpace DRAFT — not final ({customer_name or lead_id})",
-        "html": _draft_package_html(customer_name or "there", lead_id, space_type),
+        "html": _draft_package_html(
+            customer_name or "there",
+            lead_id,
+            space_type,
+            project_title=(project_title or "").strip(),
+            preview_src="cid:blueprint-preview" if board_bytes else "",
+        ),
         "attachments": attachments,
     }
     cc = [e.strip() for e in (cc_emails or []) if (e or "").strip()]
