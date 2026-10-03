@@ -22,20 +22,51 @@ function Section({ title, testId, children }) {
 
 function RoomPlan({ plan }) {
     const places = Array.isArray(plan?.places) ? plan.places : [];
+    const legend = Array.isArray(plan?.legend) ? plan.legend : [];
+    const path = Array.isArray(plan?.path) ? plan.path : [];
+    const points = path
+        .filter((point) => Array.isArray(point) && point.length >= 2)
+        .map(([x, y]) => `${Number(x) * 100},${Number(y) * 100}`)
+        .join(" ");
+    const doorY = path[0] && Array.isArray(path[0]) ? Number(path[0][1]) * 100 : 32;
     return (
         <Section title="Room flow" testId="blueprint-plan">
             <div className="relative mx-auto aspect-[5/4] w-full overflow-hidden rounded-2xl border-[3px] border-[#1F3D2C] bg-[#faf6ef]">
                 <p className="absolute left-1/2 top-2 -translate-x-1/2 text-xs font-semibold tracking-wide text-[#C17B4A]">
                     {plan?.window || "Window"}
                 </p>
-                <p className="absolute left-2 top-[22%] text-xs font-semibold text-[#1F3D2C]">{plan?.door || "Door"}</p>
+                <p
+                    className="absolute left-2 text-xs font-semibold text-[#1F3D2C]"
+                    style={{ top: `calc(${doorY}% - 0.9rem)` }}
+                >
+                    {plan?.door || "Door"}
+                </p>
+                {points ? (
+                    <svg
+                        className="pointer-events-none absolute inset-0 h-full w-full"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        aria-hidden="true"
+                    >
+                        <polyline
+                            points={points}
+                            fill="none"
+                            stroke="#C17B4A"
+                            strokeWidth="1.6"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                            vectorEffect="non-scaling-stroke"
+                        />
+                    </svg>
+                ) : null}
                 {places.map((place) => {
                     const box = Array.isArray(place.box) ? place.box : [0.08, 0.08, 0.32, 0.28];
                     const [l, t, r, b] = box;
+                    const zone = place.zone || place.label;
                     return (
                         <div
                             key={place.id || place.label}
-                            className="absolute flex items-center justify-center rounded-xl border-2 border-[#1F3D2C] bg-[#cfe2d7] px-1 text-center text-xs font-semibold leading-tight text-[#1F3D2C]"
+                            className="absolute flex items-center justify-center gap-1 rounded-xl border-2 border-[#1F3D2C] bg-[#cfe2d7] px-1 text-center text-xs font-semibold leading-tight text-[#1F3D2C]"
                             style={{
                                 left: `${l * 100}%`,
                                 top: `${t * 100}%`,
@@ -43,14 +74,28 @@ function RoomPlan({ plan }) {
                                 height: `${Math.max(8, (b - t) * 100)}%`,
                             }}
                         >
-                            {place.label}
+                            {place.number ? (
+                                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#1F3D2C] text-[10px] text-white">
+                                    {place.number}
+                                </span>
+                            ) : null}
+                            <span>{zone}</span>
                         </div>
                     );
                 })}
-                <p className="pointer-events-none absolute left-[18%] top-[46%] text-xs font-semibold text-[#C17B4A]">
+                <p className="pointer-events-none absolute left-[8%] top-[40%] text-xs font-semibold text-[#C17B4A]">
                     {plan?.circulation || "Clear path"}
                 </p>
             </div>
+            {legend.length ? (
+                <ol className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm" data-testid="blueprint-zone-legend">
+                    {legend.map((item) => (
+                        <li key={`${item.number}-${item.name}`}>
+                            <span className="font-semibold text-[#1F3D2C]">{item.number}.</span> {item.name}
+                        </li>
+                    ))}
+                </ol>
+            ) : null}
             {plan?.caption ? <p className="text-base text-[#6e655c]">{plan.caption}</p> : null}
         </Section>
     );

@@ -147,6 +147,7 @@ def test_sends_image_board_and_companion(monkeypatch):
     html = calls[0]["html"].lower()
     assert "cid:blueprint-preview" in html
     assert html.find("blueprint") < html.find("companion")
+    assert html.find("<img") < html.find("companion guide")
     assert "draft" not in html
     assert "qa" not in html
     assert "lead" not in html
@@ -188,3 +189,44 @@ def test_send_draft_package_not_final(monkeypatch):
     assert "not final" in payload["html"].lower()
     assert len(payload["attachments"]) == 2
     assert "DRAFT" in payload["attachments"][0]["filename"]
+    assert payload["attachments"][0].get("content_id") == "blueprint-preview"
+    html = payload["html"]
+    low = html.lower()
+    assert "cid:blueprint-preview" in low
+    assert low.find("<img") < low.find("companion guide")
+    assert "draft" in low
+    assert "not final" in low
+    assert "email_sent" not in low
+    assert "package_status" not in low
+
+
+def test_customer_email_uses_the_nursery_title_and_in_body_preview(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    calls = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return {"id": "ok"}
+
+    monkeypatch.setattr("email_service.resend.Emails.send", fake_send)
+    sent, err = asyncio.run(
+        send_blueprint(
+            customer_name="Camila",
+            customer_email="camila@example.com",
+            space_type="kids_room",
+            lead_id="9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+            pdf_bytes=PDF,
+            board_bytes=b"\x89PNG\r\n\x1a\nboard",
+            project_title="Nicholas's Nursery",
+        )
+    )
+    assert sent is True
+    assert err is None
+    html = calls[0]["html"]
+    assert "Nicholas's Nursery" in html
+    assert "Camila's Kids" not in html
+    assert "Kids' room" not in html
+    assert "cid:blueprint-preview" in html
+    assert html.lower().find("<img") < html.lower().find("companion guide")
+    assert "9dbedfba-81fc-45e0-b99d-36e0a1de01bb" not in html
+    assert "Nicholas" in calls[0]["subject"]

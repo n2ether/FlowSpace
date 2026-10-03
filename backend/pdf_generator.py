@@ -221,6 +221,48 @@ def plan_title(space_type: Optional[str]) -> str:
     return f"{label} Organization Plan"
 
 
+_CHILD_TURNING = re.compile(r"\b([A-Z][a-z]{2,})\s+is\s+turning\b")
+
+
+def _child_first_name(
+    lead: Optional[Dict[str, Any]],
+    deliverable: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Child named by the plan, such as 'Nicholas is turning one.'"""
+    lead = lead or {}
+    explicit = str(lead.get("child_name") or "").strip()
+    if explicit:
+        first = explicit.split()[0]
+        if first[:1].isalpha():
+            return first[:1].upper() + first[1:]
+    chunks = [str(lead.get(key) or "") for key in ("goals", "must_stay", "notes", "daily_improvement")]
+    doc = deliverable or {}
+    for key in ("intro", "summary", "notes"):
+        chunks.append(str(doc.get(key) or ""))
+    match = _CHILD_TURNING.search("\n".join(chunks))
+    return match.group(1) if match else ""
+
+
+def customer_project_title(
+    lead: Optional[Dict[str, Any]],
+    deliverable: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Nursery title the customer sees. Empty for every other room.
+
+    A nursery plan that names the child becomes \"Nicholas's Nursery\".
+    A nursery with no child name becomes \"Nursery\". Other rooms keep
+    their own plan title at the call site.
+    """
+    from space_rails import is_nursery_space
+
+    if not is_nursery_space(lead):
+        return ""
+    child = _child_first_name(lead, deliverable)
+    if child:
+        return f"{child}'s Nursery"
+    return "Nursery"
+
+
 PAGE_W, PAGE_H = LETTER
 # Narrow page so body type stays readable when a phone fits the page to the screen.
 PHONE_W, PHONE_H = 390, 744
@@ -1560,7 +1602,7 @@ def build_pdf(
     buf = io.BytesIO()
     s = _styles()
     space_key = lead.get("space_type") or "space"
-    title_text = plan_title(space_key)
+    title_text = customer_project_title(lead, deliverable) or plan_title(space_key)
     customer_name = lead.get("name") or "there"
     vibe = _keyword_line(lead)
     page_w, page_h = PHONE_W, PHONE_H

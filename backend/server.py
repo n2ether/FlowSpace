@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 from gridfs.errors import NoFile
+import base64
 import io
 import os
 import logging
@@ -21,10 +22,10 @@ import httpx
 
 from image_board import build_image_board
 from blueprint_presentation import build_presentation
-from pdf_generator import build_pdf, plan_title
+from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
-from email_service import send_blueprint, send_contact_sheet, send_draft_package
+from email_service import customer_email_html, send_blueprint, send_contact_sheet, send_draft_package
 from source_photos import draft_send_block_reason, final_email_block_reason
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
@@ -958,11 +959,20 @@ async def _blueprint_render_inputs(lead_id: str, request: Request):
     return lead, d, images
 
 
-def _blueprint_filenames(lead: Dict[str, Any]) -> Tuple[str, str, str]:
+def _customer_title(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
+    """Title a customer sees. Nursery plans use the child's name when the plan states it."""
+    return customer_project_title(lead, deliverable) or plan_title(lead.get("space_type"))
+
+
+def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str]:
     safe_name = "".join(
         ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client")
     )
-    stem = plan_title(lead.get("space_type")).replace(" ", "_")
+    title = _customer_title(lead, deliverable or {})
+    stem = "".join(ch if ch.isalnum() else "_" for ch in title)
+    while "__" in stem:
+        stem = stem.replace("__", "_")
+    stem = stem.strip("_") or "Blueprint"
     board = f"FlowSpace_{stem}_Blueprint_{safe_name}.png"
     pdf = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
     package = f"FlowSpace_{stem}_Blueprint_{safe_name}.zip"
@@ -1000,7 +1010,7 @@ async def deliverable_presentation(lead_id: str, request: Request, _: bool = Dep
 async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depends(require_admin)):
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
-    _board_name, filename, _package = _blueprint_filenames(lead)
+    _board_name, filename, _package = _blueprint_filenames(lead, d)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1012,11 +1022,30 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
 async def render_deliverable_board(lead_id: str, request: Request, _: bool = Depends(require_admin)):
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
-    filename, _pdf_name, _package = _blueprint_filenames(lead)
+    filename, _pdf_name, _package = _blueprint_filenames(lead, d)
     return Response(
         content=png_bytes,
         media_type="image/png",
         headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/email-preview")
+async def render_customer_email_preview(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Customer email HTML with the Blueprint in the body. Does not send or mark final."""
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    board = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    preview_src = "data:image/png;base64," + base64.b64encode(board).decode("ascii")
+    html = customer_email_html(
+        lead.get("name") or "there",
+        lead.get("space_type") or "space",
+        project_title=_customer_title(lead, deliverable),
+        preview_src=preview_src,
+    )
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1026,7 +1055,7 @@ async def render_deliverable_package(lead_id: str, request: Request, _: bool = D
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
-    board_name, pdf_name, package_name = _blueprint_filenames(lead)
+    board_name, pdf_name, package_name = _blueprint_filenames(lead, d)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(board_name, png_bytes)
@@ -1128,6 +1157,7 @@ async def send_draft_package_endpoint(
         pdf_bytes=pdf_bytes,
         board_bytes=board_bytes,
         cc_emails=cc_emails or None,
+        project_title=_customer_title(lead, deliverable),
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
@@ -1157,6 +1187,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         lead_id=lead_id,
         pdf_bytes=pdf_bytes,
         board_bytes=board_bytes,
+        project_title=_customer_title(lead, deliverable),
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:
