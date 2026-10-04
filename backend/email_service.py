@@ -276,16 +276,19 @@ async def send_blueprint(
     return True, None
 
 
+REVIEW_STATUS = "DRAFT. Review version. Not yet approved. Customer release held."
+
+
 def _review_sheet_html(customer_name: str, lead_id: str, *, incomplete: bool) -> str:
-    state = "incomplete" if incomplete else "ready for review"
+    missing = " A required after is still missing, so customer release held." if incomplete else ""
     return f"""
 <!DOCTYPE html>
 <html>
 <body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
-  <h2 style="color:#1F3D2C;">FlowSpace contact sheet — not final</h2>
-  <p>This is a review sheet for {customer_name} (lead <code>{lead_id}</code>). It is {state}.</p>
+  <h2 style="color:#1F3D2C;">FlowSpace contact sheet — DRAFT</h2>
+  <p>{REVIEW_STATUS}{missing}</p>
+  <p>This is a review sheet for {customer_name} (lead <code>{lead_id}</code>).</p>
   <p>Each row is one source photo and the after edited from that same camera. It is not the customer image board and not the companion PDF.</p>
-  <p>Do not send the final package until the sheet is approved. If a row has no after, the package stays incomplete.</p>
 </body>
 </html>
 """
@@ -316,7 +319,7 @@ async def send_contact_sheet(
             {
                 "from": _from_email(),
                 "to": [recipient],
-                "subject": f"FlowSpace review sheet — not final ({customer_name or lead_id})",
+                "subject": f"FlowSpace DRAFT — review version, not yet approved ({customer_name or lead_id})",
                 "html": _review_sheet_html(customer_name or "the customer", lead_id, incomplete=incomplete),
                 "attachments": [
                     {
@@ -341,10 +344,10 @@ def _draft_package_html(
     project_title: str = "",
     preview_src: str = "",
 ) -> str:
-    """Draft review uses the customer email layout, with a not-final banner.
+    """Draft review uses the customer email layout, with a review-version banner.
 
     The banner is the only draft marker. The body under it is the layout a
-    final send would use. This function does not mark a lead final.
+    later customer send would use. This function does not release the package.
     """
     inner = customer_email_html(
         customer_name,
@@ -352,6 +355,11 @@ def _draft_package_html(
         project_title=project_title,
         preview_src=preview_src,
     )
+    inner = inner.replace(
+        f"Your Blueprint is ready, {customer_name}",
+        REVIEW_STATUS,
+    )
+    inner = inner.replace("Your FlowSpace Blueprint is Ready", "FlowSpace DRAFT — review version")
     preview = _preview_url(lead_id)
     banner = f"""
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#1F3D2C;padding:16px 0;">
@@ -360,10 +368,8 @@ def _draft_package_html(
         <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
           <tr>
             <td style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;">
-              <strong>DRAFT REVIEW — not final.</strong>
-              This copy is for review only. It does not mark the package final, and it is not the customer send.
-              Lead <code>{lead_id}</code>.
-              Mobile preview (review only): <a href="{preview}" style="color:#cfe2d7;">{preview}</a>
+              <strong>{REVIEW_STATUS}</strong>
+              <a href="{preview}" style="color:#cfe2d7;">Open the mobile preview</a>
             </td>
           </tr>
         </table>
@@ -371,7 +377,7 @@ def _draft_package_html(
     </tr>
   </table>
 """
-    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\'Helvetica Neue\',Helvetica,Arial,sans-serif;">'
+    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\\'Helvetica Neue\\',Helvetica,Arial,sans-serif;">'
     if marker in inner:
         return inner.replace(marker, marker + banner, 1)
     return banner + inner
@@ -422,7 +428,7 @@ async def send_draft_package(
     payload = {
         "from": _from_email(),
         "to": [recipient],
-        "subject": f"FlowSpace DRAFT — not final ({customer_name or lead_id})",
+        "subject": f"FlowSpace DRAFT — review version, not yet approved ({customer_name or lead_id})",
         "html": _draft_package_html(
             customer_name or "there",
             lead_id,
@@ -442,4 +448,3 @@ async def send_draft_package(
     except Exception as exc:
         logger.exception("Draft package email failed: %s", exc)
         return False, f"Resend draft package send failed: {exc}"
-
