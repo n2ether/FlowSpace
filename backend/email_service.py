@@ -377,7 +377,7 @@ def _draft_package_html(
     </tr>
   </table>
 """
-    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\\'Helvetica Neue\\',Helvetica,Arial,sans-serif;">'
+    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\'Helvetica Neue\',Helvetica,Arial,sans-serif;">'
     if marker in inner:
         return inner.replace(marker, marker + banner, 1)
     return banner + inner
@@ -448,3 +448,4 @@ async def send_draft_package(
     except Exception as exc:
         logger.exception("Draft package email failed: %s", exc)
         return False, f"Resend draft package send failed: {exc}"
+
