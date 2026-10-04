@@ -748,9 +748,9 @@ async def run_automation(
             # Review sheet is ready. The customer board and PDF stay unsent
             # until an admin marks the package final. Incomplete never emails.
             note = (
-                "Package incomplete: a required room photo failed generation or QA. Not emailed as final."
+                "DRAFT. Review version. Not yet approved. Customer release held. A required room photo is still missing."
                 if package_status == "incomplete"
-                else "Contact sheet ready for review. Customer board and PDF are not final until approved."
+                else "DRAFT. Review version. Not yet approved. Customer release held."
             )
             await db.leads.update_one(
                 {"id": lead_id},

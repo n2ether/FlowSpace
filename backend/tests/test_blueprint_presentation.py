@@ -47,12 +47,21 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert view["shopping_total"] == "$174"
     assert view["headline"] == "Nicholas's Nursery"
     assert [item["name"] for item in view["plan"]["legend"]] == [
-        "Sleep",
-        "Change",
-        "Comfort",
-        "Play/Storage",
+        "Crib",
+        "Dresser",
+        "Rocker",
     ]
-    assert view["plan"]["path"][0][0] == 0.0
+    assert view["plan"]["door_wall"] == "west"
+    assert view["plan"]["door_at"] < 0.2
+    dresser = next(place["box"] for place in view["plan"]["places"] if place["id"] == "change")
+    crib = next(place["box"] for place in view["plan"]["places"] if place["id"] == "sleep")
+    assert dresser[1] < 0.12
+    assert dresser[2] < crib[0]
+    assert view["plan"]["path"][0][1] < 0.25
+    assert view["plan"]["board_caption"] == "Approximate room flow + zones"
+    assert len(view["changes"]) == 4
+    assert view["reset_title"] == "One-minute bedtime ritual"
+    assert "companion guide" in view["warning_note"].lower()
     assert "DRAFT" not in view["headline"].upper()
     assert "DRAFT" not in (view["outcome"] or "").upper()
     assert "QA" not in (view["hero_label"] or "").upper()

@@ -41,8 +41,9 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Flowable,
     Frame,
+    CondPageBreak,
+    KeepTogether,
     NextPageTemplate,
-    PageBreak,
     PageTemplate,
     Paragraph,
     Spacer,
@@ -427,15 +428,21 @@ def _styles():
         ),
         "guideH": ParagraphStyle(
             "guideH", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
-            fontSize=16, leading=20, textColor=SLATE, spaceBefore=12, spaceAfter=6,
+            fontSize=14, leading=17, textColor=SLATE, spaceBefore=7, spaceAfter=2,
+            keepWithNext=True,
         ),
         "guideH3": ParagraphStyle(
             "guideH3", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
-            fontSize=14, leading=18, textColor=EMERALD_DEEP, spaceBefore=8, spaceAfter=2,
+            fontSize=12, leading=15, textColor=EMERALD_DEEP, spaceBefore=4, spaceAfter=1,
+            keepWithNext=True,
         ),
         "guideBody": ParagraphStyle(
             "guideBody", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=14, leading=19, textColor=INK, spaceAfter=6,
+            fontSize=12, leading=15.5, textColor=INK, spaceAfter=2,
+        ),
+        "guideLink": ParagraphStyle(
+            "guideLink", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=11, leading=14, textColor=INK, spaceAfter=1,
         ),
     }
 
@@ -1442,6 +1449,18 @@ def _compare_panel(
     return stack
 
 
+def _guide_frame_height() -> float:
+    """Usable height of one companion-guide frame, after header, footer, and padding."""
+    return PHONE_H - INT_HEADER_H - FOOTER_H - 0.12 * inch - 6
+
+
+def _compare_photo_height(frame_h: float) -> float:
+    """Two contained photos plus their headings must stay on one page."""
+    reserved = 210
+    fitted = (frame_h - reserved) / 2.0
+    return max(120.0, min(fitted, 2.55 * inch))
+
+
 def _before_after_section(
     before: Optional[bytes],
     after: Optional[bytes],
@@ -1450,10 +1469,12 @@ def _before_after_section(
     compact: bool = True,
     before_banner: str = COMPARE_BEFORE_BANNER,
     after_banner: str = COMPARE_AFTER_BANNER,
+    photo_h: Optional[float] = None,
 ) -> Table:
     # Stacked, full width, so a phone does not have to pinch a side-by-side pair.
     # ``photo_h`` is a maximum. Each photo then contains at its own ratio.
-    photo_h = 2.15 * inch if compact else 3.15 * inch
+    if photo_h is None:
+        photo_h = 2.15 * inch if compact else 3.15 * inch
     left = _compare_panel(
         before, width, photo_h,
         before_banner, COMPARE_BEFORE_EMPTY, COMPARE_BEFORE_EMPTY_SUB,
@@ -1477,6 +1498,7 @@ def _before_after_section(
             ]
         )
     )
+    t.splitByRow = 0
     return t
 
 
@@ -1546,8 +1568,12 @@ def _shopping_blocks(items: List[Dict[str, Any]]) -> List[Any]:
         qty_label = str(int(qty) if float(qty).is_integer() else qty)
         price_label = _money(price) if price else "Typical"
         sub_label = _money(sub) if sub else "—"
-        flows.append(Paragraph(f"<b>{_esc(name)}</b>", s["guideBody"]))
-        flows.append(Paragraph(f"Qty {qty_label} · {price_label} each · {sub_label}", s["guideBody"]))
+        flows.append(
+            Paragraph(
+                f"<b>{_esc(name)}</b><br/>Qty {qty_label} · {price_label} each · {sub_label}",
+                s["guideBody"],
+            )
+        )
     return flows
 
 
@@ -1677,7 +1703,8 @@ def build_pdf(
             f"Hi {_esc(customer_name)}. Open the portrait Blueprint first — the hero, "
             "what changed, and the room flow. This companion guide is next, and it is "
             "meant to be read on your phone: full steps, the shopping list, safety, "
-            "climate, the weekly reset, and each before and after from the same photo. "
+            f"climate, the {_esc(str(sections.get('reset_title') or 'weekly reset').lower())}, "
+            "and each before and after from the same photo. "
             "Measurements are approximate.",
             s["guideBody"],
         )
@@ -1706,7 +1733,6 @@ def build_pdf(
         story.append(Paragraph(OPTIONAL_PAINT_HEADING, s["guideH"]))
         story.append(paint)
 
-    story.append(PageBreak())
     story.append(Paragraph("SHOPPING LIST", s["guideH"]))
     if sections["budget_note"]:
         story.append(Paragraph(_esc(sections["budget_note"]), s["guideBody"]))
@@ -1732,11 +1758,11 @@ def build_pdf(
                 story.append(
                     Paragraph(
                         f'<link href="{_esc(url)}" color="#047857"><u>{_esc(name)}</u></link>',
-                        s["guideBody"],
+                        s["guideLink"],
                     )
                 )
             elif name:
-                story.append(Paragraph(_esc(name), s["guideBody"]))
+                story.append(Paragraph(_esc(name), s["guideLink"]))
         if sections["links_are_search"]:
             story.append(
                 Paragraph(
@@ -1747,7 +1773,6 @@ def build_pdf(
     else:
         story.append(Paragraph("Shopping links will follow once the list has items.", s["guideBody"]))
 
-    story.append(PageBreak())
     story.append(Paragraph("STEP BY STEP", s["guideH"]))
     for index, step in enumerate(sections["steps"], 1):
         story.append(Paragraph(f"{index}. {_esc(step)}", s["guideBody"]))
@@ -1760,21 +1785,35 @@ def build_pdf(
     for line in sections["climate"]:
         story.append(Paragraph(_esc(line), s["guideBody"]))
 
-    story.append(Paragraph("MAINTENANCE AND WEEKLY RESET", s["guideH"]))
-    story.append(Paragraph(_esc(sections["maintenance"]), s["guideBody"]))
-
-    if sections["removed_note"]:
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(_esc(sections["removed_note"]), s["guideBody"]))
-
     notes = sections["notes"]
+    removed = sections["removed_note"]
+    # The removed-storage note is already part of notes when both are set.
+    # Printing it twice left a short page that only repeated that sentence.
+    if removed and removed not in (notes or ""):
+        notes = f"{notes} {removed}".strip() if notes and notes != DEFAULT_NOTES else removed
+    # Keep the fidelity and removed-item notes with the nightly instruction.
+    # A separate NOTES heading did not fit the previous page and sat alone.
+    ritual: List[Any] = [
+        Paragraph(_esc(str(sections.get("reset_title") or "Weekly reset")).upper(), s["guideH"]),
+        Paragraph(_esc(sections["maintenance"]), s["guideBody"]),
+    ]
     if notes and notes != DEFAULT_NOTES:
-        story.append(Paragraph("NOTES", s["guideH"]))
-        story.append(Paragraph(_esc(notes), s["guideBody"]))
+        ritual.append(Paragraph(f"Notes: {_esc(notes)}", s["guideBody"]))
+    story.append(KeepTogether(ritual))
     attachment_note = deliverable.get("attachment_note") or ""
     if attachment_note:
         story.append(Spacer(1, 4))
         story.append(Paragraph(_esc(str(attachment_note)), s["guideBody"]))
+
+    frame_h = _guide_frame_height()
+    photo_h = _compare_photo_height(frame_h)
+
+    def _compare_page(flowables: List[Any]) -> None:
+        story.append(NextPageTemplate("compare"))
+        # Break only when this page cannot hold the pair. Breaking at the top
+        # of an empty page would insert a blank sheet.
+        story.append(CondPageBreak(max(160, frame_h - 28)))
+        story.append(KeepTogether(flowables))
 
     source_pairs = images.get("source_pairs") or []
     if isinstance(source_pairs, list) and len(source_pairs) >= 2:
@@ -1788,9 +1827,7 @@ def build_pdf(
 
             ready = bool(coerce_image_bytes(pair.get("after")))
             name = customer_view_caption(index, lead, missing=not ready)
-            story.append(NextPageTemplate("compare"))
-            story.append(PageBreak())
-            story.append(Paragraph(_esc(name), s["guideH"]))
+            block: List[Any] = [Paragraph(_esc(name), s["guideH"])]
             if ready:
                 reference = (
                     "The organized view was edited from this photo, same camera. "
@@ -1801,17 +1838,17 @@ def build_pdf(
                     "This view is not ready. The package stays incomplete. "
                     "A missing angle is not replaced by another photo or by a crop."
                 )
-            story.append(Paragraph(reference, s["guideBody"]))
+            block.append(Paragraph(reference, s["guideBody"]))
             if any_missing and index == 0:
-                story.append(
+                block.append(
                     Paragraph(
                         "A required view is still missing its organized photo. "
                         "That view is not filled from another angle.",
                         s["guideBody"],
                     )
                 )
-            story.append(Spacer(1, 8))
-            story.append(
+            block.append(Spacer(1, 8))
+            block.append(
                 _before_after_section(
                     coerce_image_bytes(pair.get("before")),
                     coerce_image_bytes(pair.get("after")),
@@ -1819,46 +1856,52 @@ def build_pdf(
                     compact=False,
                     before_banner="Your photo",
                     after_banner="Organized view",
+                    photo_h=photo_h,
                 )
             )
+            _compare_page(block)
         doc.build(story)
         return buf.getvalue()
 
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
     if after_bytes:
-        # Organized after exists: show that final render. Do not print the
+        # Organized after exists. Do not print the
         # "we do not invent" / "organized view unavailable" disclaimer.
-        story.append(NextPageTemplate("compare"))
-        story.append(PageBreak())
-        story.append(Paragraph("FINAL ORGANIZED VIEW", s["guideH"]))
         if before_bytes:
             reference = (
-                "This page shows the final organized after beside your original photo. "
+                "This page shows the organized after beside your original photo. "
                 "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
             )
         else:
             reference = (
-                "This page shows the final organized after. "
+                "This page shows the organized after. "
                 "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
             )
-        story.append(Paragraph(reference, s["guideBody"]))
-        story.append(Spacer(1, 8))
-        story.append(_before_after_section(before_bytes, after_bytes, content_w, compact=False))
-    elif before_bytes:
-        story.append(NextPageTemplate("compare"))
-        story.append(PageBreak())
-        story.append(Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]))
-        story.append(
-            Paragraph(
-                "The portrait Blueprint is the primary visual. Your original photo is shown first. "
-                "An organized after was not produced for this package. "
-                "Do not invent an after.",
-                s["guideBody"],
-            )
+        _compare_page(
+            [
+                Paragraph("ORGANIZED VIEW", s["guideH"]),
+                Paragraph(reference, s["guideBody"]),
+                Spacer(1, 8),
+                _before_after_section(
+                    before_bytes, after_bytes, content_w, compact=False, photo_h=photo_h
+                ),
+            ]
         )
-        story.append(Spacer(1, 8))
-        story.append(_before_after_section(before_bytes, None, content_w, compact=False))
+    elif before_bytes:
+        _compare_page(
+            [
+                Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]),
+                Paragraph(
+                    "The portrait Blueprint is the primary visual. Your original photo is shown first. "
+                    "An organized after was not produced for this package. "
+                    "Do not invent an after.",
+                    s["guideBody"],
+                ),
+                Spacer(1, 8),
+                _before_after_section(before_bytes, None, content_w, compact=False, photo_h=photo_h),
+            ]
+        )
 
     doc.build(story)
     return buf.getvalue()

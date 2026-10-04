@@ -185,8 +185,11 @@ def test_send_draft_package_not_final(monkeypatch):
     assert payload["to"] == ["reviewer@example.com"]
     assert payload["cc"] == ["rb@example.com"]
     assert "DRAFT" in payload["subject"]
-    assert "not final" in payload["subject"].lower()
-    assert "not final" in payload["html"].lower()
+    assert "review version" in payload["subject"].lower()
+    assert "not yet approved" in payload["subject"].lower()
+    assert "not yet approved" in payload["html"].lower()
+    assert "customer release held" in payload["html"].lower()
+    assert "is ready" not in payload["html"].lower()
     assert len(payload["attachments"]) == 2
     assert "DRAFT" in payload["attachments"][0]["filename"]
     assert payload["attachments"][0].get("content_id") == "blueprint-preview"
@@ -195,7 +198,12 @@ def test_send_draft_package_not_final(monkeypatch):
     assert "cid:blueprint-preview" in low
     assert low.find("<img") < low.find("companion guide")
     assert "draft" in low
-    assert "not final" in low
+    assert "review version" in low
+    assert "not yet approved" in low
+    assert "customer release held" in low
+    assert "is ready" not in low
+    assert "Open the mobile preview" in html
+    assert ">https://" not in html
     assert "email_sent" not in low
     assert "package_status" not in low
 

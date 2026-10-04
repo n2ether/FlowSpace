@@ -13,7 +13,7 @@ field of view, never cover-cropped into a wide fixed slot. When several room
 photos were required, the hero is the first complete after and each remaining
 after is a full frame. A missing after stays empty — it is not a crop of
 another angle. Detail crops are extras for a single organized photo only.
-The room plan is a top-down sketch of this room — window, door, and the
+The room flow is a top-down sketch of this room — window, door, and the
 furniture already in it — not a stack of bars and not a measured drawing.
 Customer pixels never carry SOURCE_/AFTER_ codes or a lead id. Those stay
 on the review contact sheet.
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from blueprint_consistency import prepare_deliverable, safety_guidance
+from blueprint_consistency import nightly_instruction, prepare_deliverable, safety_guidance
 from pdf_generator import customer_project_title, plan_title, space_label
 from photo_contain import contain_pixels, frame_size
 from pdf_images import (
@@ -276,10 +276,135 @@ def _subtitle(deliverable: Dict[str, Any], draw: ImageDraw.ImageDraw) -> str:
     return lines[0] if lines else "A calmer refresh of the room you already have."
 
 
-def _moves(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
+_ANCHOR_MOVE = re.compile(r"\b(anchor|anti-tip|anti tip|tip-over|tip over)\b", re.I)
+_CLIMATE_MOVE = re.compile(r"\b(thermal|draft|january|curtain|insulation|warmth|winter|warm the)\b", re.I)
+_PATH_MOVE = re.compile(r"\b(floor path|clear path|walking path|circulation)\b", re.I)
+_KEEP_MOVE = re.compile(
+    r"\b(preserve|existing wall|no new wall|space theme|drawer|one step|routine|simplify)\b",
+    re.I,
+)
+_WARNING_MOVE = re.compile(r"\b(do not|don't|never|no loose|no portable|teddy|heater)\b", re.I)
+
+
+def _change_theme(line: str) -> str:
+    """Group what's-new lines so preserve, drawers, and routine collapse together."""
+    if _WARNING_MOVE.search(line) and not _ANCHOR_MOVE.search(line):
+        return "skip"
+    if _ANCHOR_MOVE.search(line):
+        return "anchor"
+    if _CLIMATE_MOVE.search(line):
+        return "climate"
+    if _PATH_MOVE.search(line) and not _KEEP_MOVE.search(line):
+        return "path"
+    if _KEEP_MOVE.search(line) or _PATH_MOVE.search(line):
+        return "keep"
+    return "other"
+
+
+def _as_move(body: str) -> Dict[str, str]:
+    body = _clean(body)
+    return {"title": _move_title(body, 0), "body": body}
+
+
+def _anchor_move(lines: Sequence[str]) -> str:
+    line = _clean(lines[0]) if lines else ""
+    if not line:
+        return "Anchor the dresser and the shelves to the wall before anything else."
+    if re.search(r"shel(f|ves)", line, re.I):
+        return line
+    if line.lower().startswith("anchor the six-drawer dresser"):
+        return line.replace("Anchor the six-drawer dresser", "Anchor the six-drawer dresser and the shelves", 1)
+    if line.lower().startswith("anchor the dresser"):
+        return line.replace("Anchor the dresser", "Anchor the dresser and the shelves", 1)
+    return line.rstrip(".") + ", including the shelves."
+
+
+def _keep_move(lead: Dict[str, Any], deliverable: Dict[str, Any], lines: Sequence[str]) -> str:
+    from space_rails import mentions_six_drawer
+
+    blob = " ".join(
+        [
+            str(lead.get("must_stay") or ""),
+            str(lead.get("goals") or ""),
+            " ".join(lines),
+        ]
+    )
+    if mentions_six_drawer(blob):
+        base = "Keep this room and its six drawers, and use those drawers so the daily routine stays one step."
+    else:
+        base = "Keep this room and the dresser drawers, and use those drawers so the daily routine stays one step."
+    extras: List[str] = []
+    for line in lines:
+        low = line.lower()
+        if any(
+            phrase in low
+            for phrase in (
+                "one step",
+                "six-drawer",
+                "six drawer",
+                "all of its drawers",
+                "keep this room",
+                "existing dresser",
+            )
+        ):
+            continue
+        if line not in extras:
+            extras.append(line)
+    if extras:
+        return base + " " + " ".join(extras)
+    return base
+
+
+def _first_theme_line(lines: Sequence[str], fallback: str) -> str:
+    cleaned = [_clean(line) for line in lines if _clean(line)]
+    return cleaned[0] if cleaned else fallback
+
+
+def _nursery_moves(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Four distinct moves. Preserve, drawers, and the daily routine are one move."""
+    groups: Dict[str, List[str]] = {"anchor": [], "climate": [], "keep": [], "path": [], "other": []}
     strategy = [_clean(str(x)) for x in (deliverable.get("strategy") or []) if _clean(str(x))]
-    moves = [{"title": _move_title(text, i), "body": text} for i, text in enumerate(strategy[:6])]
-    return moves
+    for line in strategy:
+        theme = _change_theme(line)
+        if theme == "skip":
+            continue
+        groups[theme].append(line)
+    for source in (deliverable.get("action_plan") or []), (deliverable.get("needs") or []):
+        for raw in source:
+            line = _clean(str(raw))
+            if not line:
+                continue
+            theme = _change_theme(line)
+            if theme in {"anchor", "climate", "path"} and not groups[theme]:
+                groups[theme].append(line)
+            elif theme == "other" and re.search(r"space theme|planets|astronaut", line, re.I):
+                groups["keep"].append(line)
+    moves = [
+        _as_move(_keep_move(lead, deliverable, groups["keep"])),
+        _as_move(_anchor_move(groups["anchor"])),
+        _as_move(
+            _first_theme_line(
+                groups["climate"],
+                "Warm the January window with a thermal curtain over the panels you have, a clear insulation film, and a door draft stopper.",
+            )
+        ),
+        _as_move(
+            _first_theme_line(
+                groups["path"],
+                "Keep a clear path from the door through the center of the room, between the dresser and the crib.",
+            )
+        ),
+    ]
+    return moves[:4]
+
+
+def _moves(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    from space_rails import is_nursery_space
+
+    if is_nursery_space(lead):
+        return _nursery_moves(lead or {}, deliverable)
+    strategy = [_clean(str(x)) for x in (deliverable.get("strategy") or []) if _clean(str(x))]
+    return [{"title": _move_title(text, i), "body": text} for i, text in enumerate(strategy[:6])]
 
 
 def _move_title(text: str, index: int) -> str:
@@ -346,21 +471,27 @@ _NURSERY_VIEW_NAMES = (
     "Dresser and door",
 )
 
-# Wall-anchored blocks. None spans the room, so the plan cannot become bars.
+# Relative positions from the four source photos. Not measured.
+# Window is north. The dresser is on that same window wall, on the left,
+# between the door corner and the window. The door is on the west wall at
+# that dresser end. Crib and rocker are on the east wall: the crib's near
+# end toward the window, the rocker farther from the window. No center block.
 _NURSERY_PLACES = (
-    {"id": "sleep", "label": "SLEEP", "role": "SLEEP", "number": "1", "zone": "Sleep", "box": (0.34, 0.16, 0.86, 0.42)},
-    {"id": "change", "label": "CHANGE", "role": "CHANGE", "number": "2", "zone": "Change", "box": (0.68, 0.48, 0.94, 0.84)},
-    {"id": "comfort", "label": "COMFORT", "role": "COMFORT", "number": "3", "zone": "Comfort", "box": (0.05, 0.60, 0.32, 0.93)},
-    {"id": "play", "label": "PLAY", "role": "STORAGE", "number": "4", "zone": "Play/Storage", "box": (0.36, 0.70, 0.62, 0.93)},
+    {"id": "change", "label": "DRESSER", "role": "CHANGE", "number": "2", "zone": "Dresser", "box": (0.10, 0.03, 0.32, 0.24)},
+    {"id": "sleep", "label": "CRIB", "role": "SLEEP", "number": "1", "zone": "Crib", "box": (0.70, 0.06, 0.97, 0.42)},
+    {"id": "comfort", "label": "ROCKER", "role": "COMFORT", "number": "3", "zone": "Rocker", "box": (0.70, 0.54, 0.97, 0.84)},
 )
 _NURSERY_LEGEND = (
-    {"number": "1", "name": "Sleep"},
-    {"number": "2", "name": "Change"},
-    {"number": "3", "name": "Comfort"},
-    {"number": "4", "name": "Play/Storage"},
+    {"number": "1", "name": "Crib"},
+    {"number": "2", "name": "Dresser"},
+    {"number": "3", "name": "Rocker"},
 )
+_NURSERY_DOOR = {"door_wall": "west", "door_at": 0.04, "door_span": 0.20}
+# Starts at the west door beside the dresser and runs through the open center.
+_NURSERY_PATH = ((0.0, 0.12), (0.42, 0.50), (0.52, 0.62))
 # Room-relative. The first point sits on the door wall so the stroke meets the opening.
 _CLEAR_PATH = ((0.0, 0.32), (0.18, 0.50), (0.40, 0.48))
+_GENERIC_DOOR = {"door_wall": "west", "door_at": 0.22, "door_span": 0.16}
 _GENERIC_PLACE_BOXES = (
     (0.42, 0.08, 0.92, 0.36),
     (0.06, 0.44, 0.40, 0.78),
@@ -435,6 +566,8 @@ def topdown_layout(
 
     if is_nursery_space(lead):
         places = [dict(place) for place in _NURSERY_PLACES]
+        door = dict(_NURSERY_DOOR)
+        path = [list(point) for point in _NURSERY_PATH]
     else:
         roles: List[str] = []
         for zone in _zone_labels(deliverable):
@@ -447,34 +580,53 @@ def topdown_layout(
         places = []
         for role, box in zip(roles[:3], _GENERIC_PLACE_BOXES):
             places.append({"id": role.lower().replace(" ", "-"), "label": role, "role": role, "box": box})
+        door = dict(_GENERIC_DOOR)
+        path = [list(point) for point in _CLEAR_PATH]
     furniture = [str(place["role"]) for place in places]
-    if space_theme:
+    flow_label = "Approximate room flow + zones"
+    if is_nursery_space(lead):
+        # Exact wall lengths are not measurable from the photos, so this is
+        # a relative flow — not a measured floor plan.
+        if space_theme:
+            caption = (
+                f"{flow_label}. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
+            )
+        else:
+            caption = f"{flow_label}. Window, door, crib, dresser, rocker, and the clear path. Not a measured plan."
+        board_caption = flow_label
+    elif space_theme:
         caption = (
             "Approximate plan. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
         )
+        board_caption = "Approximate plan of this room. Not measured."
     elif organized:
         caption = (
             "Approximate top view of the organized room — furniture, window, door, and the clear path. Not a measured plan."
         )
+        board_caption = "Approximate plan of this room. Not measured."
     else:
         caption = (
             "Approximate top view from the plan — furniture, window, door, and the clear path. Not a photo and not a measured plan."
         )
+        board_caption = "Approximate plan of this room. Not measured."
     legend = list(_NURSERY_LEGEND) if is_nursery_space(lead) else []
     return {
         "window": "WINDOW",
         "door": "DOOR",
+        "door_wall": door["door_wall"],
+        "door_at": door["door_at"],
+        "door_span": door["door_span"],
         "furniture": furniture,
         "places": places,
         "legend": legend,
-        "path": [list(point) for point in _CLEAR_PATH],
+        "path": path,
         "circulation": "CLEAR PATH",
         "approximate": True,
         "matches_after": organized,
         "space_theme": space_theme,
         "drawing": "room",
         "caption": caption,
-        "board_caption": "Approximate plan of this room. Not measured.",
+        "board_caption": board_caption,
     }
 
 
@@ -499,7 +651,8 @@ def plan_geometry(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Di
         room_h = int(room_w * 1.2)
     rx0 = inner_l + max(0, (iw - room_w) // 2)
     ry0 = inner_t + max(0, (ih - room_h) // 2)
-    room = (rx0, ry0, rx0 + room_w, ry0 + room_h)
+    ry1 = ry0 + room_h
+    room = (rx0, ry0, rx0 + room_w, ry1)
     placed = []
     for place in topdown.get("places") or []:
         l, t, r, b = place.get("box") or (0.08, 0.08, 0.32, 0.28)
@@ -519,12 +672,26 @@ def plan_geometry(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Di
         placed.append({**place, "rect": rect})
     win_w = max(36, room_w // 3)
     win_x = rx0 + (room_w - win_w) // 2
-    door_h = max(28, room_h // 5)
-    door_y = ry0 + int(room_h * 0.22)
+    door_wall = str(topdown.get("door_wall") or "west")
+    door_at = float(topdown.get("door_at") or 0.22)
+    door_span = float(topdown.get("door_span") or 0.18)
+    if door_wall == "south":
+        door_w = max(36, int(room_w * door_span))
+        door_x = rx0 + int(room_w * door_at)
+        door_x = min(max(rx0 + 4, door_x), rx0 + room_w - door_w - 4)
+        thickness = max(10, room_h // 28)
+        door = (door_x, ry1 - thickness, door_x + door_w, ry1)
+    else:
+        door_h = max(28, int(room_h * door_span))
+        door_y = ry0 + int(room_h * door_at)
+        door_y = min(max(ry0 + 4, door_y), ry0 + room_h - door_h - 4)
+        door = (rx0, door_y, rx0 + max(16, room_w // 28), door_y + door_h)
     return {
         "room": room,
         "window": (win_x, ry0, win_x + win_w, ry0 + max(10, room_h // 18)),
-        "door": (rx0, door_y, rx0 + max(16, room_w // 28), door_y + door_h),
+        "door": door,
+        "door_wall": door_wall,
+        "path": topdown.get("path") or [],
         "places": placed,
     }
 
@@ -639,7 +806,8 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "plan_title": customer_project_title(lead, doc) or plan_title(lead.get("space_type")),
         "subtitle": _subtitle(doc, probe),
         "tagline": _tagline(lead),
-        "moves": _moves(doc),
+        "moves": _moves(doc, lead),
+        "reset_title": nightly_instruction(lead, doc)[0],
         "palette": _palette(lead, doc),
         "products": _products(doc),
         "roadmap": _roadmap(doc),
@@ -760,18 +928,38 @@ def _section_kicker(draw: ImageDraw.ImageDraw, x: int, y: int, number: str, titl
     draw.text((x + 34, y + 3), title, font=_font("sans-bold", 16), fill=GREEN)
 
 
+def _draw_path_arrow(draw: ImageDraw.ImageDraw, origin: Tuple[int, int], end: Tuple[int, int]) -> None:
+    """Arrowhead pointing along the last segment of the clear path."""
+    dx, dy = end[0] - origin[0], end[1] - origin[1]
+    length = max(1.0, (dx * dx + dy * dy) ** 0.5)
+    ux, uy = dx / length, dy / length
+    left = (end[0] - ux * 12 - uy * 6, end[1] - uy * 12 + ux * 6)
+    right = (end[0] - ux * 12 + uy * 6, end[1] - uy * 12 - ux * 6)
+    draw.polygon([end, left, right], fill=CLAY)
+
+
 def clear_path_points(geo: Dict[str, Any]) -> List[Tuple[int, int]]:
     """Stroke from the door opening into open floor. The first point meets the door."""
     room = geo["room"]
     door = geo["door"]
     rx0, ry0, rx1, ry1 = room
     rw, rh = max(1, rx1 - rx0), max(1, ry1 - ry0)
-    start = (rx0 + 1, (door[1] + door[3]) // 2)
+    wall = str(geo.get("door_wall") or "west")
+    if wall == "south":
+        start = ((door[0] + door[2]) // 2, door[1] + 1)
+    else:
+        start = (door[2] - 1, (door[1] + door[3]) // 2)
 
     def _at(fx: float, fy: float) -> Tuple[int, int]:
-        return (rx0 + int(fx * rw), ry0 + int(fy * rh))
+        return (rx0 + int(float(fx) * rw), ry0 + int(float(fy) * rh))
 
-    return [start, _at(0.18, 0.50), _at(0.40, 0.48)]
+    raw = [point for point in (geo.get("path") or []) if isinstance(point, (list, tuple)) and len(point) >= 2]
+    points = [start]
+    for point in raw[1:]:
+        points.append(_at(point[0], point[1]))
+    if len(points) < 3:
+        points = [start, _at(0.18, 0.50), _at(0.40, 0.48)]
+    return points
 
 
 def _legend_band_height(legend: Sequence[Dict[str, Any]]) -> int:
@@ -808,7 +996,7 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     draw = ImageDraw.Draw(base)
     _rounded(draw, box, 16, CARD)
     x0, y0, x1, y1 = box
-    _section_kicker(draw, x0 + 14, y0 + 10, "4", "ROOM PLAN")
+    _section_kicker(draw, x0 + 14, y0 + 10, "4", "ROOM FLOW")
     approx = "APPROXIMATE"
     afont = _font("sans", 13)
     aw = draw.textlength(approx, font=afont)
@@ -835,12 +1023,19 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     ww = draw.textlength(window_label, font=wfont)
     label_y = ry0 - 22 if ry0 - 22 > y0 + 34 else ry0 + 8
     draw.text(((wx0 + wx1 - ww) / 2, label_y), window_label, font=wfont, fill=CLAY)
-    _dx0, dy0, _dx1, dy1 = geo["door"]
-    draw.rectangle((rx0 - 1, dy0, rx0 + 10, dy1), fill=floor)
-    swing = max(26, dy1 - dy0)
-    draw.arc((rx0 - 2, dy0, rx0 + swing, dy0 + swing), start=280, end=10, fill=GREEN, width=2)
-    door_at = _at(0.08, 0.30)
-    draw.text(door_at, str(topdown.get("door") or "DOOR"), font=_font("sans-bold", 14), fill=GREEN)
+    dx0, dy0, dx1, dy1 = geo["door"]
+    door_wall = str(geo.get("door_wall") or topdown.get("door_wall") or "west")
+    door_label = str(topdown.get("door") or "DOOR")
+    if door_wall == "south":
+        draw.rectangle((dx0, ry1 - 10, dx1, ry1 + 1), fill=floor)
+        swing = max(26, dx1 - dx0)
+        draw.arc((dx0, ry1 - swing, dx0 + swing, ry1 + 2), start=180, end=270, fill=GREEN, width=2)
+        draw.text((dx0 + 4, max(ry0 + 8, dy0 - 22)), door_label, font=_font("sans-bold", 14), fill=GREEN)
+    else:
+        draw.rectangle((rx0 - 1, dy0, rx0 + 10, dy1), fill=floor)
+        swing = max(26, dy1 - dy0)
+        draw.arc((rx0 - 2, dy0, rx0 + swing, dy0 + swing), start=280, end=10, fill=GREEN, width=2)
+        draw.text((dx1 + 8, min(ry1 - 18, dy1 + 4)), door_label, font=_font("sans-bold", 14), fill=GREEN)
     for place in geo["places"]:
         rect = place["rect"]
         draw.rounded_rectangle(rect, radius=8, fill=GREEN_SOFT, outline=GREEN, width=2)
@@ -871,8 +1066,11 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     # The stroke starts on the door opening and stops in open floor, short of the furniture.
     start, mid, end = clear_path_points(geo)
     draw.line([start, mid, end], fill=CLAY, width=4)
-    draw.polygon([(end[0] + 10, end[1]), (end[0] - 2, end[1] - 7), (end[0] - 2, end[1] + 7)], fill=CLAY)
-    path_at = (start[0] + 8, min(mid[1], start[1]) + 8)
+    _draw_path_arrow(draw, mid, end)
+    if door_wall == "south":
+        path_at = (min(rx1 - 110, start[0] + 28), max(ry0 + 8, start[1] - 36))
+    else:
+        path_at = (mid[0] + 8, max(ry0 + 8, mid[1] - 18))
     draw.text(path_at, path, font=_font("sans-bold", 13), fill=CLAY)
     if legend:
         _draw_zone_legend(draw, (x0 + 16, y1 - 26 - legend_h, x1 - 16, y1 - 26), legend)
@@ -1398,9 +1596,15 @@ def _draw_roadmap_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int],
                 ty += 15
 
 
-def _draw_board_footer(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int]) -> None:
+def _footer_line(spec: Dict[str, Any]) -> str:
+    title = str(spec.get("reset_title") or "")
+    if "bedtime" in title.lower():
+        return "Companion guide: steps, shopping, safety, climate, and the one-minute bedtime ritual."
+    return "Companion guide: steps, shopping, safety, climate, and the weekly reset."
+
+
+def _draw_board_footer(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], text: str) -> None:
     x0, y0, x1, _y1 = box
-    text = "Companion guide: steps, shopping, safety, climate, and the weekly reset."
     fitted = _fit(draw, text, _font("sans", 13), x1 - x0, 1)
     if fitted:
         draw.text((x0, y0), fitted[0], font=_font("sans", 13), fill=MUTED)
@@ -1463,10 +1667,10 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
         "Your space. Your flow. Your life.",
         "The outcome",
         "What's new & why",
-        "Room plan",
+        "Room flow",
         "Palette",
         "Roadmap",
-        "Companion guide: steps, shopping, safety, climate, and the weekly reset.",
+        _footer_line(spec),
     ]
     products = spec.get("products") or []
     if products:
@@ -1540,7 +1744,7 @@ def build_image_board(
     draw = ImageDraw.Draw(base)
     _draw_palette_row(draw, layout["palette"], spec.get("palette") or [])
     _draw_roadmap_row(draw, layout["roadmap"], spec.get("roadmap") or [], "")
-    _draw_board_footer(draw, layout["footer"])
+    _draw_board_footer(draw, layout["footer"], _footer_line(spec))
 
     out = io.BytesIO()
     base.convert("RGB").save(out, format="PNG", optimize=True)

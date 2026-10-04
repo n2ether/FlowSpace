@@ -185,8 +185,9 @@ def test_nursery_pdf_hides_invent_disclaimer_when_the_after_exists():
         },
     )
     text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
-    low = text.lower()
-    assert "final organized view" in low
+    low = " ".join(text.lower().split())
+    assert "organized view" in low
+    assert "final organized" not in low
     assert "do not invent an after" not in low
     assert "organized view unavailable" not in low
     assert "we do not invent an organized after" not in low
@@ -206,7 +207,9 @@ def test_nursery_pdf_hides_invent_disclaimer_when_the_after_exists():
 def test_companion_keeps_the_full_zone_sentence_and_one_total():
     lead, deliverable = _load()
     pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
-    text = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages)
+    text = " ".join(
+        "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages).split()
+    )
     assert "bottom drawer" in text
     assert "bulky bedding" in text
     assert "Diaper & Dress Zone" in text
@@ -221,7 +224,7 @@ def test_companion_keeps_the_full_zone_sentence_and_one_total():
     assert "safety" in text.lower()
     assert "climate" in text.lower()
     assert "68" in text
-    assert "weekly reset" in text.lower() or "ten minutes" in text.lower()
+    assert "one-minute bedtime ritual" in text.lower()
 
 
 def _png(color, size):
@@ -314,13 +317,30 @@ def test_room_plan_is_a_topdown_room_not_only_horizontal_bars():
     topdown = spec["topdown"]
     assert topdown["drawing"] == "room"
     ids = {place["id"] for place in topdown["places"]}
-    assert {"sleep", "change", "comfort", "play"} <= ids
+    assert {"sleep", "change", "comfort"} <= ids
+    assert "play" not in ids
     assert "SLEEP" in topdown["furniture"]
-    assert [item["name"] for item in topdown["legend"]] == ["Sleep", "Change", "Comfort", "Play/Storage"]
-    door = plan_geometry((36, 900, 800, 1500), topdown)["door"]
-    path = clear_path_points(plan_geometry((36, 900, 800, 1500), topdown))
-    assert path[0][1] >= door[1] and path[0][1] <= door[3]
-    assert path[0][0] <= door[2]
+    assert [item["name"] for item in topdown["legend"]] == ["Crib", "Dresser", "Rocker"]
+    assert topdown["door_wall"] == "west"
+    assert topdown["door_at"] < 0.2
+    assert topdown["board_caption"] == "Approximate room flow + zones"
+    places = {place["id"]: place for place in topdown["places"]}
+    dresser, crib, rocker = places["change"]["box"], places["sleep"]["box"], places["comfort"]["box"]
+    # Dresser shares the window wall, on the left, between the door corner and the window.
+    assert dresser[1] < 0.12
+    assert dresser[3] < 0.40
+    assert dresser[2] < 0.45
+    assert crib[0] > 0.55 and rocker[0] > 0.55
+    assert crib[1] < rocker[1]
+    assert rocker[1] > crib[3]
+    geo = plan_geometry((36, 900, 800, 1500), topdown)
+    door = geo["door"]
+    room = geo["room"]
+    assert door[0] <= room[0] + 4
+    assert door[1] < room[1] + (room[3] - room[1]) * 0.25
+    path = clear_path_points(geo)
+    assert path[0][1] >= door[1] and path[0][1] <= door[3] + 2
+    assert door[0] <= path[0][0] <= door[2]
     assert path[-1][0] > path[0][0]
     # Even inside a short wide card, furniture stays on walls instead of spanning the room.
     geo = plan_geometry((36, 900, 1164, 1220), topdown)
@@ -416,7 +436,9 @@ def test_board_paints_zones_title_and_shopping_lines(monkeypatch):
     blob = _drawn_text(monkeypatch, lead, deliverable, {})
     assert "Nicholas's Nursery" in blob
     assert "Camila's Kids" not in blob
-    assert "Play/Storage" in blob
+    assert "Dresser" in blob
+    assert "Approximate room flow + zones" in blob
+    assert "Play/Storage" not in blob
     assert "SHOPPING" in blob
     assert "$174" in blob
     assert "more in the companion guide" in blob
@@ -432,3 +454,68 @@ def test_board_drops_a_lone_total_when_there_are_no_line_items(monkeypatch):
     assert "$240" not in blob
     assert "$" not in blob
     assert "SHOPPING" not in blob
+
+
+def test_nursery_changes_merge_preserve_drawers_and_routine():
+    lead, deliverable = _load()
+    moves = board_spec(lead, deliverable, {})["moves"]
+    assert len(moves) == 4
+    assert len({move["title"].lower() for move in moves}) == 4
+    for move in moves:
+        assert move["body"].lower().startswith(move["title"].lower())
+    routine_moves = [
+        move for move in moves if "routine" in move["body"].lower() or "one step" in move["body"].lower()
+    ]
+    assert len(routine_moves) == 1
+    assert "drawer" in routine_moves[0]["body"].lower()
+    bodies = " ".join(move["body"].lower() for move in moves)
+    assert "anchor" in bodies
+    assert "path" in bodies
+    assert "curtain" in bodies or "thermal" in bodies or "january" in bodies or "warm" in bodies
+
+
+def test_nursery_companion_reflow_keeps_photo_pages_and_drops_blank_ones():
+    lead, deliverable = _load()
+    frames = []
+    for index in range(4):
+        before = io.BytesIO()
+        Image.new("RGB", (240, 480), (140, 40 + index * 20, 40)).save(before, format="JPEG", quality=80)
+        after = io.BytesIO()
+        Image.new("RGB", (240, 480), (20, 80 + index * 10, 90)).save(after, format="JPEG", quality=80)
+        frames.append((before.getvalue(), after.getvalue()))
+    pdf = build_pdf(
+        lead=lead,
+        deliverable=deliverable,
+        images={
+            "source_pairs": [
+                {
+                    "label": f"SOURCE_{i + 1:02d}",
+                    "after_label": f"AFTER_{i + 1:02d}",
+                    "before": frames[i][0],
+                    "after": frames[i][1],
+                }
+                for i in range(4)
+            ]
+        },
+    )
+    reader = PdfReader(io.BytesIO(pdf))
+    pair_pages = []
+    for page in reader.pages:
+        text = " ".join((page.extract_text() or "").split())
+        images = len(page.images)
+        assert len(text) >= 80 or images >= 1
+        # A heading with no body and no photo is an orphan page.
+        # A text page under 500 characters is the notes-only sheet this reflow removes.
+        assert not (images == 0 and len(text) < 500)
+        low = text.lower()
+        if images == 0 and "notes:" in low:
+            assert "one-minute bedtime ritual" in low
+        if "same camera" in text.lower():
+            pair_pages.append(page)
+            assert images >= 2
+    assert len(pair_pages) == 4
+    joined = "\n".join((page.extract_text() or "") for page in reader.pages).lower()
+    assert "one-minute bedtime ritual" in joined
+    assert joined.count("do not add a portable heater") == 1
+    assert "source_" not in joined
+    assert "after_" not in joined

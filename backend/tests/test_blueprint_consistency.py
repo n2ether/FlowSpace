@@ -181,3 +181,21 @@ def test_prose_kit_price_follows_the_list_when_nothing_is_removed():
     assert "230" in prepared["intro"]
     assert "$150" not in prepared["budget_note"]
     assert "230" in prepared["budget_note"]
+
+
+def test_nursery_safety_and_climate_are_each_written_once():
+    from blueprint_consistency import companion_sections
+
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    sections, _prepared = companion_sections(doc["lead"], doc["deliverable"])
+    safety = [line.lower() for line in sections["safety"]]
+    climate = " ".join(sections["climate"]).lower()
+    assert len(safety) == len(set(safety))
+    assert "heater" not in climate
+    assert "portable heater" not in climate
+    assert "68" in climate
+    assert "thermal window layer" in climate
+    assert sections["reset_title"] == "One-minute bedtime ritual"
+    assert sections["maintenance"].lower().startswith("one-minute bedtime ritual")
+    for line in sections["safety"]:
+        assert line.lower() not in sections["maintenance"].lower()

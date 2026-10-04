@@ -187,6 +187,32 @@ NURSERY_SAFETY = (
     "Keep a clear floor path to the door.",
 )
 
+# One climate story. The heater ban stays in NURSERY_SAFETY so it is not repeated here.
+NURSERY_CLIMATE = (
+    "Keep sleep comfort in a normal nursery range, about 68–72°F, using the heating you already have.",
+    "Warm the window with a thermal curtain or shade — a thermal window layer, not a blanket — "
+    "plus a clear insulation film and a door draft stopper. If the room stays cold, have an HVAC "
+    "or building professional check door gaps and airflow.",
+)
+
+NURSERY_BEDTIME_TITLE = "One-minute bedtime ritual"
+NURSERY_BEDTIME = (
+    "One-minute bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
+    "leave the crib otherwise clear, and make sure the path from the door stays open."
+)
+
+_WARNING_MARKERS = (
+    "heater",
+    "electric blanket",
+    "window cord",
+    "teddy",
+    "sleep sack",
+    "loose blanket",
+    "bumper",
+    "loose cushion",
+    "fitted sheet",
+)
+
 
 def _drop_recommendation_sentences(text: str) -> str:
     kept: List[str] = []
@@ -560,7 +586,34 @@ def search_links(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
     return links
 
 
+def _warning_markers(text: str) -> List[str]:
+    low = (text or "").lower()
+    return [marker for marker in _WARNING_MARKERS if marker in low]
+
+
+def _same_warning(text: str, lines: List[str]) -> bool:
+    """True when this sentence is the same safety or climate warning already listed."""
+    cleaned = " ".join((text or "").split()).strip().lower()
+    if not cleaned:
+        return True
+    if any(cleaned == " ".join(line.split()).strip().lower() for line in lines):
+        return True
+    markers = _warning_markers(cleaned)
+    if not markers:
+        return False
+    for line in lines:
+        other = _warning_markers(line)
+        if any(marker in other for marker in markers):
+            return True
+    return False
+
+
 def _climate_lines(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[str]:
+    """Climate guidance, without repeating a safety warning already listed."""
+    if is_nursery_space(lead):
+        # One climate story for the companion guide. Do not scrape strategy,
+        # steps, and zones — those sentences are the same warning again.
+        return [line for line in NURSERY_CLIMATE if not _same_warning(line, list(NURSERY_SAFETY))]
     blobs: List[str] = []
     for key in ("strategy", "action_plan", "needs", "benefits"):
         blobs.extend(str(x) for x in (deliverable.get(key) or []))
@@ -570,43 +623,43 @@ def _climate_lines(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[st
     if deliverable.get("notes"):
         blobs.append(str(deliverable.get("notes")))
     lines: List[str] = []
-    nursery = is_nursery_space(lead)
     for blob in blobs:
         text = " ".join(blob.split())
-        if nursery:
-            text = clarify_plan_text(text)
-        if text and _CLIMATE.search(text) and text not in lines and _keep_safety_line(text):
+        if text and _CLIMATE.search(text) and not _same_warning(text, lines) and _keep_safety_line(text):
             lines.append(text)
-    if nursery:
-        standing = (
-            "Keep sleep comfort in a normal nursery range, about 68–72°F, using the heating you already have. "
-            "Warm the window with a thermal curtain or shade — a thermal window layer, not a blanket. "
-            "Do not add a portable heater, wall heater, or electric blanket."
-        )
-    else:
-        standing = (
-            "Use the heating and cooling already in the room. This plan does not add portable heaters or new vents."
-        )
-    if standing not in lines:
+    standing = (
+        "Use the heating and cooling already in the room. This plan does not add portable heaters or new vents."
+    )
+    if not _same_warning(standing, lines):
         lines.append(standing)
     return lines[:6]
 
 
-def _maintenance(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
+def nightly_instruction(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Tuple[str, str]:
+    """Section title plus the nightly instruction. The title matches the instruction.
+
+    A nursery keeps the one-minute bedtime ritual. The title is that ritual's name,
+    not a weekly-reset label that describes a different job.
+    """
+    lead = lead or {}
+    deliverable = deliverable or {}
     layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
     instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
     reset = " ".join(str(instruction.get("weekly_reset") or "").split())
-    if reset:
-        return reset
     if is_nursery_space(lead):
-        return (
-            "Once a week, take ten minutes: check that the dresser is still anchored, "
-            "the crib holds only a fitted sheet and a wearable sleep sack, the floor path is clear, and the room is a comfortable temperature. "
-            "Put diaper supplies back in the existing drawers."
-        )
+        if reset and re.search(r"bedtime|one[- ]minute", reset, re.I):
+            body = reset
+        else:
+            body = NURSERY_BEDTIME
+        if not body.lower().startswith(NURSERY_BEDTIME_TITLE.lower()):
+            body = f"{NURSERY_BEDTIME_TITLE}: {body}"
+        return NURSERY_BEDTIME_TITLE, body
+    if reset:
+        return "Weekly reset", reset
     return (
+        "Weekly reset",
         "Once a week, take ten minutes to return each item to its home, clear the floor path, and wipe one surface. "
-        "The reset keeps the system. It is not a remodel."
+        "The reset keeps the system. It is not a remodel.",
     )
 
 
@@ -626,7 +679,7 @@ def safety_guidance(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | N
             if text and _keep_safety_line(text):
                 extras.append(text)
     for text in extras:
-        if text not in lines:
+        if not _same_warning(text, lines):
             lines.append(text)
     if not lines:
         lines = [
@@ -651,6 +704,9 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         steps = ["Start with a clear floor path, then give everyday items a home you already have."]
     safety = safety_guidance(lead, doc)
     needs = [str(x).strip() for x in (doc.get("needs") or []) if str(x).strip()]
+    if is_nursery_space(lead):
+        # A need that only restates a safety warning is already in the safety section.
+        needs = [need for need in needs if not _same_warning(need, safety)]
     if not needs:
         needs = ["A clear floor path", "A home for everyday items"]
     zones = []
@@ -664,6 +720,7 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         f"A calmer {space} — organized around the room you already have."
     )
     removed = _REMOVED_NOTE if _REMOVED_NOTE in str(doc.get("notes") or "") else ""
+    reset_title, reset_body = nightly_instruction(lead, doc)
     sections = {
         "intro": intro,
         "needs": needs,
@@ -671,7 +728,8 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "steps": steps,
         "safety": safety,
         "climate": _climate_lines(lead, doc),
-        "maintenance": _maintenance(lead, doc),
+        "reset_title": reset_title,
+        "maintenance": reset_body,
         "list_total": doc.get("budget_display") or "—",
         "stated_budget": doc.get("stated_budget") or "",
         "budget_note": str(doc.get("budget_note") or ""),

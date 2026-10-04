@@ -20,8 +20,8 @@
     "zones": [
       {"title": "Safe Sleep Zone", "desc": "Crib stays clear of cords and loose bedding."},
       {"title": "Diaper & Dress Zone", "desc": "The six-drawer dresser stays. Wipes, diapers, and clothes live in the existing drawers, including the bottom drawer for bulky bedding."},
-      {"title": "Play & Movement Zone", "desc": "Clear floor path along the door."},
-      {"title": "Comfort & Feed Zone", "desc": "Rocker stays by the window. Thermal curtains cut the draft."}
+      {"title": "Play & Movement Zone", "desc": "Clear floor path from the door through the center of the room, between the dresser and the crib."},
+      {"title": "Comfort & Feed Zone", "desc": "Rocker stays on the crib wall, farther from the window than the crib."}
     ],
     "wall_color_name": "Keep existing / no paint change",
     "wall_color_hex": "",
