@@ -450,3 +450,15 @@ def _products(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
         price_label = f"${sub:,.0f}" if sub and abs(sub - round(sub)) < 0.01 else (f"${sub:,.2f}" if sub else "Confirm price")
         rows.append({"name": name, "price": price_label})
     return rows
+
+
+def _zone_labels(deliverable: Dict[str, Any]) -> List[str]:
+    labels = []
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict):
+            title = _clean(str(zone.get("title") or ""))
+        else:
+            title = _clean(str(zone))
+        if title:
+            labels.append(title)
+    return labels[:4]
