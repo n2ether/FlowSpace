@@ -98,12 +98,14 @@ def build_contact_sheet(
     height = header_h + 24 + len(rows) * row_h
     base = Image.new("RGB", (width, height), PAPER)
     draw = ImageDraw.Draw(base)
-    draw.text((36, 22), "FLOWSPACE CONTACT SHEET", font=_font(22, bold=True), fill=GREEN)
-    status = "INCOMPLETE — NOT FINAL" if incomplete else "REVIEW — NOT FINAL"
+    draw.text((36, 18), "FLOWSPACE CONTACT SHEET", font=_font(22, bold=True), fill=GREEN)
+    status = "DRAFT. Review version. Not yet approved. Customer release held."
+    if incomplete:
+        status = f"{status} A required after is still missing."
     draw.text((36, 52), status, font=_font(16, bold=True), fill=INK)
     who = (customer_name or "Customer").strip()
     note = f"{who}. Each row is one source photo and the after edited from that same camera."
-    draw.text((420, 54), note[:110], font=_font(15), fill=MUTED)
+    draw.text((36, 76), note[:140], font=_font(14), fill=MUTED)
 
     gap = 16
     inner_w = width - 72
