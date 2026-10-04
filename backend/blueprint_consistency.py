@@ -7,10 +7,10 @@ prose while a blanket line pushed the shopping list to $230, and it mixed
 
 This module is the single place that:
 
-    - drops nursery recommendations that swap drawers for baskets, add large cubbies, or sell a blanket
-    - rewrites every kit-price claim so it matches the shopping-list total
-    - keeps one safety story for the board and the companion PDF
-    - builds the companion-guide sections from the cleaned plan
+- drops nursery recommendations that swap drawers for baskets, add large cubbies, or sell a blanket
+- rewrites every kit-price claim so it matches the shopping-list total
+- keeps one safety story for the board and the companion PDF
+- builds the companion-guide sections from the cleaned plan
 """
 from __future__ import annotations
 
@@ -165,7 +165,7 @@ def clarify_blanket_wording(text: str) -> str:
     )
 
 
-_SENTENCE_SPLIT = re.compile(r"[^.!?\n]+[.!]?")
+_SENTENCE_SPLIT = re.compile(r"[^.!?\n]+[.!?]?")
 _DO_NOT_LINE = re.compile(r"\b(do not|don't|never|no loose|no portable)\b", re.I)
 _ADD_HEATER = re.compile(r"\b(add|install|use|consider|place|buy|mount|get)\b", re.I)
 _HEATER_WORD = re.compile(r"\b(heaters?|space heater)\b", re.I)
