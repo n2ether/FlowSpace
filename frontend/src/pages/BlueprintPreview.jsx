@@ -31,7 +31,7 @@ function RoomPlan({ plan }) {
     const doorWall = plan?.door_wall || "west";
     const doorAt = Number(plan?.door_at ?? 0.22);
     const doorSpan = Number(plan?.door_span ?? 0.2);
-    const doorY = path[0] && Array.isArray(path[0]) ? Number(path[0][1]) * 100 : 32;
+    const doorY = doorAt * 100;
     const pathLabel = path.length > 1 ? path[1] : path[0];
     return (
         <Section title="Room flow" testId="blueprint-plan">

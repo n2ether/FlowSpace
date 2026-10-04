@@ -321,19 +321,27 @@ def test_room_plan_is_a_topdown_room_not_only_horizontal_bars():
     assert "play" not in ids
     assert "SLEEP" in topdown["furniture"]
     assert [item["name"] for item in topdown["legend"]] == ["Crib", "Dresser", "Rocker"]
-    assert topdown["door_wall"] == "south"
+    assert topdown["door_wall"] == "west"
+    assert topdown["door_at"] < 0.2
     assert topdown["board_caption"] == "Approximate room flow + zones"
     places = {place["id"]: place for place in topdown["places"]}
-    assert places["change"]["box"][2] < 0.45
-    assert places["sleep"]["box"][0] > 0.55
-    assert places["comfort"]["box"][0] > 0.55
-    assert places["comfort"]["box"][1] > places["sleep"]["box"][3]
+    dresser, crib, rocker = places["change"]["box"], places["sleep"]["box"], places["comfort"]["box"]
+    # Dresser shares the window wall, on the left, between the door corner and the window.
+    assert dresser[1] < 0.12
+    assert dresser[3] < 0.40
+    assert dresser[2] < 0.45
+    assert crib[0] > 0.55 and rocker[0] > 0.55
+    assert crib[1] < rocker[1]
+    assert rocker[1] > crib[3]
     geo = plan_geometry((36, 900, 800, 1500), topdown)
     door = geo["door"]
+    room = geo["room"]
+    assert door[0] <= room[0] + 4
+    assert door[1] < room[1] + (room[3] - room[1]) * 0.25
     path = clear_path_points(geo)
     assert path[0][1] >= door[1] and path[0][1] <= door[3] + 2
     assert door[0] <= path[0][0] <= door[2]
-    assert path[-1][1] < path[0][1]
+    assert path[-1][0] > path[0][0]
     # Even inside a short wide card, furniture stays on walls instead of spanning the room.
     geo = plan_geometry((36, 900, 1164, 1220), topdown)
     room = geo["room"]

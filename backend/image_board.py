@@ -472,23 +472,23 @@ _NURSERY_VIEW_NAMES = (
 )
 
 # Relative positions from the four source photos. Not measured.
-# Window is north. Dresser is on the west wall. Crib is on the east wall,
-# closer to the window. Rocker is on that same east wall, farther from the
-# window. Door is on the south wall, toward the west. No center "play" block.
+# Window is north. The dresser is on that same window wall, on the left,
+# between the door corner and the window. The door is on the west wall at
+# that dresser end. Crib and rocker are on the east wall: the crib's near
+# end toward the window, the rocker farther from the window. No center block.
 _NURSERY_PLACES = (
-    {"id": "change", "label": "DRESSER", "role": "CHANGE", "number": "2", "zone": "Dresser", "box": (0.03, 0.22, 0.30, 0.58)},
-    {"id": "sleep", "label": "CRIB", "role": "SLEEP", "number": "1", "zone": "Crib", "box": (0.70, 0.14, 0.97, 0.46)},
-    {"id": "comfort", "label": "ROCKER", "role": "COMFORT", "number": "3", "zone": "Rocker", "box": (0.70, 0.56, 0.97, 0.82)},
+    {"id": "change", "label": "DRESSER", "role": "CHANGE", "number": "2", "zone": "Dresser", "box": (0.10, 0.03, 0.32, 0.24)},
+    {"id": "sleep", "label": "CRIB", "role": "SLEEP", "number": "1", "zone": "Crib", "box": (0.70, 0.06, 0.97, 0.42)},
+    {"id": "comfort", "label": "ROCKER", "role": "COMFORT", "number": "3", "zone": "Rocker", "box": (0.70, 0.54, 0.97, 0.84)},
 )
 _NURSERY_LEGEND = (
     {"number": "1", "name": "Crib"},
     {"number": "2", "name": "Dresser"},
     {"number": "3", "name": "Rocker"},
 )
-_NURSERY_DOOR = {"door_wall": "south", "door_at": 0.08, "door_span": 0.24}
-# Starts on the south door and runs north through the open center, between
-# the dresser and the crib/rocker, toward the window.
-_NURSERY_PATH = ((0.20, 0.98), (0.46, 0.70), (0.46, 0.38))
+_NURSERY_DOOR = {"door_wall": "west", "door_at": 0.04, "door_span": 0.20}
+# Starts at the west door beside the dresser and runs through the open center.
+_NURSERY_PATH = ((0.0, 0.12), (0.42, 0.50), (0.52, 0.62))
 # Room-relative. The first point sits on the door wall so the stroke meets the opening.
 _CLEAR_PATH = ((0.0, 0.32), (0.18, 0.50), (0.40, 0.48))
 _GENERIC_DOOR = {"door_wall": "west", "door_at": 0.22, "door_span": 0.16}
@@ -682,9 +682,9 @@ def plan_geometry(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Di
         thickness = max(10, room_h // 28)
         door = (door_x, ry1 - thickness, door_x + door_w, ry1)
     else:
-        door_h = max(28, room_h // 5)
+        door_h = max(28, int(room_h * door_span))
         door_y = ry0 + int(room_h * door_at)
-        door_y = min(door_y, ry0 + room_h - door_h - 4)
+        door_y = min(max(ry0 + 4, door_y), ry0 + room_h - door_h - 4)
         door = (rx0, door_y, rx0 + max(16, room_w // 28), door_y + door_h)
     return {
         "room": room,
@@ -1035,7 +1035,7 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
         draw.rectangle((rx0 - 1, dy0, rx0 + 10, dy1), fill=floor)
         swing = max(26, dy1 - dy0)
         draw.arc((rx0 - 2, dy0, rx0 + swing, dy0 + swing), start=280, end=10, fill=GREEN, width=2)
-        draw.text(_at(0.08, 0.30), door_label, font=_font("sans-bold", 14), fill=GREEN)
+        draw.text((dx1 + 8, min(ry1 - 18, dy1 + 4)), door_label, font=_font("sans-bold", 14), fill=GREEN)
     for place in geo["places"]:
         rect = place["rect"]
         draw.rounded_rectangle(rect, radius=8, fill=GREEN_SOFT, outline=GREEN, width=2)
@@ -1070,7 +1070,7 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     if door_wall == "south":
         path_at = (min(rx1 - 110, start[0] + 28), max(ry0 + 8, start[1] - 36))
     else:
-        path_at = (start[0] + 8, min(mid[1], start[1]) + 8)
+        path_at = (mid[0] + 8, max(ry0 + 8, mid[1] - 18))
     draw.text(path_at, path, font=_font("sans-bold", 13), fill=CLAY)
     if legend:
         _draw_zone_legend(draw, (x0 + 16, y1 - 26 - legend_h, x1 - 16, y1 - 26), legend)
