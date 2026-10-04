@@ -239,7 +239,7 @@ def test_pdf_before_after_when_both_present_stays_compact():
     assert 2 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "Before & after" in text or "BEFORE" in text
-    assert COMPARE_BEFORE_BANNER.split("\u2014")[0].strip() in text
+    assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in text
     assert "YOUR PHOTO" in text
     assert "ORGANIZED VIEW" in text
     assert COMPARE_BEFORE_EMPTY not in text
