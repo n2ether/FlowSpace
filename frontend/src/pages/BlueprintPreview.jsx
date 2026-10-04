@@ -28,19 +28,36 @@ function RoomPlan({ plan }) {
         .filter((point) => Array.isArray(point) && point.length >= 2)
         .map(([x, y]) => `${Number(x) * 100},${Number(y) * 100}`)
         .join(" ");
+    const doorWall = plan?.door_wall || "west";
+    const doorAt = Number(plan?.door_at ?? 0.22);
+    const doorSpan = Number(plan?.door_span ?? 0.2);
     const doorY = path[0] && Array.isArray(path[0]) ? Number(path[0][1]) * 100 : 32;
+    const pathLabel = path.length > 1 ? path[1] : path[0];
     return (
         <Section title="Room flow" testId="blueprint-plan">
             <div className="relative mx-auto aspect-[5/4] w-full overflow-hidden rounded-2xl border-[3px] border-[#1F3D2C] bg-[#faf6ef]">
                 <p className="absolute left-1/2 top-2 -translate-x-1/2 text-xs font-semibold tracking-wide text-[#C17B4A]">
                     {plan?.window || "Window"}
                 </p>
-                <p
-                    className="absolute left-2 text-xs font-semibold text-[#1F3D2C]"
-                    style={{ top: `calc(${doorY}% - 0.9rem)` }}
-                >
-                    {plan?.door || "Door"}
-                </p>
+                {doorWall === "south" ? (
+                    <p
+                        className="absolute z-10 bg-[#faf6ef] text-center text-xs font-semibold text-[#1F3D2C]"
+                        style={{
+                            left: `${doorAt * 100}%`,
+                            bottom: 0,
+                            width: `${Math.max(12, doorSpan * 100)}%`,
+                        }}
+                    >
+                        {plan?.door || "Door"}
+                    </p>
+                ) : (
+                    <p
+                        className="absolute left-2 text-xs font-semibold text-[#1F3D2C]"
+                        style={{ top: `calc(${doorY}% - 0.9rem)` }}
+                    >
+                        {plan?.door || "Door"}
+                    </p>
+                )}
                 {points ? (
                     <svg
                         className="pointer-events-none absolute inset-0 h-full w-full"
@@ -83,9 +100,17 @@ function RoomPlan({ plan }) {
                         </div>
                     );
                 })}
-                <p className="pointer-events-none absolute left-[8%] top-[40%] text-xs font-semibold text-[#C17B4A]">
-                    {plan?.circulation || "Clear path"}
-                </p>
+                {pathLabel ? (
+                    <p
+                        className="pointer-events-none absolute text-xs font-semibold text-[#C17B4A]"
+                        style={{
+                            left: `${Number(pathLabel[0]) * 100}%`,
+                            top: `${Math.max(8, Number(pathLabel[1]) * 100 - 6)}%`,
+                        }}
+                    >
+                        {plan?.circulation || "Clear path"}
+                    </p>
+                ) : null}
             </div>
             {legend.length ? (
                 <ol className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm" data-testid="blueprint-zone-legend">
@@ -216,7 +241,7 @@ export default function BlueprintPreview() {
                 <div className="bg-[#1F3D2C] px-4 py-3 text-white" data-testid="blueprint-review-bar">
                     <div className="mx-auto flex w-full max-w-[430px] items-start justify-between gap-3">
                         <p className="min-w-0 text-sm leading-snug">
-                            Review preview. Nothing has been sent, and this does not mark the package final.
+                            DRAFT. Review version. Not yet approved. Customer release held.
                         </p>
                         <button type="button" className="shrink-0 text-sm underline" onClick={() => setReviewVisible(false)}>
                             Hide
@@ -317,19 +342,11 @@ export default function BlueprintPreview() {
                             ))}
                         </Section>
 
-                        <Section title="Safety" testId="blueprint-safety">
-                            {(doc.safety || []).map((line) => (
-                                <p key={line}>{line}</p>
-                            ))}
+                        <Section title="Safety and climate" testId="blueprint-safety">
+                            <p data-testid="blueprint-climate">{doc.warning_note}</p>
                         </Section>
 
-                        <Section title="Climate" testId="blueprint-climate">
-                            {(doc.climate || []).map((line) => (
-                                <p key={line}>{line}</p>
-                            ))}
-                        </Section>
-
-                        <Section title="Weekly reset" testId="blueprint-reset">
+                        <Section title={doc.reset_title || "Weekly reset"} testId="blueprint-reset">
                             <p>{doc.reset}</p>
                         </Section>
                     </>
