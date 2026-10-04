@@ -1,7 +1,7 @@
 """Unit tests for Resend delivery (API mocked — no network, no secrets)."""
 import asyncio
 
-from email_service import send_blueprint, send_draft_package
+from email_service import customer_email_html, send_blueprint, send_draft_package
 
 
 PDF = b"%PDF-1.4 fake-pdf-bytes"
@@ -148,7 +148,9 @@ def test_sends_image_board_and_companion(monkeypatch):
     assert "cid:blueprint-preview" in html
     assert html.find("blueprint") < html.find("companion")
     assert html.find("<img") < html.find("companion guide")
-    assert "draft" not in html
+    assert "DRAFT. Review version. Not yet approved. Customer release held." in calls[0]["html"]
+    assert "is ready" not in html
+    assert "is Ready" not in calls[0]["html"]
     assert "qa" not in html
     assert "lead" not in html
     assert "SOURCE_" not in calls[0]["html"]
@@ -238,3 +240,21 @@ def test_customer_email_uses_the_nursery_title_and_in_body_preview(monkeypatch):
     assert html.lower().find("<img") < html.lower().find("companion guide")
     assert "9dbedfba-81fc-45e0-b99d-36e0a1de01bb" not in html
     assert "Nicholas" in calls[0]["subject"]
+    assert "DRAFT. Review version. Not yet approved. Customer release held." in html
+    assert "is ready" not in html.lower()
+    assert "Your FlowSpace Blueprint is Ready" not in html
+
+
+def test_customer_email_preview_uses_the_review_status_line():
+    html = customer_email_html(
+        "Camila Sales",
+        "kids_room",
+        project_title="Nicholas's Nursery",
+        preview_src="data:image/png;base64,abc",
+    )
+    status = "DRAFT. Review version. Not yet approved. Customer release held."
+    assert html.count(status) >= 2
+    assert "Your Blueprint is ready, Camila Sales" not in html
+    assert "Your FlowSpace Blueprint is Ready" not in html
+    assert "is ready" not in html.lower()
+    assert "final" not in html.lower()

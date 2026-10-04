@@ -94,7 +94,7 @@ def customer_email_html(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your FlowSpace Blueprint is Ready</title>
+  <title>{REVIEW_STATUS}</title>
 </head>
 <body style="margin:0;padding:0;background:#f3eee6;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eee6;padding:24px 0;">
@@ -112,7 +112,7 @@ def customer_email_html(
           <tr>
             <td style="padding:28px 20px 24px;">
               <h1 style="margin:0 0 12px;font-size:28px;font-weight:500;color:#1F3D2C;letter-spacing:-0.4px;line-height:1.2;">
-                Your Blueprint is ready, {customer_name}
+                {REVIEW_STATUS}
               </h1>
               <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
                 Start with the portrait plan below.
