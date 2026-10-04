@@ -125,6 +125,8 @@ def build_presentation(
         "steps": sections.get("steps") or [],
         "safety": sections.get("safety") or [],
         "climate": sections.get("climate") or [],
+        "warning_note": "Safety and climate are written once in the companion guide.",
+        "reset_title": sections.get("reset_title") or "Weekly reset",
         "reset": sections.get("maintenance") or "",
         "benefits": benefits,
         "preview_path": f"/admin/leads/{lead_id}/blueprint" if lead_id else "",
