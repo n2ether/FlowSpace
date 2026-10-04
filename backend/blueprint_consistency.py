@@ -178,6 +178,22 @@ _BLANKET_NOTE = (
     "We left bedding blankets off the shopping list. The crib stays bare except a fitted sheet, "
     "and a warmer window is a thermal curtain or shade, not a blanket."
 )
+# Location lines for this nursery. The photos put the crib's near end toward the
+# window, on the wall opposite the dresser, and the rocker farther from the window.
+_CRIB_LOCATION = (
+    "The crib stays on the wall opposite the dresser, with its near end toward the window."
+)
+_ROCKER_LOCATION = (
+    "The rocker stays on the crib wall, farther from the window than the crib."
+)
+_CRIB_WRONG_LOCATION = re.compile(
+    r"\b(?:away from the window|far from the window|current corner|away from the dresser)\b",
+    re.I,
+)
+_ROCKER_WRONG_LOCATION = re.compile(
+    r"\b(?:close to the window|near the window|by the window)\b",
+    re.I,
+)
 
 NURSERY_SAFETY = (
     "Anchor the dresser to the wall and keep every drawer.",
@@ -288,6 +304,39 @@ def _dedupe(items: List[str]) -> List[str]:
     return out
 
 
+def _swap_location_sentences(text: str, pattern: re.Pattern[str], replacement: str) -> str:
+    """Replace a wrong location sentence and keep the rest of the zone copy."""
+    sentences = [" ".join(match.split()).strip() for match in _SENTENCE_SPLIT.findall(text or "")]
+    sentences = [sentence for sentence in sentences if sentence]
+    if not any(pattern.search(sentence) for sentence in sentences):
+        return text
+    kept: List[str] = []
+    inserted = False
+    for sentence in sentences:
+        if pattern.search(sentence):
+            if not inserted:
+                kept.append(replacement)
+                inserted = True
+            continue
+        kept.append(sentence if sentence[-1:] in ".!?" else f"{sentence}.")
+    return " ".join(kept).strip()
+
+
+def align_nursery_zone_locations(zones: List[Any]) -> None:
+    """Make crib and rocker locations match the photos. Other sentences stay."""
+    for zone in zones or []:
+        if not isinstance(zone, dict):
+            continue
+        title = str(zone.get("title") or "")
+        desc = str(zone.get("desc") or "")
+        blob = f"{title} {desc}".lower()
+        if any(word in blob for word in ("crib", "sleep")):
+            desc = _swap_location_sentences(desc, _CRIB_WRONG_LOCATION, _CRIB_LOCATION)
+        if any(word in blob for word in ("rocker", "rocking", "feed", "feeding")):
+            desc = _swap_location_sentences(desc, _ROCKER_WRONG_LOCATION, _ROCKER_LOCATION)
+        zone["desc"] = desc
+
+
 def _append_unique(items: List[str], line: str) -> List[str]:
     if line and line not in items:
         items.append(line)
@@ -338,6 +387,7 @@ def apply_nursery_rules(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Li
         if isinstance(zone, dict):
             zone["title"] = clarify_plan_text(str(zone.get("title") or ""))
             zone["desc"] = clarify_plan_text(str(zone.get("desc") or ""))
+    align_nursery_zone_locations(deliverable.get("zones") or [])
 
     strategy = list(deliverable.get("strategy") or [])
     keep = dresser_keep_line(lead, deliverable)

@@ -199,3 +199,53 @@ def test_nursery_safety_and_climate_are_each_written_once():
     assert sections["maintenance"].lower().startswith("one-minute bedtime ritual")
     for line in sections["safety"]:
         assert line.lower() not in sections["maintenance"].lower()
+
+
+def test_nursery_zone_locations_match_the_photos():
+    """Live zone copy put the crib away from the window and the rocker beside it."""
+    from pdf_generator import build_pdf
+
+    lead = {"name": "Camila Sales", "space_type": "kids_room", "must_stay": "Six-drawer dresser, crib, rocker"}
+    deliverable = {
+        "zones": [
+            {
+                "title": "Safe Sleep Zone",
+                "desc": (
+                    "The crib stays in its current corner, away from the window and dresser. "
+                    "The sleep surface stays clear except a fitted sheet."
+                ),
+            },
+            {
+                "title": "Calm Feeding & Rocking Zone",
+                "desc": (
+                    "The rocker stays where it is, close to the window. "
+                    "Do not add a portable heater near the crib."
+                ),
+            },
+        ],
+    }
+    prepared = prepare_deliverable(lead, deliverable)
+    by_title = {zone["title"]: zone["desc"] for zone in prepared["zones"]}
+    crib = by_title["Safe Sleep Zone"]
+    rocker = by_title["Calm Feeding & Rocking Zone"]
+    assert crib == (
+        "The crib stays on the wall opposite the dresser, with its near end toward the window. "
+        "The sleep surface stays clear except a fitted sheet."
+    )
+    assert rocker == (
+        "The rocker stays on the crib wall, farther from the window than the crib. "
+        "Do not add a portable heater near the crib."
+    )
+    assert "away from the window" not in crib.lower()
+    assert "close to the window" not in rocker.lower()
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
+    text = " ".join(
+        " ".join((page.extract_text() or "").split())
+        for page in PdfReader(io.BytesIO(pdf)).pages
+    )
+    assert "near end toward the window" in text
+    assert "farther from the window than the crib" in text
+    assert "away from the window" not in text.lower()
+    assert "close to the window" not in text.lower()
+    assert "fitted sheet" in text.lower()
+    assert "portable heater" in text.lower()
