@@ -153,7 +153,8 @@ def test_pdf_handles_empty_deliverable():
     assert "95%" in text
     assert "organized view" in text.lower() or "shopping list" in text.lower()
     assert pdf[:5] == b"%PDF-"
-    assert len(PdfReader(io.BytesIO(pdf)).pages) >= 2
+    # No photo pair, so the guide stays on one page instead of a blank follow page.
+    assert len(PdfReader(io.BytesIO(pdf)).pages) >= 1
 
 
 def test_pdf_placeholder_when_images_missing():
@@ -238,13 +239,14 @@ def test_pdf_before_after_when_both_present_stays_compact():
     assert 2 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "Before & after" in text or "BEFORE" in text
-    assert COMPARE_BEFORE_BANNER.split("—")[0].strip() in text
+    assert COMPARE_BEFORE_BANNER.split("\u2014")[0].strip() in text
     assert "YOUR PHOTO" in text
     assert "ORGANIZED VIEW" in text
     assert COMPARE_BEFORE_EMPTY not in text
     assert COMPARE_AFTER_EMPTY not in text
     low = text.lower()
-    assert "final organized view" in low
+    assert "organized view" in low
+    assert "final organized" not in low
     assert "do not invent an after" not in low
     assert "organized view unavailable" not in low
     assert "we do not invent an organized after" not in low
@@ -266,7 +268,8 @@ def test_pdf_honest_empty_when_only_after():
     assert COMPARE_AFTER_EMPTY not in text
     assert "ORGANIZED VIEW" in text
     low = text.lower()
-    assert "final organized view" in low
+    assert "organized view" in low
+    assert "final organized" not in low
     assert "do not invent an after" not in low
     assert "we do not invent an organized after" not in low
     assert len(PdfReader(io.BytesIO(pdf)).pages) <= 16
