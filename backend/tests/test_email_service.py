@@ -28,9 +28,9 @@ def _png(color=(10, 120, 90)) -> bytes:
 
 
 VISUALS = [
-    {"label": "Before-1", "bytes": _sideways_jpeg()},
-    {"label": "Organized-1", "bytes": _png()},
-    {"label": "Before-2", "bytes": b"not an image"},
+    {"label": "Organized-1", "bytes": _sideways_jpeg()},
+    {"label": "Organized-2", "bytes": _png()},
+    {"label": "Organized-3", "bytes": b"not an image"},
 ]
 
 
@@ -332,8 +332,8 @@ def _assert_visual_files(attachments, *, draft: bool):
     assert [a["filename"] for a in attachments] == [
         f"Nicholas-Nursery-Blueprint{suffix}.png",
         f"Nicholas-Nursery-Room-Flow{suffix}.png",
-        "Before-1.jpg",
         "Organized-1.jpg",
+        "Organized-2.jpg",
         f"Nicholas-Nursery-Companion{suffix}.pdf",
     ]
     views = attachments[2:4]
@@ -343,9 +343,10 @@ def _assert_visual_files(attachments, *, draft: bool):
         raw = base64.b64decode(att["content"])
         assert raw[:3] == b"\xff\xd8\xff"
         assert not Image.open(io.BytesIO(raw)).getexif()
-    before = Image.open(io.BytesIO(base64.b64decode(views[0]["content"])))
-    assert before.size == (20, 40)
+    upright = Image.open(io.BytesIO(base64.b64decode(views[0]["content"])))
+    assert upright.size == (20, 40)
     for att in attachments:
+        assert not att["filename"].startswith("Before")
         for banned in ("SOURCE_", "AFTER_", "9dbedfba", "lead-9"):
             assert banned not in att["filename"]
 
