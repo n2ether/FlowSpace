@@ -10,11 +10,12 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from typing import Optional, Tuple, List, Dict, Any
 
 import resend
 
-from image_orientation import upright_png_bytes
+from image_orientation import upright_jpeg_bytes
 from pdf_generator import plan_title, space_label
 
 logger = logging.getLogger(__name__)
@@ -34,14 +35,6 @@ def _admin_email() -> str:
 def _preview_url(lead_id: str) -> str:
     base = (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").rstrip("/")
     return f"{base}/admin/leads/{lead_id}/blueprint"
-
-
-def _file_stem(title: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() else "_" for ch in (title or "Blueprint"))
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned.strip("_") or "Blueprint"
-
 
 
 def _first_name(customer_name: str) -> str:
@@ -166,33 +159,42 @@ def customer_email_html(
 
 
 
-def _png_attachment(filename: str, png: bytes, content_id: str = "") -> dict:
+# Resend rejects a message over 40 MB (body plus base64 attachments). Leave headroom.
+EMAIL_SIZE_BUDGET = 30_000_000
+
+# Full resolution first; step down only when the whole message would not fit.
+VIEW_JPEG_STEPS: Tuple[Tuple[Optional[int], int], ...] = (
+    (None, 88),
+    (2400, 86),
+    (2000, 82),
+    (1600, 78),
+)
+
+
+def attachment_slug(title: str) -> str:
+    """``Nicholas's Nursery`` -> ``Nicholas-Nursery``. Never a lead id or a pipeline code."""
+    text = re.sub(r"['’]s\b", "", title or "")
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    return "-".join(words) or "Blueprint"
+
+
+def _attachment(filename: str, data: bytes, content_type: str, content_id: str = "") -> dict:
     att = {
         "filename": filename,
-        "content": base64.b64encode(png).decode("utf-8"),
-        "content_type": "image/png",
+        "content": base64.b64encode(data).decode("utf-8"),
+        "content_type": content_type,
     }
     if content_id:
         att["content_id"] = content_id
     return att
 
 
-def _extra_visual_attachments(
-    visuals: Optional[List[Dict[str, Any]]],
-    *,
-    stem: str,
-    safe_name: str,
-    draft: bool = False,
-) -> List[dict]:
-    """Attach key client-facing visuals as full-size PNG files (in addition to body embeds)."""
-    out: List[dict] = []
-    prefix = f"FlowSpace_{stem}_DRAFT_" if draft else f"FlowSpace_{stem}_"
+def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[Tuple[str, bytes]]:
+    out: List[Tuple[str, bytes]] = []
     for index, visual in enumerate(visuals or []):
         if not isinstance(visual, dict):
             continue
         raw = visual.get("bytes") or visual.get("png") or visual.get("content")
-        if not raw:
-            continue
         if isinstance(raw, str):
             try:
                 raw = base64.b64decode(raw)
@@ -200,25 +202,76 @@ def _extra_visual_attachments(
                 continue
         if not isinstance(raw, (bytes, bytearray)) or not raw:
             continue
-        # Source photos are usually camera JPEGs; the file must really be an upright PNG.
-        png = upright_png_bytes(bytes(raw))
-        if not png:
-            continue
-        label = "".join(
-            ch if ch.isalnum() or ch in "-_" else "_"
-            for ch in str(visual.get("label") or visual.get("name") or f"visual_{index + 1}")
-        )
-        out.append(_png_attachment(f"{prefix}{label}_{safe_name}.png", png))
+        label = "-".join(re.findall(r"[A-Za-z0-9]+", str(visual.get("label") or ""))) or f"View-{index + 1}"
+        out.append((label, bytes(raw)))
     return out
 
 
-def _zone_map_attachment(filename: str, png: bytes) -> dict:
-    return {
-        "filename": filename,
-        "content": base64.b64encode(png).decode("utf-8"),
-        "content_type": "image/png",
-        "content_id": "room-flow",
-    }
+def encoded_message_size(html: str, attachments: List[dict]) -> int:
+    """Bytes Resend counts: the HTML body plus each base64 attachment."""
+    return len((html or "").encode("utf-8")) + sum(len(a.get("content") or "") for a in attachments)
+
+
+def package_attachments(
+    *,
+    title: str,
+    html: str,
+    pdf_bytes: bytes,
+    board_bytes: Optional[bytes] = None,
+    zone_map_bytes: Optional[bytes] = None,
+    extra_visuals: Optional[List[Dict[str, Any]]] = None,
+    draft: bool = False,
+    budget: Optional[int] = None,
+) -> List[dict]:
+    """Board and zone map (PNG, full size), view photos (JPEG), then the companion PDF.
+
+    View photos are the only part that bends to the size budget: quality and
+    long edge step down, and as a last resort they are left out (they are
+    still in the email body and the PDF). Size never fails a send.
+    """
+    budget = EMAIL_SIZE_BUDGET if budget is None else budget
+    slug = attachment_slug(title)
+    suffix = "-DRAFT" if draft else ""
+    head: List[dict] = []
+    if board_bytes:
+        head.append(_attachment(f"{slug}-Blueprint{suffix}.png", board_bytes, "image/png", "blueprint-preview"))
+        if zone_map_bytes:
+            head.append(_attachment(f"{slug}-Room-Flow{suffix}.png", zone_map_bytes, "image/png", "room-flow"))
+    pdf = _attachment(f"{slug}-Companion{suffix}.pdf", pdf_bytes, "application/pdf")
+    base = head + [pdf]
+    sources = _view_sources(extra_visuals)
+    if not sources:
+        return base
+
+    size = encoded_message_size(html, base)
+    for step, (max_edge, quality) in enumerate(VIEW_JPEG_STEPS):
+        views = []
+        for label, raw in sources:
+            jpeg = upright_jpeg_bytes(raw, quality=quality, max_edge=max_edge)
+            if jpeg:
+                views.append(_attachment(f"{label}.jpg", jpeg, "image/jpeg"))
+        attachments = head + views + [pdf]
+        size = encoded_message_size(html, attachments)
+        if size <= budget:
+            if step:
+                logger.warning(
+                    "Email size budget: view photos stepped down to long edge %s px, JPEG quality %s (%.1f MB encoded)",
+                    max_edge,
+                    quality,
+                    size / 1e6,
+                )
+            return attachments
+
+    size = encoded_message_size(html, base)
+    logger.warning(
+        "Email size budget: dropped %d view photo attachments (%s); they stay in the body and the PDF (%.1f MB encoded)",
+        len(sources),
+        ", ".join(f"{label}.jpg" for label, _raw in sources),
+        size / 1e6,
+    )
+    if size > budget:
+        logger.error("Email still over the %.0f MB budget at %.1f MB; sending anyway", budget / 1e6, size / 1e6)
+    return base
 
 
 def _customer_html(
@@ -239,6 +292,48 @@ def _customer_html(
         room_flow_src=room_flow_src if two_files else "",
         outline_note=outline_note,
     )
+
+
+def email_body_html(
+    *,
+    customer_name: str,
+    space_type: str,
+    project_title: str = "",
+    outline_note: str = "",
+    draft: bool = False,
+    lead_id: str = "",
+    preview_src: str = "",
+    room_flow_src: str = "",
+) -> str:
+    """The exact HTML a send uses. The preview endpoint passes data URIs where a send passes ``cid:``."""
+    title = (project_title or "").strip()
+    room_flow_src = room_flow_src if preview_src else ""
+    if draft:
+        return _draft_package_html(
+            customer_name or "there",
+            lead_id,
+            space_type,
+            project_title=title,
+            preview_src=preview_src,
+            room_flow_src=room_flow_src,
+            outline_note=outline_note,
+        )
+    return _customer_html(
+        customer_name or "there",
+        space_type,
+        two_files=bool(preview_src),
+        project_title=title,
+        preview_src=preview_src,
+        room_flow_src=room_flow_src,
+        outline_note=outline_note,
+    )
+
+
+def _cid_sources(board_bytes: Optional[bytes], zone_map_bytes: Optional[bytes]) -> Dict[str, str]:
+    return {
+        "preview_src": "cid:blueprint-preview" if board_bytes else "",
+        "room_flow_src": "cid:room-flow" if board_bytes and zone_map_bytes else "",
+    }
 
 
 def _admin_html(customer_name: str, customer_email: str, space_type: str, lead_id: str) -> str:
@@ -290,33 +385,23 @@ async def send_blueprint(
     resend.api_key = api_key
     space = plan_title(space_type)
     shown = (project_title or "").strip()
-    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    stem = _file_stem(shown) if shown else space.replace(" ", "_")
-    pdf_filename = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
     subject = f"Your FlowSpace Blueprint — {shown}" if shown else f"Your FlowSpace {space}"
     sender = _from_email()
-    attachments = []
-    if board_bytes:
-        attachments.append(
-            {
-                "filename": f"FlowSpace_{stem}_Blueprint_{safe_name}.png",
-                "content": base64.b64encode(board_bytes).decode("utf-8"),
-                "content_type": "image/png",
-                "content_id": "blueprint-preview",
-            }
-        )
-    if board_bytes and zone_map_bytes:
-        attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_Room_Flow_{safe_name}.png", zone_map_bytes))
-    attachments.extend(
-        _extra_visual_attachments(extra_visuals, stem=stem, safe_name=safe_name, draft=False)
+    html = email_body_html(
+        customer_name=customer_name,
+        space_type=space_type,
+        project_title=shown,
+        outline_note=outline_note,
+        **_cid_sources(board_bytes, zone_map_bytes),
     )
-    attachments.append(
-        {
-            "filename": pdf_filename,
-            "content": pdf_b64,
-            "content_type": "application/pdf",
-        }
+    attachments = await asyncio.to_thread(
+        package_attachments,
+        title=shown or space,
+        html=html,
+        pdf_bytes=pdf_bytes,
+        board_bytes=board_bytes,
+        zone_map_bytes=zone_map_bytes,
+        extra_visuals=extra_visuals,
     )
 
     try:
@@ -326,14 +411,7 @@ async def send_blueprint(
                 "from": sender,
                 "to": [customer_email.strip()],
                 "subject": subject,
-                "html": _customer_html(
-                    customer_name,
-                    space_type,
-                    two_files=bool(board_bytes),
-                    project_title=shown,
-                    room_flow_src="cid:room-flow" if zone_map_bytes else "",
-                    outline_note=outline_note,
-                ),
+                "html": html,
                 "attachments": attachments,
             },
         )
@@ -497,43 +575,30 @@ async def send_draft_package(
     resend.api_key = api_key
     space = plan_title(space_type)
     shown = (project_title or "").strip()
-    safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (customer_name or "customer"))
-    stem = _file_stem(shown) if shown else space.replace(" ", "_")
-    attachments = []
-    if board_bytes:
-        attachments.append(
-            {
-                "filename": f"FlowSpace_{stem}_DRAFT_Blueprint_{safe_name}.png",
-                "content": base64.b64encode(board_bytes).decode("utf-8"),
-                "content_type": "image/png",
-                "content_id": "blueprint-preview",
-            }
-        )
-    if board_bytes and zone_map_bytes:
-        attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_DRAFT_Room_Flow_{safe_name}.png", zone_map_bytes))
-    attachments.extend(
-        _extra_visual_attachments(extra_visuals, stem=stem, safe_name=safe_name, draft=True)
+    html = email_body_html(
+        customer_name=customer_name,
+        space_type=space_type,
+        project_title=shown,
+        outline_note=outline_note,
+        draft=True,
+        lead_id=lead_id,
+        **_cid_sources(board_bytes, zone_map_bytes),
     )
-    attachments.append(
-        {
-            "filename": f"FlowSpace_{stem}_DRAFT_Companion_{safe_name}.pdf",
-            "content": base64.b64encode(pdf_bytes).decode("utf-8"),
-            "content_type": "application/pdf",
-        }
+    attachments = await asyncio.to_thread(
+        package_attachments,
+        title=shown or space,
+        html=html,
+        pdf_bytes=pdf_bytes,
+        board_bytes=board_bytes,
+        zone_map_bytes=zone_map_bytes,
+        extra_visuals=extra_visuals,
+        draft=True,
     )
     payload = {
         "from": _from_email(),
         "to": [recipient],
         "subject": f"FlowSpace DRAFT — review version, not yet approved ({customer_name or shown or space})",
-        "html": _draft_package_html(
-            customer_name or "there",
-            lead_id,
-            space_type,
-            project_title=(project_title or "").strip(),
-            preview_src="cid:blueprint-preview" if board_bytes else "",
-            room_flow_src="cid:room-flow" if board_bytes and zone_map_bytes else "",
-            outline_note=outline_note,
-        ),
+        "html": html,
         "attachments": attachments,
     }
     cc = [e.strip() for e in (cc_emails or []) if (e or "").strip()]

@@ -28,9 +28,9 @@ def _png(color=(10, 120, 90)) -> bytes:
 
 
 VISUALS = [
-    {"label": "Before_view_1", "bytes": _sideways_jpeg()},
-    {"label": "Organized_view_1", "bytes": _png()},
-    {"label": "Before_view_2", "bytes": b"not an image"},
+    {"label": "Before-1", "bytes": _sideways_jpeg()},
+    {"label": "Organized-1", "bytes": _png()},
+    {"label": "Before-2", "bytes": b"not an image"},
 ]
 
 
@@ -167,10 +167,10 @@ def test_sends_image_board_and_companion(monkeypatch):
     attachments = calls[0]["attachments"]
     assert len(attachments) == 2
     assert attachments[0]["content_type"] == "image/png"
-    assert attachments[0]["filename"].endswith("_Blueprint_Camila.png")
+    assert attachments[0]["filename"] == "Kids-room-Organization-Plan-Blueprint.png"
     assert attachments[0].get("content_id") == "blueprint-preview"
     assert attachments[1]["content_type"] == "application/pdf"
-    assert attachments[1]["filename"].endswith("_Companion_Camila.pdf")
+    assert attachments[1]["filename"] == "Kids-room-Organization-Plan-Companion.pdf"
     html = calls[0]["html"].lower()
     assert "cid:blueprint-preview" in html
     assert html.find("blueprint") < html.find("companion")
@@ -323,20 +323,27 @@ def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
     assert sent is True
     attachments = calls[0]["attachments"]
     assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None]
-    assert "DRAFT_Room_Flow" in attachments[1]["filename"]
+    assert attachments[1]["filename"].endswith("-Room-Flow-DRAFT.png")
     assert "cid:room-flow" in calls[0]["html"]
 
 
 def _assert_visual_files(attachments, *, draft: bool):
-    pngs = [a for a in attachments if "_view_" in a["filename"]]
-    assert [a["filename"].split("_view_")[0].rsplit("_", 1)[-1] for a in pngs] == ["Before", "Organized"]
-    for att in pngs:
-        assert att["content_type"] == "image/png"
+    suffix = "-DRAFT" if draft else ""
+    assert [a["filename"] for a in attachments] == [
+        f"Nicholas-Nursery-Blueprint{suffix}.png",
+        f"Nicholas-Nursery-Room-Flow{suffix}.png",
+        "Before-1.jpg",
+        "Organized-1.jpg",
+        f"Nicholas-Nursery-Companion{suffix}.pdf",
+    ]
+    views = attachments[2:4]
+    for att in views:
+        assert att["content_type"] == "image/jpeg"
         assert "content_id" not in att
-        assert ("_DRAFT_" in att["filename"]) is draft
         raw = base64.b64decode(att["content"])
-        assert raw[:8] == b"\x89PNG\r\n\x1a\n"
-    before = Image.open(io.BytesIO(base64.b64decode(pngs[0]["content"])))
+        assert raw[:3] == b"\xff\xd8\xff"
+        assert not Image.open(io.BytesIO(raw)).getexif()
+    before = Image.open(io.BytesIO(base64.b64decode(views[0]["content"])))
     assert before.size == (20, 40)
     for att in attachments:
         for banned in ("SOURCE_", "AFTER_", "9dbedfba", "lead-9"):

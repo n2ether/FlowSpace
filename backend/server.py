@@ -27,7 +27,7 @@ from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
-from email_service import customer_email_html, send_blueprint, send_contact_sheet, send_draft_package
+from email_service import email_body_html, send_blueprint, send_contact_sheet, send_draft_package
 from source_photos import draft_send_block_reason, final_email_block_reason
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
@@ -1075,19 +1075,37 @@ async def render_deliverable_zone_map(
     )
 
 
+def _email_inputs(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, str]:
+    """Body inputs shared by send-draft, send-final, and the email preview, so the preview is the sent body."""
+    return {
+        "customer_name": lead.get("name") or "",
+        "space_type": lead.get("space_type") or "space",
+        "project_title": _customer_title(lead, deliverable),
+        "outline_note": outline_caption(lead, deliverable),
+    }
+
+
+def _png_data_uri(png: Optional[bytes]) -> str:
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii") if png else ""
+
+
 @api_router.get("/admin/leads/{lead_id}/deliverable/email-preview")
-async def render_customer_email_preview(lead_id: str, request: Request, _: bool = Depends(require_admin)):
-    """Customer email HTML with the Blueprint in the body. Does not send or mark final."""
+async def render_customer_email_preview(
+    lead_id: str,
+    request: Request,
+    draft: bool = False,
+    _: bool = Depends(require_admin),
+):
+    """The HTML send-final (or send-draft with ``?draft=true``) emails, with images inlined. Does not send."""
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     board = build_image_board(lead=lead, deliverable=deliverable, images=images)
-    zone_map = build_zone_map(lead=lead, deliverable=deliverable, images=images)
-    preview_src = "data:image/png;base64," + base64.b64encode(board).decode("ascii")
-    html = customer_email_html(
-        lead.get("name") or "there",
-        lead.get("space_type") or "space",
-        project_title=_customer_title(lead, deliverable),
-        preview_src=preview_src,
-        room_flow_src="data:image/png;base64," + base64.b64encode(zone_map).decode("ascii"),
+    zone_map = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=not draft)
+    html = email_body_html(
+        **_email_inputs(lead, deliverable),
+        draft=draft,
+        lead_id=lead_id,
+        preview_src=_png_data_uri(board),
+        room_flow_src=_png_data_uri(zone_map) if board else "",
     )
     return Response(
         content=html,
@@ -1185,7 +1203,7 @@ async def send_review_contact_sheet(
 
 
 def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Full-size client-facing before/after PNGs for email attachment.
+    """Full-size client-facing before/after photos for email attachment.
 
     Each required room photo contributes its before and organized after when
     present. These are attached as separate files in addition to the body embeds
@@ -1198,9 +1216,9 @@ def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
         before = pair.get("before")
         after = pair.get("after")
         if before:
-            visuals.append({"label": f"Before_view_{index + 1}", "bytes": before})
+            visuals.append({"label": f"Before-{index + 1}", "bytes": before})
         if after:
-            visuals.append({"label": f"Organized_view_{index + 1}", "bytes": after})
+            visuals.append({"label": f"Organized-{index + 1}", "bytes": after})
     return visuals
 
 
@@ -1223,17 +1241,14 @@ async def send_draft_package_endpoint(
     cc_raw = (request.query_params.get("cc") or "").strip()
     cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
     sent, error = await send_draft_package(
+        **_email_inputs(lead, deliverable),
         to_email=recipient,
-        customer_name=lead.get("name") or "",
-        space_type=lead.get("space_type") or "space",
         lead_id=lead_id,
         pdf_bytes=pdf_bytes,
         board_bytes=board_bytes,
         cc_emails=cc_emails or None,
-        project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
         extra_visuals=_client_facing_visuals(images),
-        outline_note=outline_caption(lead, deliverable),
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
@@ -1258,16 +1273,13 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=True)
     sent, error = await send_blueprint(
-        customer_name=lead.get("name") or "there",
+        **_email_inputs(lead, deliverable),
         customer_email=lead.get("email") or "",
-        space_type=lead.get("space_type") or "space",
         lead_id=lead_id,
         pdf_bytes=pdf_bytes,
         board_bytes=board_bytes,
-        project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
         extra_visuals=_client_facing_visuals(images),
-        outline_note=outline_caption(lead, deliverable),
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:
