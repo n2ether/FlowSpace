@@ -1203,20 +1203,16 @@ async def send_review_contact_sheet(
 
 
 def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Full-size client-facing before/after photos for email attachment.
+    """Full-size organized (after) photos for email attachment.
 
-    Each required room photo contributes its before and organized after when
-    present. These are attached as separate files in addition to the body embeds
-    and the companion PDF.
+    Before photos are not attached as separate files; the before/after pairs
+    live in the companion PDF only.
     """
     visuals: List[Dict[str, Any]] = []
     for index, pair in enumerate(images.get("source_pairs") or []):
         if not isinstance(pair, dict):
             continue
-        before = pair.get("before")
         after = pair.get("after")
-        if before:
-            visuals.append({"label": f"Before-{index + 1}", "bytes": before})
         if after:
             visuals.append({"label": f"Organized-{index + 1}", "bytes": after})
     return visuals
