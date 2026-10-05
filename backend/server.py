@@ -21,6 +21,7 @@ import stripe as stripe_sdk
 import httpx
 
 from image_board import build_image_board
+from room_flow import build_zone_map
 from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
@@ -979,6 +980,11 @@ def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, A
     return board, pdf, package
 
 
+def _zone_map_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str, str]:
+    board, pdf, package = _blueprint_filenames(lead, deliverable)
+    return board, pdf, package, board.replace("_Blueprint_", "_Room_Flow_", 1)
+
+
 @api_router.get("/admin/leads/{lead_id}/deliverable/presentation")
 async def deliverable_presentation(lead_id: str, request: Request, _: bool = Depends(require_admin)):
     """Phone-page model for a lead. Does not email anyone or mark the package final."""
@@ -1030,6 +1036,31 @@ async def render_deliverable_board(lead_id: str, request: Request, _: bool = Dep
     )
 
 
+@api_router.get("/admin/leads/{lead_id}/deliverable/zone-map")
+async def render_deliverable_zone_map(
+    lead_id: str,
+    request: Request,
+    review: bool = False,
+    _: bool = Depends(require_admin),
+):
+    """Conceptual Zone Map / Flow Plan PNG. ``review=1`` adds the status banner with the lead id."""
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    png_bytes = build_zone_map(
+        lead=lead,
+        deliverable=d,
+        images=images,
+        final=str(d.get("package_status") or "") == "final",
+        review=review,
+        lead_id=lead_id,
+    )
+    _board, _pdf, _package, zone_map_name = _zone_map_filenames(lead, d)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{zone_map_name}"', "Cache-Control": "no-store"},
+    )
+
+
 @api_router.get("/admin/leads/{lead_id}/deliverable/email-preview")
 async def render_customer_email_preview(lead_id: str, request: Request, _: bool = Depends(require_admin)):
     """Customer email HTML with the Blueprint in the body. Does not send or mark final."""
@@ -1051,14 +1082,18 @@ async def render_customer_email_preview(lead_id: str, request: Request, _: bool 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/package")
 async def render_deliverable_package(lead_id: str, request: Request, _: bool = Depends(require_admin)):
-    """Zip of the image board and the companion guide, for a nursery revise or QA."""
+    """Zip of the image board, the room-flow zone map, and the companion guide, for a revise or QA."""
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
-    board_name, pdf_name, package_name = _blueprint_filenames(lead, d)
+    zone_map = build_zone_map(
+        lead=lead, deliverable=d, images=images, final=str(d.get("package_status") or "") == "final"
+    )
+    board_name, pdf_name, package_name, zone_map_name = _zone_map_filenames(lead, d)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(board_name, png_bytes)
+        archive.writestr(zone_map_name, zone_map)
         archive.writestr(pdf_name, pdf_bytes)
     return Response(
         content=buf.getvalue(),

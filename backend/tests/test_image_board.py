@@ -12,9 +12,7 @@ from image_board import (
     board_layout,
     board_spec,
     build_image_board,
-    clear_path_points,
     customer_board_text,
-    plan_geometry,
 )
 from pdf_generator import build_pdf, customer_project_title
 
@@ -123,7 +121,7 @@ def test_board_claims_after_only_when_the_render_exists():
     assert spec["topdown"]["window"] == "WINDOW"
     assert spec["topdown"]["door"] == "DOOR"
     assert "CLEAR PATH" == spec["topdown"]["circulation"]
-    assert "SLEEP" in spec["topdown"]["furniture"]
+    assert "CRIB" in spec["topdown"]["furniture"]
     assert spec["topdown"]["matches_after"] is True
     assert spec["topdown"]["approximate"] is True
     assert spec["space_theme"] is True
@@ -311,66 +309,31 @@ def test_portrait_hero_is_larger_without_cropping_and_board_hides_internal_codes
     assert LEAD_ID.encode() not in png
 
 
-def test_room_plan_is_a_topdown_room_not_only_horizontal_bars():
+def test_room_flow_card_is_the_measured_zone_map():
+    """The card draws Camila's zone map: measured outline, door at the lower-left corner."""
     lead, deliverable = _load()
     spec = board_spec(lead, deliverable, {})
     topdown = spec["topdown"]
-    assert topdown["drawing"] == "room"
-    ids = {place["id"] for place in topdown["places"]}
-    assert {"sleep", "change", "comfort"} <= ids
-    assert "play" not in ids
-    assert "SLEEP" in topdown["furniture"]
-    assert [item["name"] for item in topdown["legend"]] == ["Crib", "Dresser", "Rocker"]
-    assert topdown["door_wall"] == "west"
-    assert topdown["door_at"] < 0.2
-    assert topdown["board_caption"] == "Approximate room flow + zones"
-    places = {place["id"]: place for place in topdown["places"]}
-    dresser, crib, rocker = places["change"]["box"], places["sleep"]["box"], places["comfort"]["box"]
-    # Dresser shares the window wall, on the left, between the door corner and the window.
-    assert dresser[1] < 0.12
-    assert dresser[3] < 0.40
-    assert dresser[2] < 0.45
-    assert crib[0] > 0.55 and rocker[0] > 0.55
-    assert crib[1] < rocker[1]
-    assert rocker[1] > crib[3]
-    geo = plan_geometry((36, 900, 800, 1500), topdown)
-    door = geo["door"]
-    room = geo["room"]
-    assert door[0] <= room[0] + 4
-    assert door[1] < room[1] + (room[3] - room[1]) * 0.25
-    path = clear_path_points(geo)
-    assert path[0][1] >= door[1] and path[0][1] <= door[3] + 2
-    assert door[0] <= path[0][0] <= door[2]
-    assert path[-1][0] > path[0][0]
-    # Even inside a short wide card, furniture stays on walls instead of spanning the room.
-    geo = plan_geometry((36, 900, 1164, 1220), topdown)
-    room = geo["room"]
-    rw, rh = room[2] - room[0], room[3] - room[1]
-    assert rh >= 140
-    assert rw / rh <= 2.4
-    for place in geo["places"]:
-        rect = place["rect"]
-        assert rect[2] - rect[0] <= int(rw * 0.58) + 1
-        assert rect[0] >= room[0] and rect[2] <= room[2]
+    assert topdown["drawing"] == "zone_map"
+    assert topdown["measured_outline"] is True
+    assert topdown["approximate"] is True
+    assert topdown["board_caption"] == "Measured room outline. Furniture and zones approximate."
+    assert "not a measured" not in topdown["caption"].lower()
+    assert [item["name"] for item in topdown["legend"]] == ["Sleep", "Change", "Comfort", "Play + Storage"]
+    assert {"DRESSER", "CRIB", "ROCKER", "RUG + BASKET"} <= set(topdown["furniture"])
+    flow = topdown["room_flow"]
+    assert flow["walls"][3] == {"door": True}
+    door = (flow["outline"][3], flow["outline"][4])
+    assert max(p[0] for p in door) < 1.0 and min(p[1] for p in door) > 2.0
     png = build_image_board(lead=lead, deliverable=deliverable, images={})
     board = Image.open(io.BytesIO(png))
-    laid = plan_geometry(board_layout(spec)["plan"], topdown)
-    floor = (250, 246, 239)
-    soft = (207, 226, 215)
-    open_hits = 0
-    block_hits = 0
-    rx0, ry0, rx1, ry1 = laid["room"]
-    rects = [place["rect"] for place in laid["places"]]
-    for y in range(ry0 + 16, ry1 - 16, 6):
-        for x in range(rx0 + 16, rx1 - 16, 6):
-            inside = any(r[0] + 2 <= x <= r[2] - 2 and r[1] + 2 <= y <= r[3] - 2 for r in rects)
-            pixel = board.getpixel((x, y))
-            if inside and _near(pixel, soft, tol=28):
-                block_hits += 1
-            if not inside and _near(pixel, floor, tol=12):
-                open_hits += 1
-    assert block_hits > 20
-    assert open_hits > 20
+    x0, y0, x1, y1 = board_layout(spec)["plan"]
+    crop = board.crop((x0, y0, x1, y1)).convert("RGB")
+    colors = {pixel for pixel in crop.getdata()}
+    # Wall green, zone tints, and furniture fills are all painted inside the card.
+    assert (36, 72, 52) in colors
+    assert (219, 233, 225) in colors
+    assert (237, 217, 192) in colors
 
 
 def test_landscape_hero_reaches_across_the_board():
@@ -436,8 +399,9 @@ def test_board_paints_zones_title_and_shopping_lines(monkeypatch):
     blob = _drawn_text(monkeypatch, lead, deliverable, {})
     assert "Nicholas's Nursery" in blob
     assert "Camila's Kids" not in blob
-    assert "Dresser" in blob
-    assert "Approximate room flow + zones" in blob
+    assert "Change" in blob
+    assert "Measured room outline. Furniture and zones approximate." in blob
+    assert "Not measured" not in blob
     assert "Play/Storage" not in blob
     assert "SHOPPING" in blob
     assert "$174" in blob

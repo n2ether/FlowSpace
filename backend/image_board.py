@@ -13,8 +13,10 @@ field of view, never cover-cropped into a wide fixed slot. When several room
 photos were required, the hero is the first complete after and each remaining
 after is a full frame. A missing after stays empty — it is not a crop of
 another angle. Detail crops are extras for a single organized photo only.
-The room flow is a top-down sketch of this room — window, door, and the
-furniture already in it — not a stack of bars and not a measured drawing.
+The room flow is the standard zone-map plan from ``room_flow`` — outline,
+window, door, the furniture already in the room, zones, and the clear path.
+The outline is called measured only when a measured outline was supplied;
+furniture and zones stay approximate.
 Customer pixels never carry SOURCE_/AFTER_ codes or a lead id. Those stay
 on the review contact sheet.
 """
@@ -29,6 +31,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from blueprint_consistency import nightly_instruction, prepare_deliverable, safety_guidance
 from pdf_generator import customer_project_title, plan_title, space_label
 from photo_contain import contain_pixels, frame_size
+from room_flow import draw_floor_plan, outline_phrases, resolve_room_flow, wall_labels
 from pdf_images import (
     HERO_PLACEHOLDER_LABEL,
     HERO_PLACEHOLDER_SUB,
@@ -471,34 +474,6 @@ _NURSERY_VIEW_NAMES = (
     "Dresser and door",
 )
 
-# Relative positions from the four source photos. Not measured.
-# Window is north. The dresser is on that same window wall, on the left,
-# between the door corner and the window. The door is on the west wall at
-# that dresser end. Crib and rocker are on the east wall: the crib's near
-# end toward the window, the rocker farther from the window. No center block.
-_NURSERY_PLACES = (
-    {"id": "change", "label": "DRESSER", "role": "CHANGE", "number": "2", "zone": "Dresser", "box": (0.10, 0.03, 0.32, 0.24)},
-    {"id": "sleep", "label": "CRIB", "role": "SLEEP", "number": "1", "zone": "Crib", "box": (0.70, 0.06, 0.97, 0.42)},
-    {"id": "comfort", "label": "ROCKER", "role": "COMFORT", "number": "3", "zone": "Rocker", "box": (0.70, 0.54, 0.97, 0.84)},
-)
-_NURSERY_LEGEND = (
-    {"number": "1", "name": "Crib"},
-    {"number": "2", "name": "Dresser"},
-    {"number": "3", "name": "Rocker"},
-)
-_NURSERY_DOOR = {"door_wall": "west", "door_at": 0.04, "door_span": 0.20}
-# Starts at the west door beside the dresser and runs through the open center.
-_NURSERY_PATH = ((0.0, 0.12), (0.42, 0.50), (0.52, 0.62))
-# Room-relative. The first point sits on the door wall so the stroke meets the opening.
-_CLEAR_PATH = ((0.0, 0.32), (0.18, 0.50), (0.40, 0.48))
-_GENERIC_DOOR = {"door_wall": "west", "door_at": 0.22, "door_span": 0.16}
-_GENERIC_PLACE_BOXES = (
-    (0.42, 0.08, 0.92, 0.36),
-    (0.06, 0.44, 0.40, 0.78),
-    (0.50, 0.48, 0.92, 0.84),
-)
-
-
 def customer_view_caption(index: int, lead: Optional[Dict[str, Any]], *, missing: bool = False) -> str:
     """Short customer label for one room photo. Never a SOURCE_/AFTER_ code."""
     from space_rails import is_nursery_space
@@ -530,26 +505,6 @@ def _board_phrase(title: str, body: str, words: int = 8) -> str:
     return phrase
 
 
-def _role_label(title: str) -> str:
-    low = title.lower()
-    if any(key in low for key in ("sleep", "crib")):
-        return "SLEEP"
-    if any(key in low for key in ("dress", "change", "diaper", "dresser")):
-        return "CHANGE"
-    if any(key in low for key in ("comfort", "feed", "rock", "seat")):
-        return "COMFORT"
-    if any(key in low for key in ("path", "play", "circulat", "floor", "walk", "door")):
-        return "CLEAR PATH"
-    if "park" in low:
-        return "PARK"
-    if any(key in low for key in ("stor", "bin", "shelf")):
-        return "STORAGE"
-    if "work" in low:
-        return "WORK"
-    words = [word for word in title.split() if word]
-    return " ".join(words[:2]).upper() or "ZONE"
-
-
 def topdown_layout(
     deliverable: Dict[str, Any],
     *,
@@ -557,142 +512,52 @@ def topdown_layout(
     space_theme: bool = False,
     lead: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Approximate top-down plan of this room: window, door, furniture, path.
+    """Room-flow card data: the same zone-map plan the standalone sheet draws.
 
-    A diagram, not a generated floor-plan photo and not a measured drawing.
-    Places sit on walls. They are not full-width bars.
+    The outline is measured only when a measured outline was supplied.
+    Furniture and zones are always approximate.
     """
-    from space_rails import is_nursery_space
-
-    if is_nursery_space(lead):
-        places = [dict(place) for place in _NURSERY_PLACES]
-        door = dict(_NURSERY_DOOR)
-        path = [list(point) for point in _NURSERY_PATH]
-    else:
-        roles: List[str] = []
-        for zone in _zone_labels(deliverable):
-            label = _role_label(zone)
-            if label == "CLEAR PATH" or label in roles:
-                continue
-            roles.append(label)
-        if not roles:
-            roles = ["DAILY", "STORAGE", "COMFORT"]
-        places = []
-        for role, box in zip(roles[:3], _GENERIC_PLACE_BOXES):
-            places.append({"id": role.lower().replace(" ", "-"), "label": role, "role": role, "box": box})
-        door = dict(_GENERIC_DOOR)
-        path = [list(point) for point in _CLEAR_PATH]
-    furniture = [str(place["role"]) for place in places]
-    flow_label = "Approximate room flow + zones"
-    if is_nursery_space(lead):
-        # Exact wall lengths are not measurable from the photos, so this is
-        # a relative flow — not a measured floor plan.
-        if space_theme:
-            caption = (
-                f"{flow_label}. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
-            )
-        else:
-            caption = f"{flow_label}. Window, door, crib, dresser, rocker, and the clear path. Not a measured plan."
-        board_caption = flow_label
-    elif space_theme:
-        caption = (
-            "Approximate plan. Space theme stays: planets, moon, rockets, and astronauts. Not a measured plan."
+    flow = resolve_room_flow(lead, deliverable)
+    phrases = outline_phrases(flow)
+    zones = [zone for zone in flow.get("zones") or [] if isinstance(zone, dict)][:4]
+    titles = {str(zone.get("id")): zone for zone in zones}
+    places = []
+    for item in flow.get("furniture") or []:
+        label = _clean(str(item.get("label") or ""))
+        if not label:
+            continue
+        zone = titles.get(str(item.get("zone") or ""), {})
+        places.append(
+            {
+                "id": str(item.get("id") or label.lower()),
+                "label": label,
+                "zone": str(zone.get("title") or ""),
+                "number": str(zone.get("number") or ""),
+            }
         )
-        board_caption = "Approximate plan of this room. Not measured."
-    elif organized:
-        caption = (
-            "Approximate top view of the organized room — furniture, window, door, and the clear path. Not a measured plan."
-        )
-        board_caption = "Approximate plan of this room. Not measured."
-    else:
-        caption = (
-            "Approximate top view from the plan — furniture, window, door, and the clear path. Not a photo and not a measured plan."
-        )
-        board_caption = "Approximate plan of this room. Not measured."
-    legend = list(_NURSERY_LEGEND) if is_nursery_space(lead) else []
+    if not places:
+        places = [
+            {"id": str(zone.get("id")), "label": str(zone.get("map_label") or zone.get("title") or ""), "zone": str(zone.get("title") or ""), "number": str(zone.get("number") or "")}
+            for zone in zones
+        ]
+    caption = phrases["board_caption"]
+    if space_theme:
+        caption = f"{caption} Space theme stays: planets, moon, rockets, and astronauts."
     return {
         "window": "WINDOW",
         "door": "DOOR",
-        "door_wall": door["door_wall"],
-        "door_at": door["door_at"],
-        "door_span": door["door_span"],
-        "furniture": furniture,
-        "places": places,
-        "legend": legend,
-        "path": path,
         "circulation": "CLEAR PATH",
+        "furniture": [place["label"] for place in places],
+        "places": places,
+        "legend": [{"number": str(zone.get("number") or ""), "name": str(zone.get("title") or "")} for zone in zones],
         "approximate": True,
+        "measured_outline": flow.get("outline_source") == "measured",
         "matches_after": organized,
         "space_theme": space_theme,
-        "drawing": "room",
+        "drawing": "zone_map",
         "caption": caption,
-        "board_caption": board_caption,
-    }
-
-
-def plan_geometry(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Dict[str, Any]:
-    """Room rectangle and wall-anchored furniture inside a plan card.
-
-    The room stays recognizably a room (not a thin strip). Each furniture
-    block stays under 58% of the room width, so it cannot become a bar.
-    """
-    x0, y0, x1, y1 = box
-    title_h = 42
-    caption_h = 28
-    inner_l, inner_t = x0 + 14, y0 + title_h
-    inner_r, inner_b = x1 - 14, max(inner_t + 48, y1 - caption_h)
-    iw = max(48, inner_r - inner_l)
-    ih = max(48, inner_b - inner_t)
-    room_w, room_h = iw, ih
-    # A very wide card stays a room, not a ribbon. A tall card stays a room too.
-    if room_w > int(room_h * 2.35):
-        room_w = int(room_h * 2.35)
-    if room_h > int(room_w * 1.2):
-        room_h = int(room_w * 1.2)
-    rx0 = inner_l + max(0, (iw - room_w) // 2)
-    ry0 = inner_t + max(0, (ih - room_h) // 2)
-    ry1 = ry0 + room_h
-    room = (rx0, ry0, rx0 + room_w, ry1)
-    placed = []
-    for place in topdown.get("places") or []:
-        l, t, r, b = place.get("box") or (0.08, 0.08, 0.32, 0.28)
-        rect = (
-            rx0 + int(l * room_w),
-            ry0 + int(t * room_h),
-            rx0 + int(r * room_w),
-            ry0 + int(b * room_h),
-        )
-        max_w = max(24, int(room_w * 0.56))
-        if rect[2] - rect[0] > max_w:
-            rect = (rect[0], rect[1], rect[0] + max_w, rect[3])
-        if rect[2] <= rect[0] + 8:
-            rect = (rect[0], rect[1], rect[0] + 12, rect[3])
-        if rect[3] <= rect[1] + 8:
-            rect = (rect[0], rect[1], rect[2], rect[1] + 12)
-        placed.append({**place, "rect": rect})
-    win_w = max(36, room_w // 3)
-    win_x = rx0 + (room_w - win_w) // 2
-    door_wall = str(topdown.get("door_wall") or "west")
-    door_at = float(topdown.get("door_at") or 0.22)
-    door_span = float(topdown.get("door_span") or 0.18)
-    if door_wall == "south":
-        door_w = max(36, int(room_w * door_span))
-        door_x = rx0 + int(room_w * door_at)
-        door_x = min(max(rx0 + 4, door_x), rx0 + room_w - door_w - 4)
-        thickness = max(10, room_h // 28)
-        door = (door_x, ry1 - thickness, door_x + door_w, ry1)
-    else:
-        door_h = max(28, int(room_h * door_span))
-        door_y = ry0 + int(room_h * door_at)
-        door_y = min(max(ry0 + 4, door_y), ry0 + room_h - door_h - 4)
-        door = (rx0, door_y, rx0 + max(16, room_w // 28), door_y + door_h)
-    return {
-        "room": room,
-        "window": (win_x, ry0, win_x + win_w, ry0 + max(10, room_h // 18)),
-        "door": door,
-        "door_wall": door_wall,
-        "path": topdown.get("path") or [],
-        "places": placed,
+        "board_caption": phrases["board_caption"],
+        "room_flow": flow,
     }
 
 
@@ -928,40 +793,6 @@ def _section_kicker(draw: ImageDraw.ImageDraw, x: int, y: int, number: str, titl
     draw.text((x + 34, y + 3), title, font=_font("sans-bold", 16), fill=GREEN)
 
 
-def _draw_path_arrow(draw: ImageDraw.ImageDraw, origin: Tuple[int, int], end: Tuple[int, int]) -> None:
-    """Arrowhead pointing along the last segment of the clear path."""
-    dx, dy = end[0] - origin[0], end[1] - origin[1]
-    length = max(1.0, (dx * dx + dy * dy) ** 0.5)
-    ux, uy = dx / length, dy / length
-    left = (end[0] - ux * 12 - uy * 6, end[1] - uy * 12 + ux * 6)
-    right = (end[0] - ux * 12 + uy * 6, end[1] - uy * 12 - ux * 6)
-    draw.polygon([end, left, right], fill=CLAY)
-
-
-def clear_path_points(geo: Dict[str, Any]) -> List[Tuple[int, int]]:
-    """Stroke from the door opening into open floor. The first point meets the door."""
-    room = geo["room"]
-    door = geo["door"]
-    rx0, ry0, rx1, ry1 = room
-    rw, rh = max(1, rx1 - rx0), max(1, ry1 - ry0)
-    wall = str(geo.get("door_wall") or "west")
-    if wall == "south":
-        start = ((door[0] + door[2]) // 2, door[1] + 1)
-    else:
-        start = (door[2] - 1, (door[1] + door[3]) // 2)
-
-    def _at(fx: float, fy: float) -> Tuple[int, int]:
-        return (rx0 + int(float(fx) * rw), ry0 + int(float(fy) * rh))
-
-    raw = [point for point in (geo.get("path") or []) if isinstance(point, (list, tuple)) and len(point) >= 2]
-    points = [start]
-    for point in raw[1:]:
-        points.append(_at(point[0], point[1]))
-    if len(points) < 3:
-        points = [start, _at(0.18, 0.50), _at(0.40, 0.48)]
-    return points
-
-
 def _legend_band_height(legend: Sequence[Dict[str, Any]]) -> int:
     return 52 if legend else 0
 
@@ -992,89 +823,25 @@ def _draw_zone_legend(
 
 
 def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> None:
-    """Top-down sketch of this room. Zones sit on walls. No dimensions."""
+    """The zone-map plan of this room inside the board card."""
     draw = ImageDraw.Draw(base)
     _rounded(draw, box, 16, CARD)
     x0, y0, x1, y1 = box
     _section_kicker(draw, x0 + 14, y0 + 10, "4", "ROOM FLOW")
-    approx = "APPROXIMATE"
+    tag = "MEASURED OUTLINE" if topdown.get("measured_outline") else "APPROXIMATE"
     afont = _font("sans", 13)
-    aw = draw.textlength(approx, font=afont)
-    draw.text((x1 - 16 - aw, y0 + 14), approx, font=afont, fill=MUTED)
+    aw = draw.textlength(tag, font=afont)
+    draw.text((x1 - 16 - aw, y0 + 14), tag, font=afont, fill=MUTED)
     if topdown.get("space_theme"):
         _draw_space_glyphs(draw, x1 - 16 - aw - 78, y0 + 12)
     legend = [item for item in (topdown.get("legend") or []) if isinstance(item, dict)]
     legend_h = _legend_band_height(legend)
-    geo = plan_geometry((x0, y0, x1, y1 - legend_h), topdown)
-    rx0, ry0, rx1, ry1 = geo["room"]
-    floor = (250, 246, 239)
-    draw.rounded_rectangle(geo["room"], radius=12, fill=floor, outline=GREEN, width=4)
-    wx0, _wy0, wx1, _wy1 = geo["window"]
-    draw.rectangle((wx0, ry0 - 1, wx1, ry0 + 7), fill=floor)
-    draw.line((wx0, ry0 - 8, wx1, ry0 - 8), fill=CLAY, width=4)
-    draw.line((wx0, ry0 - 2, wx1, ry0 - 2), fill=CLAY, width=2)
-    rw, rh = max(1, rx1 - rx0), max(1, ry1 - ry0)
-
-    def _at(fx: float, fy: float) -> Tuple[int, int]:
-        return (rx0 + int(fx * rw), ry0 + int(fy * rh))
-
-    window_label = str(topdown.get("window") or "WINDOW")
-    wfont = _font("sans-bold", 15)
-    ww = draw.textlength(window_label, font=wfont)
-    label_y = ry0 - 22 if ry0 - 22 > y0 + 34 else ry0 + 8
-    draw.text(((wx0 + wx1 - ww) / 2, label_y), window_label, font=wfont, fill=CLAY)
-    dx0, dy0, dx1, dy1 = geo["door"]
-    door_wall = str(geo.get("door_wall") or topdown.get("door_wall") or "west")
-    door_label = str(topdown.get("door") or "DOOR")
-    if door_wall == "south":
-        draw.rectangle((dx0, ry1 - 10, dx1, ry1 + 1), fill=floor)
-        swing = max(26, dx1 - dx0)
-        draw.arc((dx0, ry1 - swing, dx0 + swing, ry1 + 2), start=180, end=270, fill=GREEN, width=2)
-        draw.text((dx0 + 4, max(ry0 + 8, dy0 - 22)), door_label, font=_font("sans-bold", 14), fill=GREEN)
-    else:
-        draw.rectangle((rx0 - 1, dy0, rx0 + 10, dy1), fill=floor)
-        swing = max(26, dy1 - dy0)
-        draw.arc((rx0 - 2, dy0, rx0 + swing, dy0 + swing), start=280, end=10, fill=GREEN, width=2)
-        draw.text((dx1 + 8, min(ry1 - 18, dy1 + 4)), door_label, font=_font("sans-bold", 14), fill=GREEN)
-    for place in geo["places"]:
-        rect = place["rect"]
-        draw.rounded_rectangle(rect, radius=8, fill=GREEN_SOFT, outline=GREEN, width=2)
-        number = str(place.get("number") or "")
-        label = str(place.get("label") or place.get("role") or "")
-        text_left = rect[0] + 6
-        if number:
-            bx, by = rect[0] + 6, rect[1] + 6
-            draw.ellipse((bx, by, bx + 18, by + 18), fill=GREEN)
-            nfont = _font("sans-bold", 11)
-            nw = draw.textlength(number, font=nfont)
-            draw.text((bx + (18 - nw) / 2, by + 2), number, font=nfont, fill=WHITE)
-            text_left = bx + 22
-        pw = max(12, rect[2] - text_left - 6)
-        ph = max(12, rect[3] - rect[1] - 8)
-        size = 16 if ph >= 48 else 13
-        font = _font("sans-bold", size)
-        while size > 11 and draw.textlength(label, font=font) > pw:
-            size -= 1
-            font = _font("sans-bold", size)
-        tw = draw.textlength(label, font=font)
-        tx = text_left if number else rect[0] + max(4, (rect[2] - rect[0] - tw) / 2)
-        ty = rect[1] + max(4, (rect[3] - rect[1] - size) / 2)
-        if number and ty < rect[1] + 6:
-            ty = rect[1] + 6
-        draw.text((tx, ty), label, font=font, fill=GREEN)
-    path = str(topdown.get("circulation") or "CLEAR PATH")
-    # The stroke starts on the door opening and stops in open floor, short of the furniture.
-    start, mid, end = clear_path_points(geo)
-    draw.line([start, mid, end], fill=CLAY, width=4)
-    _draw_path_arrow(draw, mid, end)
-    if door_wall == "south":
-        path_at = (min(rx1 - 110, start[0] + 28), max(ry0 + 8, start[1] - 36))
-    else:
-        path_at = (mid[0] + 8, max(ry0 + 8, mid[1] - 18))
-    draw.text(path_at, path, font=_font("sans-bold", 13), fill=CLAY)
+    flow = topdown.get("room_flow") or {}
+    draw_floor_plan(base, (x0 + 44, y0 + 66, x1 - 44, y1 - 56 - legend_h), flow, compact=True, min_px=12)
+    draw = ImageDraw.Draw(base)
     if legend:
         _draw_zone_legend(draw, (x0 + 16, y1 - 26 - legend_h, x1 - 16, y1 - 26), legend)
-    caption = str(topdown.get("board_caption") or "Approximate plan of this room. Not measured.")
+    caption = str(topdown.get("board_caption") or "")
     fitted = _fit(draw, caption, _font("sans", 15), x1 - x0 - 32, 1)
     if fitted:
         draw.text((x0 + 16, y1 - 24), fitted[0], font=_font("sans", 15), fill=MUTED)
@@ -1597,10 +1364,7 @@ def _draw_roadmap_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int],
 
 
 def _footer_line(spec: Dict[str, Any]) -> str:
-    title = str(spec.get("reset_title") or "")
-    if "bedtime" in title.lower():
-        return "Companion guide: steps, shopping, safety, climate, and the one-minute bedtime ritual."
-    return "Companion guide: steps, shopping, safety, climate, and the weekly reset."
+    return "Companion guide: safety, climate, why it helps, the shopping list, and each before and after."
 
 
 def _draw_board_footer(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], text: str) -> None:
@@ -1689,10 +1453,15 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
     parts.append(str(topdown.get("window") or ""))
     parts.append(str(topdown.get("door") or ""))
     parts.append(str(topdown.get("circulation") or ""))
+    parts.append("MEASURED OUTLINE" if topdown.get("measured_outline") else "APPROXIMATE")
     for place in topdown.get("places") or []:
         parts.append(str(place.get("label") or ""))
         parts.append(str(place.get("number") or ""))
         parts.append(str(place.get("zone") or ""))
+    flow = topdown.get("room_flow") or {}
+    for zone in flow.get("zones") or []:
+        parts.append(str(zone.get("map_label") or zone.get("title") or "").upper())
+    parts.extend(wall_labels(flow))
     for item in topdown.get("legend") or []:
         if isinstance(item, dict):
             parts.append(str(item.get("number") or ""))
