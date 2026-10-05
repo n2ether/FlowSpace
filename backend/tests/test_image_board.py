@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader
 
 from blueprint_presentation import build_presentation
@@ -498,3 +498,53 @@ def test_nursery_companion_reflow_keeps_photo_pages_and_drops_blank_ones():
         colors = [img.image.convert("RGB").resize((1, 1)).getpixel((0, 0)) for img in page.images]
         assert sum(_near(c, (140, 40 + index * 20, 40), tol=12) for c in colors) == 1
         assert sum(_near(c, (20, 80 + index * 10, 90), tol=12) for c in colors) == 1
+
+
+def _overlap(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_room_flow_card_wall_labels_clear_the_legend_and_caption():
+    """Live board drew "1.70 m" on top of "02 Change"."""
+    from image_board import _draw_plan
+
+    lead, deliverable = _load()
+    topdown = board_spec(lead, deliverable, {})["topdown"]
+    for box in (
+        (36, 1237, 735, 1752),
+        (36, 1292, 757, 1752),
+        (36, 708, 735, 1752),
+        (36, 1380, 1164, 1752),
+        (36, 1300, 1164, 1752),
+        (36, 1440, 640, 1752),
+    ):
+        canvas = Image.new("RGBA", (1200, 1800), (243, 238, 230, 255))
+        geo = _draw_plan(canvas, box, topdown)
+        regions = geo["regions"]
+        assert not _overlap(regions["legend"], regions["caption"])
+        assert regions["plan"][3] <= regions["legend"][1]
+        assert len(geo["label_boxes"]) == 4
+        for label in geo["label_boxes"]:
+            px0, py0, px1, py1 = regions["plan"]
+            assert px0 - 1 <= label[0] and label[2] <= px1 + 1, (box, label)
+            assert py0 - 1 <= label[1] and label[3] <= py1 + 1, (box, label)
+            assert not _overlap(label, regions["legend"]), (box, label)
+            assert not _overlap(label, regions["caption"]), (box, label)
+
+
+def test_board_fonts_do_not_fall_back_to_the_bitmap_default(monkeypatch):
+    """The slim production image has no system fonts; the bundled files must load."""
+    import image_board
+
+    bundled_only = {
+        kind: tuple(path for path in paths if not path.startswith("/usr/share/fonts"))
+        for kind, paths in image_board._FONT_PATHS.items()
+    }
+    monkeypatch.setattr(image_board, "_FONT_PATHS", bundled_only)
+    monkeypatch.setattr(image_board, "_fonts", {})
+    for kind in bundled_only:
+        face = image_board._font(kind, 15)
+        assert isinstance(face, ImageFont.FreeTypeFont), kind
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    face = image_board._font("sans", 15)
+    assert probe.textlength("zones approximate", font=face) > probe.textlength("zonesapproximate", font=face) + 2

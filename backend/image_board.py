@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import io
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -54,29 +55,38 @@ GREEN_SOFT = (207, 226, 215)
 CLAY = (193, 123, 74)
 WHITE = (255, 255, 255)
 
+# The slim production image has no system fonts. The bundled Inter and
+# Fraunces files keep the board off Pillow's bitmap default font.
+_BUNDLED_FONTS = str(Path(__file__).resolve().parent / "fonts")
 _FONT_PATHS = {
     "serif": (
         "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf",
+        f"{_BUNDLED_FONTS}/Fraunces-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
     ),
     "serif-bold": (
         "/usr/share/fonts/truetype/noto/NotoSerif-Bold.ttf",
+        f"{_BUNDLED_FONTS}/Fraunces-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
     ),
     "serif-italic": (
         "/usr/share/fonts/truetype/noto/NotoSerif-Italic.ttf",
+        f"{_BUNDLED_FONTS}/Fraunces-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf",
     ),
     "sans": (
         "/usr/share/fonts/truetype/macos/Inter-Regular.ttf",
+        f"{_BUNDLED_FONTS}/Inter-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     ),
     "sans-medium": (
         "/usr/share/fonts/truetype/macos/Inter-Medium.ttf",
+        f"{_BUNDLED_FONTS}/Inter-Medium.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     ),
     "sans-bold": (
         "/usr/share/fonts/truetype/macos/Inter-Bold.ttf",
+        f"{_BUNDLED_FONTS}/Inter-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ),
 }
@@ -822,8 +832,20 @@ def _draw_zone_legend(
         draw.text((x + 24, y + 1), str(item.get("name") or ""), font=name_font, fill=INK)
 
 
-def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> None:
-    """The zone-map plan of this room inside the board card."""
+def plan_card_regions(box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Dict[str, Tuple[int, int, int, int]]:
+    """Stacked, non-overlapping regions of the room-flow card: map, legend, caption."""
+    x0, y0, x1, y1 = box
+    legend = [item for item in (topdown.get("legend") or []) if isinstance(item, dict)]
+    caption_h = 22
+    caption = (x0 + 16, y1 - 12 - caption_h, x1 - 16, y1 - 12)
+    legend_h = _legend_band_height(legend)
+    legend_box = (x0 + 16, caption[1] - 8 - legend_h, x1 - 16, caption[1] - 8)
+    plan_bottom = (legend_box[1] if legend_h else caption[1]) - 10
+    return {"plan": (x0 + 16, y0 + 44, x1 - 16, plan_bottom), "legend": legend_box, "caption": caption}
+
+
+def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[str, Any]) -> Dict[str, Any]:
+    """The zone-map plan of this room inside the board card. Returns the drawn geometry."""
     draw = ImageDraw.Draw(base)
     _rounded(draw, box, 16, CARD)
     x0, y0, x1, y1 = box
@@ -835,16 +857,20 @@ def _draw_plan(base: Image.Image, box: Tuple[int, int, int, int], topdown: Dict[
     if topdown.get("space_theme"):
         _draw_space_glyphs(draw, x1 - 16 - aw - 78, y0 + 12)
     legend = [item for item in (topdown.get("legend") or []) if isinstance(item, dict)]
-    legend_h = _legend_band_height(legend)
-    flow = topdown.get("room_flow") or {}
-    draw_floor_plan(base, (x0 + 44, y0 + 66, x1 - 44, y1 - 56 - legend_h), flow, compact=True, min_px=12)
+    regions = plan_card_regions(box, topdown)
+    geo = draw_floor_plan(
+        base, regions["plan"], topdown.get("room_flow") or {}, compact=True, min_px=12, contain_labels=True
+    )
     draw = ImageDraw.Draw(base)
     if legend:
-        _draw_zone_legend(draw, (x0 + 16, y1 - 26 - legend_h, x1 - 16, y1 - 26), legend)
+        _draw_zone_legend(draw, regions["legend"], legend)
     caption = str(topdown.get("board_caption") or "")
-    fitted = _fit(draw, caption, _font("sans", 15), x1 - x0 - 32, 1)
+    cap_font = _font("sans", 15)
+    cx0, cy0, cx1, _cy1 = regions["caption"]
+    fitted = _fit(draw, caption, cap_font, cx1 - cx0, 1)
     if fitted:
-        draw.text((x0 + 16, y1 - 24), fitted[0], font=_font("sans", 15), fill=MUTED)
+        draw.text((cx0, cy0 + 2), fitted[0], font=cap_font, fill=MUTED)
+    return {**(geo or {}), "regions": regions}
 
 
 def _draw_moves(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], moves: Sequence[Dict[str, str]]) -> None:
