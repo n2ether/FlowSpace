@@ -12,8 +12,8 @@ Every paid Blueprint is three files:
 | File | What |
 |---|---|
 | Image board (PNG) | Photo-faithful after hero, 2–4 extra views or honest crops, the room-flow card (same zone-map plan as below), design moves, palette and materials, roadmap, and one list total |
-| Room-flow zone map (PNG) | The standard Conceptual Zone Map / Flow Plan (`room_flow.py`): outline, window, door, furniture, zones, clear path, "each zone has one job", flow principle, why this helps, source rule |
-| Companion PDF | Safety essentials, climate comfort, one why-it-helps paragraph, the consolidated shopping list, and one before/after page per source photo |
+| Room-flow zone map (PNG) | The standard Conceptual Zone Map / Flow Plan (`room_flow.py`): outline, window, door, furniture, zones with numbered markers matching the zones column, clear path, "each zone has one job", flow principle, why the FlowSpace zone approach helps, source rule |
+| Companion PDF | Safety essentials, climate comfort, the "why the FlowSpace zone approach helps" paragraph (same words as the zone map), the consolidated shopping list, and one before/after page per source photo |
 
 The Do Not list, extended notes, steps, and full safety copy are internal (`blueprint_consistency.internal_record`), not customer pages.
 

@@ -57,7 +57,5 @@
   "path": [[0.36, 2.34], [0.92, 1.96], [1.46, 1.46]],
   "path_label_at": [1.00, 1.58],
   "flow_principle": ["Less visual noise.", "Fewer decisions.", "Easier resets."],
-  "flow_note": "A clear route supports calmer bedtime transitions for both parent and child.",
-  "why_headline": "The room becomes easier to read, easier to reset, and easier to live in.",
-  "why_note": "Environmental psychology in practice: visual calm, clear circulation, and one simple place for each recurring task."
+  "flow_note": "A clear route supports calmer bedtime transitions for both parent and child."
 }

@@ -1,9 +1,9 @@
 """Conceptual Zone Map / Flow Plan — the standard FlowSpace room-flow layout.
 
 One portrait page per project: brand header, project title and badge, a
-top-down map of the room (outline, window, door, furniture, zones, clear
-path), "The zones" column (one job per zone), the flow principle, a
-"Why this helps" band, and a source-rule footer.
+top-down map of the room (outline, window, door, furniture, zones with their
+numbered markers, clear path), "The zones" column (one job per zone), the flow
+principle, a "Why the FlowSpace zone approach helps" band, and a source-rule footer.
 
 The plan is data, in metres. ``resolve_room_flow`` picks it from, in order:
 
@@ -108,6 +108,43 @@ def outline_phrases(flow: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def guide_outline_sentence(flow: Dict[str, Any]) -> str:
+    """The companion guide's opening outline sentence; same claim as ``outline_phrases``."""
+    if flow.get("outline_source") == "measured":
+        return "The room outline follows your measurements, while furniture footprints and zones remain approximate."
+    return "The room outline is approximate, and furniture footprints and zones are approximate too."
+
+
+ZONE_APPROACH_HEADING = "WHY THE FLOWSPACE ZONE APPROACH HELPS"
+
+
+def _zone_jobs_phrase(flow: Dict[str, Any]) -> str:
+    titles = [
+        _clean(z.get("title")).replace("&", "+").lower()
+        for z in (flow.get("zones") or [])[:4]
+        if isinstance(z, dict) and _clean(z.get("title"))
+    ]
+    if not titles:
+        return ""
+    if len(titles) == 1:
+        return titles[0]
+    if len(titles) == 2:
+        return f"{titles[0]} or {titles[1]}"
+    return ", ".join(titles[:-1]) + ", or " + titles[-1]
+
+
+def zone_approach_why(flow: Dict[str, Any]) -> str:
+    """The why-it-helps paragraph. The Room Flow map and the companion guide print this one string."""
+    jobs = _zone_jobs_phrase(flow)
+    lead = f"FlowSpace gives each part of the room a clear job\u2014{jobs}." if jobs else (
+        "FlowSpace gives each part of the room a clear job."
+    )
+    return (
+        f"{lead} With an open path and a simple home for everyday items, daily routines require "
+        "fewer decisions, resets happen faster, and the room becomes calmer and easier to use."
+    )
+
+
 def _zone_style_key(title: str, index: int) -> str:
     low = title.lower()
     for key, words in (
@@ -201,8 +238,6 @@ def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict
         "subtitle": subtitle,
         "flow_principle": ["Less visual noise.", "Fewer decisions.", "Easier resets."],
         "flow_note": "A clear route through the room makes everyday routines calmer.",
-        "why_headline": "The room becomes easier to read, easier to reset, and easier to live in.",
-        "why_note": "Environmental psychology in practice: visual calm, clear circulation, and one simple place for each recurring task.",
     }
 
 
@@ -231,6 +266,14 @@ def resolve_room_flow(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict
 def outline_caption(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
     """The one outline sentence the PDF and email repeat from the board."""
     return outline_phrases(resolve_room_flow(lead, deliverable))["board_caption"]
+
+
+def guide_outline_caption(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
+    return guide_outline_sentence(resolve_room_flow(lead, deliverable))
+
+
+def why_zone_approach(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
+    return zone_approach_why(resolve_room_flow(lead, deliverable))
 
 
 def validate_room_flow(flow: Dict[str, Any]) -> List[str]:
@@ -355,8 +398,8 @@ def zone_map_spec(
         "zones": list(flow.get("zones") or [])[:4],
         "flow_principle": [str(x) for x in (flow.get("flow_principle") or [])][:3],
         "flow_note": _clean(flow.get("flow_note")),
-        "why_headline": _clean(flow.get("why_headline")),
-        "why_note": _clean(flow.get("why_note")),
+        "why_heading": ZONE_APPROACH_HEADING,
+        "why_body": zone_approach_why(flow),
         "source_rule": source_rule(flow, views),
         "footer_status": "ROOM FLOW PLAN" if final else "DRAFT CONCEPT FOR REVIEW",
         "final": final,
@@ -380,9 +423,8 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         "FLOW PRINCIPLE",
         *spec["flow_principle"],
         spec["flow_note"],
-        "03 WHY THIS HELPS",
-        spec["why_headline"],
-        spec["why_note"],
+        f"03 {spec['why_heading']}",
+        spec["why_body"],
         "SOURCE RULE",
         spec["source_rule"],
         spec["footer_status"],
@@ -785,15 +827,23 @@ def _label_safe_box(
     return (x0 + pad_x, y0 + pad_y, x1 - pad_x, y1 - pad_y)
 
 
-def _label_block(draw, center_x: float, top: float, lines: Sequence[Tuple[str, Any, Tuple[int, int, int], float]]) -> None:
+Box = Tuple[float, float, float, float]
+
+
+def _label_block(draw, center_x: float, top: float, lines: Sequence[Tuple[str, Any, Tuple[int, int, int], float]]) -> Box:
+    """Paint centred lines from ``top``. Returns the painted text box."""
     y = top
+    half = 0.0
     for text, face, fill, tracking in lines:
         spaced_text(draw, (center_x, y), text, face, fill, tracking, anchor="m")
+        half = max(half, _spaced_width(draw, text, face, tracking) / 2)
         y += face.size * 1.45
+    return (center_x - half, top, center_x + half, y)
 
 
-def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, compact: bool, min_px: float) -> None:
+def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, compact: bool, min_px: float) -> List[Box]:
     draw = ImageDraw.Draw(base)
+    boxes: List[Box] = []
     zones = {str(z.get("id")): z for z in flow.get("zones") or []}
     label_face = font("sans-bold", max(8 * u, min_px))
     zone_face = font("sans", max(6.8 * u, min_px - 1))
@@ -815,7 +865,7 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
             cx, top = (x0 + x1) / 2, y1 + 5 * u
         else:
             continue
-        _label_block(draw, cx, top, lines)
+        boxes.append(_label_block(draw, cx, top, lines))
     for zone in flow.get("zones") or []:
         if str(zone.get("id")) in labelled_zones:
             continue
@@ -833,7 +883,9 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
             continue
         face = label_face
         lines = wrap(draw, text, face, max(20, (x1 - x0) - 8 * u))[:2]
-        _label_block(draw, (x0 + x1) / 2, (y0 + y1) / 2 - face.size * 0.75 * len(lines), [(ln, face, INK, 0.6 * u) for ln in lines])
+        boxes.append(
+            _label_block(draw, (x0 + x1) / 2, (y0 + y1) / 2 - face.size * 0.75 * len(lines), [(ln, face, INK, 0.6 * u) for ln in lines])
+        )
     if flow.get("path"):
         at = flow.get("path_label_at")
         if at:
@@ -844,6 +896,129 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
             px, py = mp.pt(mid[0], mid[1] - 0.12)
         face = font("sans-medium", max(7 * u, min_px - 1))
         spaced_text(draw, (px, py - face.size / 2), "CLEAR PATH", face, MUTED, 0.9 * u, anchor="m")
+        half = _spaced_width(draw, "CLEAR PATH", face, 0.9 * u) / 2
+        boxes.append((px - half, py - face.size * 0.75, px + half, py + face.size * 0.75))
+    return boxes
+
+
+# ──────────────────────────── Zone markers ─────────────────────────────
+
+
+def _circle_box_overlap(cx: float, cy: float, r: float, box: Box) -> float:
+    """How far a circle reaches into a box, in pixels. 0 when they do not touch."""
+    x0, y0, x1, y1 = box
+    nx, ny = min(max(cx, x0), x1), min(max(cy, y0), y1)
+    return max(0.0, r - math.hypot(cx - nx, cy - ny))
+
+
+def _in_zone(zone: Dict[str, Any], mp: _Mapper, x: float, y: float, inset: float = 0.0) -> bool:
+    if zone.get("rect"):
+        x0, y0, x1, y1 = mp.rect(zone["rect"])
+        return x0 + inset <= x <= x1 - inset and y0 + inset <= y <= y1 - inset
+    if zone.get("ellipse"):
+        cx, cy, rx, ry = zone["ellipse"]
+        c = mp.pt(cx, cy)
+        prx, pry = max(1.0, mp.m(rx) - inset), max(1.0, mp.m(ry) - inset)
+        return ((x - c[0]) / prx) ** 2 + ((y - c[1]) / pry) ** 2 <= 1.0
+    return False
+
+
+def _zone_anchor(zone: Dict[str, Any], mp: _Mapper, inset: float) -> Optional[Tuple[float, float]]:
+    """Preferred marker spot: the zone's top-left inner corner."""
+    if zone.get("rect"):
+        x0, y0, _x1, _y1 = mp.rect(zone["rect"])
+        return (x0 + inset, y0 + inset)
+    if zone.get("ellipse"):
+        cx, cy, rx, ry = zone["ellipse"]
+        c = mp.pt(cx, cy)
+        return (c[0] - (mp.m(rx) - inset) * 0.7, c[1] - (mp.m(ry) - inset) * 0.7)
+    return None
+
+
+def _zone_bounds(zone: Dict[str, Any], mp: _Mapper) -> Optional[Box]:
+    if zone.get("rect"):
+        return mp.rect(zone["rect"])
+    if zone.get("ellipse"):
+        cx, cy, rx, ry = zone["ellipse"]
+        return mp.rect((cx - rx, cy - ry, cx + rx, cy + ry))
+    return None
+
+
+def place_zone_markers(
+    mp: _Mapper,
+    flow: Dict[str, Any],
+    radius: float,
+    text_boxes: Sequence[Box],
+    wall_w: float,
+) -> List[Tuple[Dict[str, Any], float, float]]:
+    """One marker centre per zone, inside its zone, clear of text, walls, and other markers.
+
+    A zone may pin its marker with ``marker_at`` (metres). Otherwise the spot is
+    searched on a grid: text and other markers are hard limits; furniture, other
+    zones, and the clear path are avoided where the zone leaves room.
+    """
+    outline = flow.get("outline") or []
+    poly = [mp.pt(*p) for p in outline]
+    zones = [z for z in (flow.get("zones") or []) if isinstance(z, dict) and str(z.get("number") or "")]
+    furniture = [mp.rect(item["rect"]) for item in flow.get("furniture") or [] if item.get("rect") and item.get("kind") != "rug"]
+    path = [mp.pt(p[0], p[1]) for p in flow.get("path") or [] if isinstance(p, (list, tuple)) and len(p) >= 2]
+    pad = radius * 0.25
+    placed: List[Tuple[Dict[str, Any], float, float]] = []
+
+    def cost(zone: Dict[str, Any], x: float, y: float, anchor: Tuple[float, float], span: float) -> float:
+        if not point_in_polygon((x, y), poly):
+            return math.inf
+        if any(_segment_distance((x, y), poly[i], poly[(i + 1) % len(poly)]) < radius + wall_w for i in range(len(poly))):
+            return math.inf
+        if any(_circle_box_overlap(x, y, radius + pad, box) > 0 for box in text_boxes):
+            return math.inf
+        if any(math.hypot(x - px, y - py) < 2 * radius + pad for _z, px, py in placed):
+            return math.inf
+        score = sum(_circle_box_overlap(x, y, radius + pad, box) for box in furniture) * 1.5
+        score += sum(_circle_box_overlap(x, y, radius * 2.0, box) for box in text_boxes) * 4.0
+        score += sum(150.0 for other in zones if other is not zone and _in_zone(other, mp, x, y, inset=-radius))
+        if len(path) >= 2:
+            near = min(_segment_distance((x, y), a, b) for a, b in zip(path, path[1:]))
+            score += max(0.0, radius * 2.2 - near) * 8.0
+        score += math.hypot(x - anchor[0], y - anchor[1]) / max(1.0, span) * 30.0
+        return score
+
+    for zone in zones:
+        if zone.get("marker_at"):
+            x, y = mp.pt(*zone["marker_at"])
+            placed.append((zone, x, y))
+            continue
+        bounds = _zone_bounds(zone, mp)
+        inset = radius + pad
+        anchor = _zone_anchor(zone, mp, inset)
+        if not bounds or not anchor:
+            continue
+        x0, y0, x1, y1 = bounds
+        span = math.hypot(x1 - x0, y1 - y0)
+        step = max(2.0, radius * 0.35)
+        best: Optional[Tuple[float, float, float]] = None
+        y = y0
+        while y <= y1:
+            x = x0
+            while x <= x1:
+                if _in_zone(zone, mp, x, y, inset=radius * 0.5):
+                    c = cost(zone, x, y, anchor, span)
+                    if c < math.inf and (best is None or c < best[0]):
+                        best = (c, x, y)
+                x += step
+            y += step
+        if best:
+            placed.append((zone, best[1], best[2]))
+    return placed
+
+
+def _draw_zone_marker(draw: ImageDraw.ImageDraw, zone: Dict[str, Any], x: float, y: float, r: float, u: float) -> None:
+    """Same circle as the zones column: zone fill, zone ring, green number."""
+    style = _style_for(zone)
+    draw.ellipse((x - r, y - r, x + r, y + r), fill=style["fill"], outline=style["ring"], width=max(1, int(round(1.2 * u))))
+    face = font("sans-semibold", r * 0.78)
+    number = str(zone.get("number") or "")
+    draw.text((x - draw.textlength(number, font=face) / 2, y - face.size * 0.62), number, font=face, fill=GREEN)
 
 
 def draw_floor_plan(
@@ -854,12 +1029,14 @@ def draw_floor_plan(
     compact: bool = False,
     min_px: float = 0.0,
     contain_labels: bool = False,
+    markers: bool = False,
 ) -> Dict[str, Any]:
     """Top-down map of ``flow`` fitted inside ``box``. Returns the fitted geometry.
 
     ``base`` must be RGBA. ``compact`` drops the zone sub-labels for small cards.
     ``contain_labels`` keeps the wall-length labels inside ``box`` too, for a
-    card where other content sits right outside it.
+    card where other content sits right outside it. ``markers`` paints each
+    zone's numbered circle inside its zone, styled like the zones column.
     """
     outline = flow.get("outline") or []
     if len(outline) < 3:
@@ -889,13 +1066,25 @@ def draw_floor_plan(
     _draw_walls(base, mp, flow, unit)
     _draw_window(base, mp, flow, unit)
     _draw_door(base, mp, flow, unit)
-    _draw_labels(base, mp, flow, unit, compact, min_px)
+    text_boxes = _draw_labels(base, mp, flow, unit, compact, min_px)
     label_boxes = _draw_dimensions(base, mp, flow, unit, min_px)
+    marker_boxes: List[Dict[str, Any]] = []
+    if markers:
+        radius = max(7.0, 10.5 * unit)
+        draw = ImageDraw.Draw(base)
+        wall_w = max(3, int(round(4.2 * unit))) / 2
+        for zone, x, y in place_zone_markers(mp, flow, radius, text_boxes + label_boxes, wall_w):
+            _draw_zone_marker(draw, zone, x, y, radius, unit)
+            marker_boxes.append(
+                {"number": str(zone.get("number")), "zone": str(zone.get("id")), "box": (x - radius, y - radius, x + radius, y + radius)}
+            )
     return {
         "room": tuple(int(v) for v in (min(p[0] for p in poly), min(p[1] for p in poly), max(p[0] for p in poly), max(p[1] for p in poly))),
         "polygon": poly,
         "unit": unit,
         "label_boxes": label_boxes,
+        "text_boxes": text_boxes,
+        "markers": marker_boxes,
     }
 
 
@@ -998,7 +1187,7 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     phrases = spec["phrases"]
     spaced_text(draw, (_s(69), _s(242)), "01 ROOM FLOW + FUNCTIONAL ZONES", font("sans-medium", _s(9.5)), GREEN, _s(1.2))
     draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
-    draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"])
+    draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
     draw = ImageDraw.Draw(base)
 
     # 02 Zones column
@@ -1033,20 +1222,24 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
         draw.text((col_x, py), line, font=font("sans", _s(7.8)), fill=INK)
         py += _s(13.5)
 
-    # 03 Why this helps
+    # 03 Why the zone approach helps
     band = (_s(49), _s(757), _s(668), _s(873))
     draw.rounded_rectangle(band, radius=_s(16), fill=WHY_FILL)
-    spaced_text(draw, (_s(71), _s(781)), "03 WHY THIS HELPS", font("sans", _s(7.8)), CLAY, _s(1.3))
-    head_face = font("serif", _s(18.5))
-    hy = _s(798)
-    for line in wrap(draw, spec["why_headline"], head_face, _s(340))[:2]:
-        draw.text((_s(71), hy), line, font=head_face, fill=GREEN)
-        hy += _s(25)
-    ny = max(hy + _s(4), _s(850))
-    for line in wrap(draw, spec["why_note"], font("sans", _s(8.2)), _s(350))[:2]:
-        draw.text((_s(71), ny), line, font=font("sans", _s(8.2)), fill=INK)
-        ny += _s(14)
-    _draw_eye(draw, _s(609), _s(817), _s(28))
+    spaced_text(draw, (_s(71), _s(777)), f"03 {spec['why_heading']}", font("sans", _s(7.8)), CLAY, _s(1.3))
+    body_top, body_bottom, body_w = _s(795), _s(862), _s(470)
+    size = 13.0
+    while True:
+        body_face = font("serif", _s(size))
+        lines = wrap(draw, spec["why_body"], body_face, body_w)
+        leading = _s(size * 1.3)
+        if len(lines) * leading <= body_bottom - body_top or size <= 9.0:
+            break
+        size -= 0.5
+    hy = body_top
+    for line in lines:
+        draw.text((_s(71), hy), line, font=body_face, fill=GREEN)
+        hy += leading
+    _draw_eye(draw, _s(609), _s(815), _s(26))
 
     # Footer
     draw.rectangle((_s(49), _s(915), _s(668), _s(917)), fill=GREEN)
