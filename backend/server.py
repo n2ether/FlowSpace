@@ -21,7 +21,7 @@ import stripe as stripe_sdk
 import httpx
 
 from image_board import build_image_board
-from room_flow import build_zone_map
+from room_flow import build_zone_map, outline_caption
 from blueprint_consistency import internal_record
 from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, customer_project_title, plan_title
@@ -1233,6 +1233,7 @@ async def send_draft_package_endpoint(
         project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
         extra_visuals=_client_facing_visuals(images),
+        outline_note=outline_caption(lead, deliverable),
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
@@ -1266,6 +1267,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
         extra_visuals=_client_facing_visuals(images),
+        outline_note=outline_caption(lead, deliverable),
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:

@@ -119,6 +119,24 @@ def upright_bytes(data: Optional[bytes]) -> Optional[bytes]:
         return data
 
 
+def upright_png_bytes(data: Optional[bytes]) -> Optional[bytes]:
+    """Gravity-correct and re-encode as PNG (metadata stripped). None if undecodable."""
+    if not data:
+        return None
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+    upright = ImageOps.exif_transpose(img) or img
+    if upright.mode not in ("RGB", "RGBA"):
+        has_alpha = upright.mode in ("LA", "PA") or "transparency" in upright.info
+        upright = upright.convert("RGBA" if has_alpha else "RGB")
+    buf = io.BytesIO()
+    upright.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
 def rotate_photo_bytes(data: bytes, degrees: int) -> bytes:
     """Rotate clockwise by 0/90/180/270 and return a JPEG."""
     turns = int(degrees) % 360

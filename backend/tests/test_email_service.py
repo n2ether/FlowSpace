@@ -1,10 +1,37 @@
 """Unit tests for Resend delivery (API mocked — no network, no secrets)."""
 import asyncio
+import base64
+import io
+
+from PIL import Image
 
 from email_service import customer_email_html, send_blueprint, send_draft_package
 
 
 PDF = b"%PDF-1.4 fake-pdf-bytes"
+
+
+def _sideways_jpeg() -> bytes:
+    """A 40x20 landscape buffer tagged EXIF Orientation=6 (displays as 20x40 portrait)."""
+    img = Image.new("RGB", (40, 20), (200, 180, 160))
+    exif = img.getexif()
+    exif[274] = 6
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
+def _png(color=(10, 120, 90)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (16, 24), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+VISUALS = [
+    {"label": "Before_view_1", "bytes": _sideways_jpeg()},
+    {"label": "Organized_view_1", "bytes": _png()},
+    {"label": "Before_view_2", "bytes": b"not an image"},
+]
 
 
 def test_skips_when_api_key_missing(monkeypatch):
@@ -298,3 +325,90 @@ def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
     assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None]
     assert "DRAFT_Room_Flow" in attachments[1]["filename"]
     assert "cid:room-flow" in calls[0]["html"]
+
+
+def _assert_visual_files(attachments, *, draft: bool):
+    pngs = [a for a in attachments if "_view_" in a["filename"]]
+    assert [a["filename"].split("_view_")[0].rsplit("_", 1)[-1] for a in pngs] == ["Before", "Organized"]
+    for att in pngs:
+        assert att["content_type"] == "image/png"
+        assert "content_id" not in att
+        assert ("_DRAFT_" in att["filename"]) is draft
+        raw = base64.b64decode(att["content"])
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    before = Image.open(io.BytesIO(base64.b64decode(pngs[0]["content"])))
+    assert before.size == (20, 40)
+    for att in attachments:
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "lead-9"):
+            assert banned not in att["filename"]
+
+
+def test_send_draft_attaches_full_size_views_and_keeps_embeds(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    calls = []
+    monkeypatch.setattr("email_service.resend.Emails.send", lambda payload: calls.append(payload) or {"id": "ok"})
+    sent, _err = asyncio.run(
+        send_draft_package(
+            to_email="camila@example.com",
+            customer_name="Camila Sales",
+            space_type="kids_room",
+            lead_id="9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+            pdf_bytes=PDF,
+            board_bytes=b"PNG",
+            zone_map_bytes=b"ZONEMAP",
+            project_title="Nicholas's Nursery",
+            extra_visuals=VISUALS,
+        )
+    )
+    assert sent is True
+    payload = calls[0]
+    attachments = payload["attachments"]
+    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None, None, None]
+    assert attachments[-1]["filename"].endswith(".pdf")
+    _assert_visual_files(attachments, draft=True)
+    html = payload["html"]
+    assert "cid:blueprint-preview" in html and "cid:room-flow" in html
+    assert "Hi Camila." in html
+    assert "Camila Sales" not in html
+    assert "9dbedfba" not in payload["subject"]
+
+
+def test_send_final_attaches_full_size_views_and_greets_by_first_name(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    calls = []
+    monkeypatch.setattr("email_service.resend.Emails.send", lambda payload: calls.append(payload) or {"id": "ok"})
+    sent, _err = asyncio.run(
+        send_blueprint(
+            customer_name="Camila Sales",
+            customer_email="camila@example.com",
+            space_type="kids_room",
+            lead_id="9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+            pdf_bytes=PDF,
+            board_bytes=b"\x89PNG\r\n\x1a\nboard",
+            zone_map_bytes=b"ZONEMAP",
+            project_title="Nicholas's Nursery",
+            extra_visuals=VISUALS,
+        )
+    )
+    assert sent is True
+    customer = calls[0]
+    _assert_visual_files(customer["attachments"], draft=False)
+    assert customer["attachments"][-1]["content_type"] == "application/pdf"
+    assert "Hi Camila." in customer["html"]
+    assert "Camila Sales" not in customer["html"]
+    assert "ready" not in customer["subject"].lower()
+    assert "Nicholas's Nursery" in customer["subject"]
+
+
+def test_room_flow_block_carries_the_outline_sentence():
+    note = "Room outline based on your measurements. Furniture footprints and zones are approximate."
+    html = customer_email_html(
+        "Camila Sales",
+        "kids_room",
+        project_title="Nicholas's Nursery",
+        preview_src="data:image/png;base64,board",
+        room_flow_src="data:image/png;base64,zonemap",
+        outline_note=note,
+    )
+    assert note in html
+    assert "not a measured" not in html.lower()

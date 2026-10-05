@@ -56,6 +56,8 @@ from reportlab.platypus import (
 from blueprint_consistency import companion_sections
 from blueprint_layers import BUDGET_LABELS, STORAGE
 from photo_contain import contain_rect
+from room_flow import outline_caption
+from shopping_links import fallback_search_links
 from pdf_images import (
     COMPARE_AFTER_BANNER,
     COMPARE_AFTER_EMPTY,
@@ -1238,7 +1240,7 @@ def _zones_row(
             Paragraph("ZONE PLAN (TOP VIEW)", s["section"]),
             ZonePlan(zones or [], left_w, 1.55 * inch),
             Spacer(1, 3),
-            Paragraph("Conceptual zone map — not a measured floor plan.", s["muted"]),
+            Paragraph("Approximate room outline. Furniture footprints and zones are approximate.", s["muted"]),
         ]
 
     items: List[List[Any]] = []
@@ -1581,6 +1583,9 @@ def _shopping_blocks(
         price_label = _money(price) if price else "Typical"
         sub_label = _money(sub) if sub else "—"
         link = by_name.get(name.strip().lower(), {}) or {}
+        if not link and by_name and it.get("name"):
+            # A curated list that names this item differently still gets a labeled search, not a bare row.
+            link = (fallback_search_links({"shopping_list": [it]}) or [{}])[0]
         url = str(link.get("url") or "").strip()
         link_type = str(link.get("link_type") or "").strip().lower()
         link_label = str(link.get("label") or "").strip()
@@ -1728,6 +1733,7 @@ def build_pdf(
     story.append(
         Paragraph(
             f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and the room-flow map. "
+            f"{_esc(outline_caption(lead, deliverable))} "
             "This guide keeps the essentials: safety, climate, why it helps, the shopping list, "
             "and each before and after from the same photo.",
             s["guideBody"],

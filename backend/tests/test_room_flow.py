@@ -194,3 +194,15 @@ def test_final_sheet_drops_draft_status(monkeypatch):
     _png, glyphs, _lines = _drawn(monkeypatch, lead=lead, deliverable=deliverable, final=True)
     assert "DRAFT" not in glyphs
     assert "Measured room outline" in glyphs
+
+
+def test_outline_caption_matches_the_board_for_both_sources():
+    from room_flow import outline_caption
+
+    lead, deliverable = _load()
+    assert outline_caption(lead, deliverable) == (
+        "Room outline based on your measurements. Furniture footprints and zones are approximate."
+    )
+    assert outline_caption({"id": "no-outline-0000", "space_type": "closet"}, {}) == (
+        "Approximate room outline. Furniture footprints and zones are approximate."
+    )

@@ -93,21 +93,16 @@ def edge_length(outline: Sequence[Sequence[float]], index: int) -> float:
 
 def outline_phrases(flow: Dict[str, Any]) -> Dict[str, str]:
     """Every sentence that describes the outline, from one source."""
-    _credit = _clean(flow.get("outline_credit"))  # retained for measured-outline provenance
     if flow.get("outline_source") == "measured":
         return {
             "badge": "Measured room outline",
             "map_note": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
-            "map_footnote": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
-            "map_footnote_2": "Furniture footprints and zones are approximate.",
             "rule": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
             "board_caption": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
         }
     return {
         "badge": "Approximate room outline",
         "map_note": "Approximate room outline. Furniture footprints and zones are approximate.",
-        "map_footnote": "Approximate room outline. Furniture footprints and zones are approximate.",
-        "map_footnote_2": "Furniture footprints and zones are approximate.",
         "rule": "Approximate room outline. Furniture footprints and zones are approximate.",
         "board_caption": "Approximate room outline. Furniture footprints and zones are approximate.",
     }
@@ -231,6 +226,11 @@ def resolve_room_flow(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict
     if record:
         return record
     return default_room_flow(lead, deliverable)
+
+
+def outline_caption(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
+    """The one outline sentence the PDF and email repeat from the board."""
+    return outline_phrases(resolve_room_flow(lead, deliverable))["board_caption"]
 
 
 def validate_room_flow(flow: Dict[str, Any]) -> List[str]:
@@ -375,8 +375,6 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         spec["badge_outline"],
         "01 ROOM FLOW + FUNCTIONAL ZONES",
         spec["phrases"]["map_note"],
-        spec["phrases"]["map_footnote"],
-        spec["phrases"]["map_footnote_2"],
         "02 THE ZONES",
         "Each zone has one job.",
         "FLOW PRINCIPLE",
@@ -1002,9 +1000,6 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
     draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"])
     draw = ImageDraw.Draw(base)
-    note_face = font("sans", _s(7.2))
-    draw.text((_s(97), _s(661)), phrases["map_footnote"], font=note_face, fill=INK)
-    draw.text((_s(97), _s(677)), phrases["map_footnote_2"], font=note_face, fill=INK)
 
     # 02 Zones column
     col_x, col_r = _s(522), _s(668)

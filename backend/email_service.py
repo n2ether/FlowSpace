@@ -14,6 +14,7 @@ from typing import Optional, Tuple, List, Dict, Any
 
 import resend
 
+from image_orientation import upright_png_bytes
 from pdf_generator import plan_title, space_label
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ def customer_email_html(
     preview_src: str = "",
     guide_href: str = "",
     room_flow_src: str = "",
+    outline_note: str = "",
 ) -> str:
     """Customer email layout a final send uses.
 
@@ -67,10 +69,11 @@ def customer_email_html(
     space = (project_title or plan_title(space_type)).strip() or plan_title(space_type)
     room_flow = ""
     if room_flow_src:
+        outline = f" {outline_note.strip()}" if outline_note.strip() else ""
         room_flow = f"""
               <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Room flow</p>
               <img src="{room_flow_src}" alt="{space} room flow map" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
-              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The zone map — each zone has one job, with a clear path through the room.</p>
+              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The zone map — each zone has one job, with a clear path through the room.{outline}</p>
         """
     if preview_src:
         guide_link = ""
@@ -197,11 +200,15 @@ def _extra_visual_attachments(
                 continue
         if not isinstance(raw, (bytes, bytearray)) or not raw:
             continue
+        # Source photos are usually camera JPEGs; the file must really be an upright PNG.
+        png = upright_png_bytes(bytes(raw))
+        if not png:
+            continue
         label = "".join(
             ch if ch.isalnum() or ch in "-_" else "_"
             for ch in str(visual.get("label") or visual.get("name") or f"visual_{index + 1}")
         )
-        out.append(_png_attachment(f"{prefix}{label}_{safe_name}.png", bytes(raw)))
+        out.append(_png_attachment(f"{prefix}{label}_{safe_name}.png", png))
     return out
 
 
@@ -222,6 +229,7 @@ def _customer_html(
     project_title: str = "",
     preview_src: str = "cid:blueprint-preview",
     room_flow_src: str = "",
+    outline_note: str = "",
 ) -> str:
     return customer_email_html(
         customer_name,
@@ -229,6 +237,7 @@ def _customer_html(
         project_title=project_title,
         preview_src=preview_src if two_files else "",
         room_flow_src=room_flow_src if two_files else "",
+        outline_note=outline_note,
     )
 
 
@@ -261,6 +270,7 @@ async def send_blueprint(
     project_title: str = "",
     zone_map_bytes: Optional[bytes] = None,
     extra_visuals: Optional[List[Dict[str, Any]]] = None,
+    outline_note: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """
     Send the companion PDF and, when present, the image board and zone map.
@@ -284,11 +294,7 @@ async def send_blueprint(
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
     stem = _file_stem(shown) if shown else space.replace(" ", "_")
     pdf_filename = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
-    subject = (
-        f"Your FlowSpace Blueprint is ready — {shown} ✨"
-        if shown
-        else f"Your FlowSpace {space} is Ready ✨"
-    )
+    subject = f"Your FlowSpace Blueprint — {shown}" if shown else f"Your FlowSpace {space}"
     sender = _from_email()
     attachments = []
     if board_bytes:
@@ -326,6 +332,7 @@ async def send_blueprint(
                     two_files=bool(board_bytes),
                     project_title=shown,
                     room_flow_src="cid:room-flow" if zone_map_bytes else "",
+                    outline_note=outline_note,
                 ),
                 "attachments": attachments,
             },
@@ -421,6 +428,7 @@ def _draft_package_html(
     project_title: str = "",
     preview_src: str = "",
     room_flow_src: str = "",
+    outline_note: str = "",
 ) -> str:
     """Draft review uses the customer email layout, with a review-version banner.
 
@@ -433,6 +441,7 @@ def _draft_package_html(
         project_title=project_title,
         preview_src=preview_src,
         room_flow_src=room_flow_src,
+        outline_note=outline_note,
     )
     inner = inner.replace(
         f"Your Blueprint is ready, {customer_name}",
@@ -474,6 +483,7 @@ async def send_draft_package(
     project_title: str = "",
     zone_map_bytes: Optional[bytes] = None,
     extra_visuals: Optional[List[Dict[str, Any]]] = None,
+    outline_note: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """Email DRAFT board, zone map, and companion PDF for review. Does not mark a package final."""
     api_key = os.environ.get("RESEND_API_KEY")
@@ -514,7 +524,7 @@ async def send_draft_package(
     payload = {
         "from": _from_email(),
         "to": [recipient],
-        "subject": f"FlowSpace DRAFT — review version, not yet approved ({customer_name or lead_id})",
+        "subject": f"FlowSpace DRAFT — review version, not yet approved ({customer_name or shown or space})",
         "html": _draft_package_html(
             customer_name or "there",
             lead_id,
@@ -522,6 +532,7 @@ async def send_draft_package(
             project_title=(project_title or "").strip(),
             preview_src="cid:blueprint-preview" if board_bytes else "",
             room_flow_src="cid:room-flow" if board_bytes and zone_map_bytes else "",
+            outline_note=outline_note,
         ),
         "attachments": attachments,
     }

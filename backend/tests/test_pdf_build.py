@@ -344,3 +344,24 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     recorded = " ".join(record["steps"] + [zone["desc"] for zone in record["zones"]]).lower()
     assert "park" in recorded or "car" in recorded
     assert "workbench" in recorded
+
+
+def test_curated_shopping_links_are_labeled_and_unmatched_rows_get_a_search():
+    nursery = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json").read_text())
+    lead = {**nursery["lead"], "name": "Camila Sales"}
+    deliverable = {
+        **nursery["deliverable"],
+        "shopping_list": [
+            {"name": "Furniture anti-tip kit (2-pack, dresser + shelves)", "qty": 1, "price": 18},
+            {"name": "Under-door draft sweep", "qty": 1, "price": 12},
+        ],
+    }
+    text = _text(build_pdf(lead=lead, deliverable=deliverable, images={}))
+    flat = " ".join(text.split())
+    assert "Qdos anti-tip kit at Target" in flat
+    assert "Search at Target" in flat
+    assert "Hi Camila." in flat
+    assert "Camila Sales" not in flat
+    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." in flat
+    for banned in ("95%", "SOURCE_", "AFTER_", "9dbedfba", "not a measured", "is ready"):
+        assert banned not in flat
