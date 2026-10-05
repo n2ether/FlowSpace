@@ -103,11 +103,11 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     low = text.lower()
 
     assert "portrait blueprint" in low
-    assert "room-flow" in low and "map" in low
+    assert "room flow map" in low
     assert "companion" in low
     assert "safety essentials" in low
     assert "climate comfort" in low
-    assert "why it helps" in low
+    assert "why the flowspace zone approach helps" in low
     assert "fewer decisions" in low
     assert "shopping list" in low
     assert "list total" in low
@@ -339,7 +339,7 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "shopping list" in joined
     assert "safety essentials" in joined
     assert "climate comfort" in joined
-    assert "why it helps" in joined
+    assert "why the flowspace zone approach helps" in joined
     record = internal_record(doc["lead"], doc["deliverable"])
     recorded = " ".join(record["steps"] + [zone["desc"] for zone in record["zones"]]).lower()
     assert "park" in recorded or "car" in recorded
@@ -362,6 +362,87 @@ def test_curated_shopping_links_are_labeled_and_unmatched_rows_get_a_search():
     assert "Search at Target" in flat
     assert "Hi Camila." in flat
     assert "Camila Sales" not in flat
-    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." in flat
+    assert "The room outline follows your measurements, while furniture footprints and zones remain approximate." in flat
     for banned in ("95%", "SOURCE_", "AFTER_", "9dbedfba", "not a measured", "is ready"):
         assert banned not in flat
+
+
+CAMILA_OPENING = (
+    "Hi Camila. Start with the portrait Blueprint and Room Flow map to see the room's overall plan and "
+    "organization. The room outline follows your measurements, while furniture footprints and zones remain "
+    "approximate. This companion guide brings together the practical essentials: safety, climate comfort, "
+    "the reasoning behind the zone-based plan, the shopping list, and each source-matched before-and-after view."
+)
+CAMILA_WHY = (
+    "FlowSpace gives each part of the room a clear job\u2014sleep, change, comfort, or play + storage. "
+    "With an open path and a simple home for everyday items, daily routines require fewer decisions, "
+    "resets happen faster, and the room becomes calmer and easier to use."
+)
+
+
+def _camila_curated(photos: int = 0):
+    from shopping_links import load_record
+
+    nursery = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "nursery_nico.json").read_text())
+    lead = nursery["lead"]
+    items = load_record(lead["id"])["items"]
+    deliverable = {
+        **nursery["deliverable"],
+        "shopping_list": [{"name": it["name"], "qty": it["qty"], "price": it["price"]} for it in items],
+    }
+    pairs = []
+    for i in range(photos):
+        pairs.append({
+            "before": _jpeg_bytes(color=(150, 120 + i * 10, 110), size=(3024, 4032)),
+            "after": _jpeg_bytes(color=(210, 196, 180 - i * 10), size=(3024, 4032)),
+        })
+    return lead, deliverable, ({"source_pairs": pairs} if pairs else {})
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_companion_opening_and_zone_approach_copy_are_exact():
+    lead, deliverable, images = _camila_curated()
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    first = _flat(_page_text(pdf, 0))
+    assert CAMILA_OPENING in first
+    assert "WHY THE FLOWSPACE ZONE APPROACH HELPS " + CAMILA_WHY in first
+    assert "WHY IT HELPS" not in _flat(_text(pdf))
+
+
+def test_opening_names_an_approximate_outline_when_none_was_measured():
+    pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
+    first = _flat(_page_text(pdf, 0))
+    assert "Start with the portrait Blueprint and Room Flow map" in first
+    assert "The room outline is approximate" in first
+    assert "follows your measurements" not in first
+
+
+def test_curated_list_total_and_link_note_share_the_shopping_page():
+    lead, deliverable, images = _camila_curated(photos=4)
+    pdf = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    reader = PdfReader(io.BytesIO(pdf))
+    pages = [_flat(page.extract_text() or "") for page in reader.pages]
+    # Guide, shopping list, then one before/after page per source photo. No spill page.
+    assert len(pages) == 6
+    shop = next(i for i, text in enumerate(pages) if "SHOPPING LIST" in text)
+    page = pages[shop]
+    assert "LIST TOTAL $240" in page
+    assert "Product pages are linked where verified; search links are labeled." in page
+    assert "Soft cotton area rug" in page and "Furniture anti-tip kit" in page
+    assert "Felt wall decor — moon or planet accent" in page and "Search at Target" in page
+    assert sum("LIST TOTAL" in text for text in pages) == 1
+    for text in pages:
+        body = text.split("Windows and room proportions follow your photos.", 1)[-1]
+        assert len(body) > 120, text
+    links = [
+        annot.get_object().get("/A", {}).get("/URI")
+        for annot in reader.pages[shop].get("/Annots") or []
+    ]
+    assert sum(1 for url in links if url and url.startswith("https://www.target.com/")) == 10
+    assert len(pdf) < 5 * 1024 * 1024
+    for text in pages:
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "QA", "is ready"):
+            assert banned not in text

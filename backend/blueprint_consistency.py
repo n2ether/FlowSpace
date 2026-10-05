@@ -227,9 +227,6 @@ _GENERIC_SAFETY_ESSENTIALS = (
     "Anchor tall or heavy furniture to the wall before you load it.",
     "Keep a clear floor path to the door.",
 )
-_CLEAR_PATHS = "A clear path from the door, one simple home for each everyday task, and a quick reset mean fewer decisions in the moment."
-_ROOM_READS = "The room becomes easier to read, easier to reset, and easier to live in."
-
 NURSERY_BEDTIME_TITLE = "One-minute bedtime ritual"
 NURSERY_BEDTIME = (
     "One-minute bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
@@ -781,13 +778,11 @@ def climate_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
     return (short or lines)[:3]
 
 
-def why_it_helps(lead: Dict[str, Any] | None) -> str:
-    """One paragraph: clear paths, fewer decisions, easier resets, calmer routines."""
-    if is_nursery_space(lead or {}):
-        calmer = "Routines get calmer, and bedtime transitions are easier for both parent and child."
-    else:
-        calmer = "Daily routines get calmer because the room stops asking you to think about it."
-    return f"{_CLEAR_PATHS} {calmer} {_ROOM_READS}"
+def why_it_helps(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> str:
+    """The zone-approach paragraph, word for word as the Room Flow map prints it."""
+    from room_flow import why_zone_approach
+
+    return why_zone_approach(lead or {}, deliverable or {})
 
 
 def internal_record(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -871,6 +866,6 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "notes": str(doc.get("notes") or "").strip(),
         "safety_essentials": safety_essentials(lead, doc),
         "climate_essentials": climate_essentials(lead, doc),
-        "why": why_it_helps(lead),
+        "why": why_it_helps(lead, doc),
     }
     return sections, doc

@@ -209,9 +209,9 @@ def test_companion_is_the_short_customer_guide_with_one_total():
         "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages).split()
     )
     low = text.lower()
-    for heading in ("SAFETY ESSENTIALS", "CLIMATE COMFORT", "WHY IT HELPS", "SHOPPING LIST", "LIST TOTAL"):
+    for heading in ("SAFETY ESSENTIALS", "CLIMATE COMFORT", "WHY THE FLOWSPACE ZONE APPROACH HELPS", "SHOPPING LIST", "LIST TOTAL"):
         assert heading in text
-    for idea in ("clear path", "fewer decisions", "reset", "calmer"):
+    for idea in ("open path", "fewer decisions", "reset", "calmer"):
         assert idea in low
     assert "six-drawer dresser" in low
     assert "$174" in text

@@ -5,7 +5,7 @@ The primary visual is ``image_board.build_image_board`` (a portrait PNG).
 This PDF is the short, phone-friendly companion guide:
 
   - Safety essentials and climate comfort (short lists)
-  - One "why it helps" paragraph
+  - One "why the FlowSpace zone approach helps" paragraph (same words as the Room Flow map)
   - The consolidated shopping list with links and one list total
   - One before | after page per source photo, only when a real photo exists
 
@@ -57,7 +57,7 @@ from reportlab.platypus import (
 from blueprint_consistency import companion_sections
 from blueprint_layers import BUDGET_LABELS, STORAGE
 from photo_contain import contain_rect
-from room_flow import outline_caption
+from room_flow import ZONE_APPROACH_HEADING, guide_outline_caption
 from shopping_links import fallback_search_links
 from pdf_images import (
     COMPARE_AFTER_BANNER,
@@ -450,6 +450,20 @@ def _styles():
         "guideLink": ParagraphStyle(
             "guideLink", parent=base["BodyText"], fontName=_font("FSSans"),
             fontSize=11, leading=14, textColor=INK, spaceAfter=1,
+        ),
+        # Ten curated rows, the total, and the link note share one phone page.
+        "shopItem": ParagraphStyle(
+            "shopItem", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=10.6, leading=12.8, textColor=INK, spaceBefore=0, spaceAfter=4.5,
+        ),
+        "shopTotal": ParagraphStyle(
+            "shopTotal", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
+            fontSize=12, leading=14, textColor=EMERALD_DEEP, spaceBefore=2, spaceAfter=1,
+            keepWithNext=True,
+        ),
+        "shopNote": ParagraphStyle(
+            "shopNote", parent=base["BodyText"], fontName=_font("FSSans"),
+            fontSize=10.6, leading=12.8, textColor=INK, spaceAfter=1,
         ),
     }
 
@@ -1654,7 +1668,7 @@ def _shopping_blocks(
         flows.append(
             Paragraph(
                 f"{title}<br/>Qty {qty_label} · {price_label} each · {sub_label}",
-                s["guideBody"],
+                s["shopItem"],
             )
         )
     return flows
@@ -1783,10 +1797,12 @@ def build_pdf(
     story.append(Paragraph("COMPANION GUIDE", s["guideKicker"]))
     story.append(
         Paragraph(
-            f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and the room-flow map. "
-            f"{_esc(outline_caption(lead, deliverable))} "
-            "This guide keeps the essentials: safety, climate, why it helps, the shopping list, "
-            "and each before and after from the same photo.",
+            f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and Room Flow map "
+            "to see the room's overall plan and organization. "
+            f"{_esc(guide_outline_caption(lead, deliverable))} "
+            "This companion guide brings together the practical essentials: safety, climate comfort, "
+            "the reasoning behind the zone-based plan, the shopping list, and each source-matched "
+            "before-and-after view.",
             s["guideBody"],
         )
     )
@@ -1799,30 +1815,30 @@ def build_pdf(
     for line in sections["climate_essentials"]:
         story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
 
-    story.append(Paragraph("WHY IT HELPS", s["guideH"]))
+    story.append(Paragraph(ZONE_APPROACH_HEADING, s["guideH"]))
     story.append(Paragraph(_esc(sections["why"]), s["guideBody"]))
 
-    shopping: List[Any] = [Paragraph("SHOPPING LIST", s["guideH"])]
-    shopping.extend(_shopping_blocks(deliverable.get("shopping_list") or [], sections["links"]))
-    shopping.append(Spacer(1, 4))
-    shopping.append(Paragraph(f"LIST TOTAL  {_esc(str(sections['list_total']))}", s["guideH3"]))
+    items = _shopping_blocks(deliverable.get("shopping_list") or [], sections["links"])
+    tail: List[Any] = [Paragraph(f"LIST TOTAL  {_esc(str(sections['list_total']))}", s["shopTotal"])]
     if sections["stated_budget"]:
-        shopping.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["guideBody"]))
+        tail.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["shopNote"]))
     if sections["links"]:
         if sections["links_are_search"]:
-            shopping.append(
+            tail.append(
                 Paragraph(
                     "Links open a labeled retailer search. Confirm the exact product before you buy.",
-                    s["guideBody"],
+                    s["shopNote"],
                 )
             )
         else:
-            shopping.append(
+            tail.append(
                 Paragraph(
                     "Product pages are linked where verified; search links are labeled. Confirm stock and price before you buy.",
-                    s["guideBody"],
+                    s["shopNote"],
                 )
             )
+    # The total and link note never sit alone on a page: the last rows travel with them.
+    shopping: List[Any] = [Paragraph("SHOPPING LIST", s["guideH"]), *items[:-2], KeepTogether([*items[-2:], *tail])]
     # One consolidated list: it moves to the next page whole rather than splitting.
     story.append(KeepTogether(shopping))
 
