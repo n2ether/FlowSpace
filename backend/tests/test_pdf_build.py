@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 from pypdf import PdfReader
 
+from blueprint_consistency import internal_record
 from blueprint_layers import ryan_answers
 from pdf_generator import build_pdf, plan_title, space_label
 from pdf_images import (
@@ -92,7 +93,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     assert pdf[:5] == b"%PDF-"
     reader = PdfReader(io.BytesIO(pdf))
-    assert 2 <= len(reader.pages) <= 16
+    assert 1 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "FlowSpace" in text
     assert "Ada Lovelace" in text
@@ -101,19 +102,23 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     low = text.lower()
 
     assert "portrait blueprint" in low
+    assert "room-flow map" in low
     assert "companion" in low
-    assert "Parking Zone" in text
-    assert "Keep the existing stall clear" in text
+    assert "safety essentials" in low
+    assert "climate comfort" in low
+    assert "why it helps" in low
+    assert "fewer decisions" in low
     assert "shopping list" in low
     assert "list total" in low
-    assert "this list totals" in low
     assert "$150" in text
-    assert "step by step" in low
-    assert "safety" in low
-    assert "climate" in low
-    assert "weekly reset" in low
-    assert "Shopping Links" in text
     assert "The FlowSpace Design Team" in text
+
+    # The long sections moved to the internal record.
+    assert "step by step" not in low
+    assert "do not" not in low
+    assert "notes:" not in low
+    assert "Shopping Links" not in text
+    assert "Parking Zone" not in text
 
     # Six-layer reasoning stays in the backend schema — not on the customer PDF.
     assert "why this plan" not in low
@@ -122,20 +127,25 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "human need" not in low
     assert "spatial constraint" not in low
     assert "customer instruction" not in low
-    assert "workbench" in low or "possessions" in low
-    assert "measurement" in low
+    assert "measurements are approximate" not in low
     assert "15 ft" not in text
     assert "15ft" not in text
-    assert "optional" in text.lower()
     assert "95%" in text
-    assert "consider" in text.lower()
 
 
-def test_optional_paint_is_framed_not_required():
-    pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
-    text = _text(pdf)
-    assert "Optional paint" in text or "WALL COLOR" in text
-    assert "consider if it helps" in text.lower() or "Consider this color" in text or "consider if it helps" in text
+def test_long_material_stays_in_the_internal_record():
+    record = internal_record(LEAD, DELIVERABLE)
+    assert record["status"].startswith("DRAFT. Review version.")
+    assert any(zone["title"] == "Parking Zone" for zone in record["zones"])
+    assert record["steps"]
+    assert record["reset"]
+    assert record["safety_full"]
+
+
+def test_customer_guide_does_not_prescribe_paint():
+    text = _text(build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={}))
+    assert "Optional paint" not in text
+    assert "repaint" not in text.lower()
 
 
 def test_pdf_omits_reference_photos_when_none_supplied():
@@ -317,17 +327,19 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "why this plan" not in low
     assert "human need" not in low
     assert "customer instruction" not in low
-    assert "park" in low
-    assert "car" in low
-    assert "workbench" in low
     assert "95%" in text
     assert "$100" in text or "100" in text
     assert "227" in text or "budget" in low
     assert "15 ft" not in text
-    assert "optional" in low
     assert answers["routine"]
     assert "workbench" in answers["possessions"].lower()
-    assert 2 <= len(reader.pages) <= 16
+    assert 1 <= len(reader.pages) <= 16
     joined = text.lower()
     assert "shopping list" in joined
-    assert "step by step" in joined or "weekly reset" in joined
+    assert "safety essentials" in joined
+    assert "climate comfort" in joined
+    assert "why it helps" in joined
+    record = internal_record(doc["lead"], doc["deliverable"])
+    recorded = " ".join(record["steps"] + [zone["desc"] for zone in record["zones"]]).lower()
+    assert "park" in recorded or "car" in recorded
+    assert "workbench" in recorded

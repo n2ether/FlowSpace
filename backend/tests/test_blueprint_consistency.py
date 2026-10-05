@@ -6,6 +6,7 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from blueprint_consistency import (
+    internal_record,
     item_forbidden,
     note_conflicts,
     prepare_deliverable,
@@ -77,7 +78,7 @@ def test_item_forbidden_targets_drawer_swaps_not_every_basket():
 
 def test_blanket_sku_and_150_vs_230_cannot_disagree():
     """A $80 blanket made the list $230 while the prose still said $150."""
-    from blueprint_consistency import companion_sections, safety_guidance
+    from blueprint_consistency import companion_sections, safety_essentials, safety_guidance
     from image_board import board_spec
     from pdf_generator import build_pdf
 
@@ -160,7 +161,7 @@ def test_blanket_sku_and_150_vs_230_cannot_disagree():
     assert "$150" in text
     assert "blanket layer" not in low
     assert "list total" in low
-    assert safety_guidance(lead, prepared)[0] in text or "anchor the dresser" in low
+    assert safety_essentials(lead, prepared)[0] in " ".join(text.split())
 
 
 def test_prose_kit_price_follows_the_list_when_nothing_is_removed():
@@ -238,13 +239,17 @@ def test_nursery_zone_locations_match_the_photos():
     )
     assert "away from the window" not in crib.lower()
     assert "close to the window" not in rocker.lower()
+    # Zone sentences live in the internal record; the customer guide keeps the short safety list.
+    record = " ".join(zone["desc"] for zone in internal_record(lead, deliverable)["zones"])
+    assert "near end toward the window" in record
+    assert "farther from the window than the crib" in record
+    assert "away from the window" not in record.lower()
+    assert "close to the window" not in record.lower()
     pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
     text = " ".join(
         " ".join((page.extract_text() or "").split())
         for page in PdfReader(io.BytesIO(pdf)).pages
     )
-    assert "near end toward the window" in text
-    assert "farther from the window than the crib" in text
     assert "away from the window" not in text.lower()
     assert "close to the window" not in text.lower()
     assert "fitted sheet" in text.lower()

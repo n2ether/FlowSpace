@@ -211,6 +211,26 @@ NURSERY_CLIMATE = (
     "or building professional check door gaps and airflow.",
 )
 
+# Customer companion guide: short essentials only. The full safety list,
+# the Do Not list, and the extended notes stay in the internal record.
+NURSERY_SAFETY_ESSENTIALS = (
+    "The crib holds a fitted sheet and a wearable sleep sack only — no pillows, bumpers, toys, or loose blankets.",
+    "No portable heater, wall heater, or electric blanket near the sleep area.",
+    "Keep window cords out of reach.",
+    "Keep a clear floor path to the door.",
+)
+NURSERY_CLIMATE_ESSENTIALS = (
+    "Keep the room about 68–72°F with the heating you already have.",
+    "Warm the window with a thermal curtain, clear insulation film, and a door draft stopper.",
+    "Still cold? Have an HVAC professional check door gaps and airflow.",
+)
+_GENERIC_SAFETY_ESSENTIALS = (
+    "Anchor tall or heavy furniture to the wall before you load it.",
+    "Keep a clear floor path to the door.",
+)
+_CLEAR_PATHS = "A clear path from the door, one simple home for each everyday task, and a quick reset mean fewer decisions in the moment."
+_ROOM_READS = "The room becomes easier to read, easier to reset, and easier to live in."
+
 NURSERY_BEDTIME_TITLE = "One-minute bedtime ritual"
 NURSERY_BEDTIME = (
     "One-minute bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
@@ -739,6 +759,79 @@ def safety_guidance(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | N
     return lines
 
 
+def safety_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> List[str]:
+    """Short customer safety section. No Do Not list and no review rules."""
+    lead = lead or {}
+    deliverable = deliverable or {}
+    if is_nursery_space(lead):
+        if mentions_six_drawer(_source_blob(lead, deliverable)):
+            anchor = "Anchor the six-drawer dresser to the wall. All six drawers stay."
+        else:
+            anchor = "Anchor the dresser to the wall and keep every drawer."
+        return [anchor, *NURSERY_SAFETY_ESSENTIALS]
+    lines: List[str] = []
+    for line in safety_guidance(lead, deliverable):
+        text = " ".join(line.split())
+        if _DO_NOT_LINE.search(text) or re.search(r"\b(invent|dimensions|walls, windows)\b", text, re.I):
+            continue
+        if not _same_warning(text, lines):
+            lines.append(text)
+    covered = " ".join(lines).lower()
+    for keyword, line in zip(("anchor", "path"), _GENERIC_SAFETY_ESSENTIALS):
+        if keyword not in covered:
+            lines.append(line)
+    return lines[:4]
+
+
+def climate_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> List[str]:
+    """Short customer climate section."""
+    lead = lead or {}
+    if is_nursery_space(lead):
+        return list(NURSERY_CLIMATE_ESSENTIALS)
+    lines = _climate_lines(lead, deliverable or {})
+    short = [line for line in lines if len(line) <= 160]
+    return (short or lines)[:3]
+
+
+def why_it_helps(lead: Dict[str, Any] | None) -> str:
+    """One paragraph: clear paths, fewer decisions, easier resets, calmer routines."""
+    if is_nursery_space(lead or {}):
+        calmer = "Routines get calmer, and bedtime transitions are easier for both parent and child."
+    else:
+        calmer = "Daily routines get calmer because the room stops asking you to think about it."
+    return f"{_CLEAR_PATHS} {calmer} {_ROOM_READS}"
+
+
+def internal_record(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Review and QA material kept off the customer companion guide."""
+    lead = lead or {}
+    sections, doc = companion_sections(lead, deliverable)
+    layers = doc.get("blueprint_layers") if isinstance(doc.get("blueprint_layers"), dict) else {}
+    instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
+    do_not = [str(x).strip() for x in (instruction.get("do_not") or []) if str(x).strip()]
+    for line in doc.get("safety_lines") or []:
+        _append_unique(do_not, str(line).strip())
+    if is_nursery_space(lead):
+        for line in NURSERY_DO_NOT:
+            _append_unique(do_not, line)
+    return {
+        "status": "DRAFT. Review version. Not yet approved. Customer release held.",
+        "do_not": do_not,
+        "safety_full": sections["safety"],
+        "climate_full": sections["climate"],
+        "needs": sections["needs"],
+        "zones": sections["zones"],
+        "steps": sections["steps"],
+        "reset_title": sections["reset_title"],
+        "reset": sections["maintenance"],
+        "notes": sections["notes"],
+        "removed_note": sections["removed_note"],
+        "consistency_notes": [str(x) for x in (doc.get("consistency_notes") or [])],
+        "budget_note": sections["budget_note"],
+        "attachment_note": str(doc.get("attachment_note") or ""),
+    }
+
+
 def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Long-form companion copy plus the prepared deliverable."""
     lead = lead or {}
@@ -789,5 +882,8 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         ),
         "removed_note": removed,
         "notes": str(doc.get("notes") or "").strip(),
+        "safety_essentials": safety_essentials(lead, doc),
+        "climate_essentials": climate_essentials(lead, doc),
+        "why": why_it_helps(lead),
     }
     return sections, doc

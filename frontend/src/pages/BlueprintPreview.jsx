@@ -20,98 +20,45 @@ function Section({ title, testId, children }) {
     );
 }
 
-function RoomPlan({ plan }) {
-    const places = Array.isArray(plan?.places) ? plan.places : [];
+function RoomPlan({ plan, leadId, token }) {
+    const [src, setSrc] = useState("");
+    const [failed, setFailed] = useState(false);
     const legend = Array.isArray(plan?.legend) ? plan.legend : [];
-    const path = Array.isArray(plan?.path) ? plan.path : [];
-    const points = path
-        .filter((point) => Array.isArray(point) && point.length >= 2)
-        .map(([x, y]) => `${Number(x) * 100},${Number(y) * 100}`)
-        .join(" ");
-    const doorWall = plan?.door_wall || "west";
-    const doorAt = Number(plan?.door_at ?? 0.22);
-    const doorSpan = Number(plan?.door_span ?? 0.2);
-    const doorY = doorAt * 100;
-    const pathLabel = path.length > 1 ? path[1] : path[0];
+
+    useEffect(() => {
+        if (!leadId || !token) return undefined;
+        let objectUrl = "";
+        let cancelled = false;
+        adminClient(token)
+            .get(`/admin/leads/${leadId}/deliverable/zone-map`, { responseType: "blob" })
+            .then((res) => {
+                if (cancelled) return;
+                objectUrl = URL.createObjectURL(res.data);
+                setSrc(objectUrl);
+            })
+            .catch(() => {
+                if (!cancelled) setFailed(true);
+            });
+        return () => {
+            cancelled = true;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [leadId, token]);
+
     return (
         <Section title="Room flow" testId="blueprint-plan">
-            <div className="relative mx-auto aspect-[5/4] w-full overflow-hidden rounded-2xl border-[3px] border-[#1F3D2C] bg-[#faf6ef]">
-                <p className="absolute left-1/2 top-2 -translate-x-1/2 text-xs font-semibold tracking-wide text-[#C17B4A]">
-                    {plan?.window || "Window"}
+            {src ? (
+                <img
+                    src={src}
+                    alt="Room flow zone map"
+                    className="w-full rounded-2xl border border-[#e7e1d6]"
+                    data-testid="blueprint-zone-map"
+                />
+            ) : (
+                <p className="text-base text-[#6e655c]">
+                    {failed ? "The room-flow map could not be loaded." : "Loading the room-flow map…"}
                 </p>
-                {doorWall === "south" ? (
-                    <p
-                        className="absolute z-10 bg-[#faf6ef] text-center text-xs font-semibold text-[#1F3D2C]"
-                        style={{
-                            left: `${doorAt * 100}%`,
-                            bottom: 0,
-                            width: `${Math.max(12, doorSpan * 100)}%`,
-                        }}
-                    >
-                        {plan?.door || "Door"}
-                    </p>
-                ) : (
-                    <p
-                        className="absolute left-2 text-xs font-semibold text-[#1F3D2C]"
-                        style={{ top: `calc(${doorY}% - 0.9rem)` }}
-                    >
-                        {plan?.door || "Door"}
-                    </p>
-                )}
-                {points ? (
-                    <svg
-                        className="pointer-events-none absolute inset-0 h-full w-full"
-                        viewBox="0 0 100 100"
-                        preserveAspectRatio="none"
-                        aria-hidden="true"
-                    >
-                        <polyline
-                            points={points}
-                            fill="none"
-                            stroke="#C17B4A"
-                            strokeWidth="1.6"
-                            strokeLinejoin="round"
-                            strokeLinecap="round"
-                            vectorEffect="non-scaling-stroke"
-                        />
-                    </svg>
-                ) : null}
-                {places.map((place) => {
-                    const box = Array.isArray(place.box) ? place.box : [0.08, 0.08, 0.32, 0.28];
-                    const [l, t, r, b] = box;
-                    const zone = place.zone || place.label;
-                    return (
-                        <div
-                            key={place.id || place.label}
-                            className="absolute flex items-center justify-center gap-1 rounded-xl border-2 border-[#1F3D2C] bg-[#cfe2d7] px-1 text-center text-xs font-semibold leading-tight text-[#1F3D2C]"
-                            style={{
-                                left: `${l * 100}%`,
-                                top: `${t * 100}%`,
-                                width: `${Math.max(8, (r - l) * 100)}%`,
-                                height: `${Math.max(8, (b - t) * 100)}%`,
-                            }}
-                        >
-                            {place.number ? (
-                                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#1F3D2C] text-[10px] text-white">
-                                    {place.number}
-                                </span>
-                            ) : null}
-                            <span>{zone}</span>
-                        </div>
-                    );
-                })}
-                {pathLabel ? (
-                    <p
-                        className="pointer-events-none absolute text-xs font-semibold text-[#C17B4A]"
-                        style={{
-                            left: `${Number(pathLabel[0]) * 100}%`,
-                            top: `${Math.max(8, Number(pathLabel[1]) * 100 - 6)}%`,
-                        }}
-                    >
-                        {plan?.circulation || "Clear path"}
-                    </p>
-                ) : null}
-            </div>
+            )}
             {legend.length ? (
                 <ol className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm" data-testid="blueprint-zone-legend">
                     {legend.map((item) => (
@@ -303,7 +250,7 @@ export default function BlueprintPreview() {
                             )}
                         </Section>
 
-                        <RoomPlan plan={doc.plan} />
+                        <RoomPlan plan={doc.plan} leadId={leadId} token={token} />
 
                         <Section title="Palette" testId="blueprint-palette">
                             <div className="flex flex-wrap gap-3">

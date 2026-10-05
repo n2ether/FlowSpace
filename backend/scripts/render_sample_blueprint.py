@@ -7,8 +7,9 @@ Uses the bake-off garage fixture (organization plan — not a bedroom redesign).
   python scripts/render_sample_blueprint.py
 
 Writes the companion PDF for the garage bake-off, plus Nico's nursery
-two-file sample (image board PNG + companion PDF) from
-``fixtures/nursery_nico.json``. The board is the visual; the PDF is the guide.
+sample (image board PNG, room-flow zone map PNG, companion PDF) from
+``fixtures/nursery_nico.json``. The board is the visual, the zone map is
+the room flow, and the PDF is the guide.
 
 Image keys expected by build_pdf() are documented in backend/pdf_images.py.
 """
@@ -27,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 from image_board import build_image_board  # noqa: E402
 from pdf_generator import build_pdf  # noqa: E402
 from pdf_images import assemble_pdf_images  # noqa: E402
+from room_flow import build_zone_map  # noqa: E402
 
 FIXTURE = ROOT / "fixtures" / "bakeoff" / "garage_org_space.json"
 
@@ -145,6 +147,10 @@ def main() -> None:
     companion_path = out_dir / "nicos-nursery-companion.pdf"
     companion_path.write_bytes(companion)
     print(f"wrote {companion_path} ({len(companion)} bytes)")
+    zone_map = build_zone_map(lead=nursery["lead"], deliverable=nursery["deliverable"], images=nursery_images)
+    zone_map_path = out_dir / "nicos-nursery-zone-map.png"
+    zone_map_path.write_bytes(zone_map)
+    print(f"wrote {zone_map_path} ({len(zone_map)} bytes)")
 
 
 if __name__ == "__main__":

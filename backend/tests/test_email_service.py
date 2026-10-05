@@ -258,3 +258,43 @@ def test_customer_email_preview_uses_the_review_status_line():
     assert "Your FlowSpace Blueprint is Ready" not in html
     assert "is ready" not in html.lower()
     assert "final" not in html.lower()
+
+
+def test_email_preview_shows_the_room_flow_map_without_codes():
+    html = customer_email_html(
+        "Camila Sales",
+        "kids_room",
+        project_title="Nicholas's Nursery",
+        preview_src="data:image/png;base64,board",
+        room_flow_src="data:image/png;base64,zonemap",
+    )
+    low = html.lower()
+    assert "data:image/png;base64,zonemap" in html
+    assert low.find("base64,board") < low.find("room flow") < low.find("companion guide")
+    assert "safety essentials, climate comfort, why it helps, the shopping list, and each before and after" in html
+    assert "weekly reset" not in low
+    assert "DRAFT. Review version. Not yet approved. Customer release held." in html
+    for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready"):
+        assert banned not in html
+
+
+def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    calls = []
+    monkeypatch.setattr("email_service.resend.Emails.send", lambda payload: calls.append(payload) or {"id": "ok"})
+    sent, _err = asyncio.run(
+        send_draft_package(
+            to_email="reviewer@example.com",
+            customer_name="Camila Sales",
+            space_type="kids_room",
+            lead_id="lead-9",
+            pdf_bytes=PDF,
+            board_bytes=b"PNG",
+            zone_map_bytes=b"ZONEMAP",
+        )
+    )
+    assert sent is True
+    attachments = calls[0]["attachments"]
+    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None]
+    assert "DRAFT_Room_Flow" in attachments[1]["filename"]
+    assert "cid:room-flow" in calls[0]["html"]

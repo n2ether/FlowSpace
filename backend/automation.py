@@ -39,6 +39,7 @@ from image_orientation import (
     upright_bytes,
 )
 from image_board import build_image_board
+from room_flow import build_zone_map
 from pdf_generator import build_pdf
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from render_qa import RenderQAResult, review_organized_render
@@ -770,6 +771,7 @@ async def run_automation(
             return package_status == "review"
 
         logger.info("[automation] Step 4: Sending email to %s...", customer_email)
+        zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable_doc, images=images, final=True)
         sent, email_error = await send_blueprint(
             customer_name=customer_name,
             customer_email=customer_email,
@@ -777,6 +779,7 @@ async def run_automation(
             lead_id=lead_id,
             pdf_bytes=pdf_bytes,
             board_bytes=board_bytes,
+            zone_map_bytes=zone_map_bytes,
         )
         final_status = "delivered" if sent else "pdf_ready"
         update = {
