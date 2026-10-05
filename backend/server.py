@@ -229,6 +229,9 @@ class Zone(BaseModel):
 class ShoppingLink(BaseModel):
     name: str
     url: str = ""
+    retailer: str = ""
+    link_type: str = ""  # "product" or "search"
+    label: str = ""
 
 
 class Deliverable(BaseModel):
@@ -1180,6 +1183,27 @@ async def send_review_contact_sheet(
 
 
 
+
+def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Full-size client-facing before/after PNGs for email attachment.
+
+    Each required room photo contributes its before and organized after when
+    present. These are attached as separate files in addition to the body embeds
+    and the companion PDF.
+    """
+    visuals: List[Dict[str, Any]] = []
+    for index, pair in enumerate(images.get("source_pairs") or []):
+        if not isinstance(pair, dict):
+            continue
+        before = pair.get("before")
+        after = pair.get("after")
+        if before:
+            visuals.append({"label": f"Before_view_{index + 1}", "bytes": before})
+        if after:
+            visuals.append({"label": f"Organized_view_{index + 1}", "bytes": after})
+    return visuals
+
+
 @api_router.post("/admin/leads/{lead_id}/deliverable/send-draft")
 async def send_draft_package_endpoint(
     lead_id: str,
@@ -1208,6 +1232,7 @@ async def send_draft_package_endpoint(
         cc_emails=cc_emails or None,
         project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
+        extra_visuals=_client_facing_visuals(images),
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
@@ -1240,6 +1265,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         board_bytes=board_bytes,
         project_title=_customer_title(lead, deliverable),
         zone_map_bytes=zone_map_bytes,
+        extra_visuals=_client_facing_visuals(images),
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:

@@ -10,7 +10,7 @@ import asyncio
 import base64
 import logging
 import os
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 
 import resend
 
@@ -41,6 +41,11 @@ def _file_stem(title: str) -> str:
         cleaned = cleaned.replace("__", "_")
     return cleaned.strip("_") or "Blueprint"
 
+
+
+def _first_name(customer_name: str) -> str:
+    parts = str(customer_name or "").strip().split()
+    return parts[0] if parts else "there"
 
 def customer_email_html(
     customer_name: str,
@@ -125,7 +130,7 @@ def customer_email_html(
                 {REVIEW_STATUS}
               </h1>
               <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
-                Start with the portrait plan below.
+                Hi {_first_name(customer_name)}. Start with the portrait plan below.
               </p>
               {preview}
               <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
@@ -155,6 +160,49 @@ def customer_email_html(
 </body>
 </html>
 """
+
+
+
+def _png_attachment(filename: str, png: bytes, content_id: str = "") -> dict:
+    att = {
+        "filename": filename,
+        "content": base64.b64encode(png).decode("utf-8"),
+        "content_type": "image/png",
+    }
+    if content_id:
+        att["content_id"] = content_id
+    return att
+
+
+def _extra_visual_attachments(
+    visuals: Optional[List[Dict[str, Any]]],
+    *,
+    stem: str,
+    safe_name: str,
+    draft: bool = False,
+) -> List[dict]:
+    """Attach key client-facing visuals as full-size PNG files (in addition to body embeds)."""
+    out: List[dict] = []
+    prefix = f"FlowSpace_{stem}_DRAFT_" if draft else f"FlowSpace_{stem}_"
+    for index, visual in enumerate(visuals or []):
+        if not isinstance(visual, dict):
+            continue
+        raw = visual.get("bytes") or visual.get("png") or visual.get("content")
+        if not raw:
+            continue
+        if isinstance(raw, str):
+            try:
+                raw = base64.b64decode(raw)
+            except Exception:
+                continue
+        if not isinstance(raw, (bytes, bytearray)) or not raw:
+            continue
+        label = "".join(
+            ch if ch.isalnum() or ch in "-_" else "_"
+            for ch in str(visual.get("label") or visual.get("name") or f"visual_{index + 1}")
+        )
+        out.append(_png_attachment(f"{prefix}{label}_{safe_name}.png", bytes(raw)))
+    return out
 
 
 def _zone_map_attachment(filename: str, png: bytes) -> dict:
@@ -212,6 +260,7 @@ async def send_blueprint(
     board_bytes: Optional[bytes] = None,
     project_title: str = "",
     zone_map_bytes: Optional[bytes] = None,
+    extra_visuals: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Send the companion PDF and, when present, the image board and zone map.
@@ -253,6 +302,9 @@ async def send_blueprint(
         )
     if board_bytes and zone_map_bytes:
         attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_Room_Flow_{safe_name}.png", zone_map_bytes))
+    attachments.extend(
+        _extra_visual_attachments(extra_visuals, stem=stem, safe_name=safe_name, draft=False)
+    )
     attachments.append(
         {
             "filename": pdf_filename,
@@ -421,6 +473,7 @@ async def send_draft_package(
     cc_emails: Optional[list] = None,
     project_title: str = "",
     zone_map_bytes: Optional[bytes] = None,
+    extra_visuals: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Email DRAFT board, zone map, and companion PDF for review. Does not mark a package final."""
     api_key = os.environ.get("RESEND_API_KEY")
@@ -448,6 +501,9 @@ async def send_draft_package(
         )
     if board_bytes and zone_map_bytes:
         attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_DRAFT_Room_Flow_{safe_name}.png", zone_map_bytes))
+    attachments.extend(
+        _extra_visual_attachments(extra_visuals, stem=stem, safe_name=safe_name, draft=True)
+    )
     attachments.append(
         {
             "filename": f"FlowSpace_{stem}_DRAFT_Companion_{safe_name}.pdf",

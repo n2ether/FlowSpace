@@ -93,24 +93,23 @@ def edge_length(outline: Sequence[Sequence[float]], index: int) -> float:
 
 def outline_phrases(flow: Dict[str, Any]) -> Dict[str, str]:
     """Every sentence that describes the outline, from one source."""
-    credit = _clean(flow.get("outline_credit"))
+    _credit = _clean(flow.get("outline_credit"))  # retained for measured-outline provenance
     if flow.get("outline_source") == "measured":
-        supplied = f"Measured outline supplied by {credit}" if credit else "Measured outline supplied"
         return {
             "badge": "Measured room outline",
-            "map_note": f"{supplied}; furniture and zones remain approximate.",
-            "map_footnote": "Room outline and wall lengths are based on the supplied measurement sketch.",
-            "map_footnote_2": "Furniture footprints remain approximate; this is a zone map, not construction documentation.",
-            "rule": "Measured room outline; furniture and zones approximate",
-            "board_caption": "Measured room outline. Furniture and zones approximate.",
+            "map_note": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
+            "map_footnote": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
+            "map_footnote_2": "Furniture footprints and zones are approximate.",
+            "rule": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
+            "board_caption": "Room outline based on your measurements. Furniture footprints and zones are approximate.",
         }
     return {
         "badge": "Approximate room outline",
-        "map_note": "Outline drawn from your photos; furniture and zones are approximate.",
-        "map_footnote": "The room outline is drawn from your photos. No wall lengths were measured.",
-        "map_footnote_2": "Furniture footprints remain approximate; this is a zone map, not construction documentation.",
-        "rule": "Approximate room outline; furniture and zones approximate",
-        "board_caption": "Approximate room outline. Furniture and zones approximate.",
+        "map_note": "Approximate room outline. Furniture footprints and zones are approximate.",
+        "map_footnote": "Approximate room outline. Furniture footprints and zones are approximate.",
+        "map_footnote_2": "Furniture footprints and zones are approximate.",
+        "rule": "Approximate room outline. Furniture footprints and zones are approximate.",
+        "board_caption": "Approximate room outline. Furniture footprints and zones are approximate.",
     }
 
 

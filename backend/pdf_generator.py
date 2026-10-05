@@ -15,7 +15,7 @@ notes, steps, and full safety copy stay in the internal record
 (``blueprint_consistency.internal_record``), not in this PDF.
 
 Hard rules:
-  - Windows and room proportions stay ~95% true to the customer photo.
+  - Windows and room proportions follow the customer photos.
   - Never invent footage, window counts, or measured callouts.
   - Floor plans only when the pipeline actually provides one.
   - Wall paint/color is an optional recommendation, not applied in the visual.
@@ -110,7 +110,7 @@ SPACE_LABELS = {
 }
 
 DEFAULT_NOTES = (
-    "Windows and room proportions stay ~95% true to your photo. "
+    "Windows and room proportions follow your photos. "
     "We do not invent dimensions. Paint is optional — consider it only if it helps your goal."
 )
 OPTIONAL_PAINT_HEADING = "Optional paint — consider if it helps"
@@ -120,7 +120,7 @@ OPTIONAL_PAINT_NOTE = (
 )
 FOOTER_NOTE = (
     "Note: Measurements are approximate. Adjust to your space as needed. "
-    "Windows and proportions stay ~95% true to your photo."
+    "Windows and room proportions follow your photos."
 )
 
 DEFAULT_STRATEGY = [
@@ -252,7 +252,9 @@ def _plan_copy(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
 
 
 def _customer_first_name(lead: Dict[str, Any]) -> str:
-    return str(lead.get("name") or "").strip().split(" ")[0]
+    """Greet every customer by first name only."""
+    parts = str(lead.get("name") or "").strip().split()
+    return parts[0] if parts else ""
 
 
 def _child_first_name(
@@ -945,7 +947,7 @@ def _draw_footer(canvas, page: int) -> None:
     canvas.rect(0, 0, page_w, y, fill=1, stroke=0)
     canvas.setFillColor(SLATE_SOFT)
     canvas.setFont(_font("FSSans"), 8 if page_w < 500 else 6.1)
-    note = "The FlowSpace Design Team · Windows stay ~95% true to your photo."
+    note = "The FlowSpace Design Team · Windows and room proportions follow your photos."
     if page_w < 500:
         canvas.drawString(inset, 12, note)
         canvas.drawRightString(page_w - inset, 12, str(page))
@@ -1568,7 +1570,7 @@ def _shopping_blocks(
         flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
         return flows
     by_name = {
-        str(link.get("name") or "").strip().lower(): str(link.get("url") or "")
+        str(link.get("name") or "").strip().lower(): link
         for link in (links or [])
         if isinstance(link, dict)
     }
@@ -1578,13 +1580,24 @@ def _shopping_blocks(
         qty_label = str(int(qty) if float(qty).is_integer() else qty)
         price_label = _money(price) if price else "Typical"
         sub_label = _money(sub) if sub else "—"
-        url = by_name.get(name.strip().lower(), "")
-        label = f"<b>{_esc(name)}</b>"
-        if url:
-            label = f'<link href="{_esc(url)}" color="#047857"><u><b>{_esc(name)}</b></u></link>'
+        link = by_name.get(name.strip().lower(), {}) or {}
+        url = str(link.get("url") or "").strip()
+        link_type = str(link.get("link_type") or "").strip().lower()
+        link_label = str(link.get("label") or "").strip()
+        retailer = str(link.get("retailer") or "Target").strip() or "Target"
+        if not link_label and url:
+            link_label = f"Search at {retailer}" if link_type == "search" else f"View at {retailer}"
+        title = f"<b>{_esc(name)}</b>"
+        if url and link_label:
+            title = (
+                f"<b>{_esc(name)}</b><br/>"
+                f'<link href="{_esc(url)}" color="#047857"><u>{_esc(link_label)}</u></link>'
+            )
+        elif url:
+            title = f'<link href="{_esc(url)}" color="#047857"><u><b>{_esc(name)}</b></u></link>'
         flows.append(
             Paragraph(
-                f"{label}<br/>Qty {qty_label} · {price_label} each · {sub_label}",
+                f"{title}<br/>Qty {qty_label} · {price_label} each · {sub_label}",
                 s["guideBody"],
             )
         )
@@ -1714,7 +1727,7 @@ def build_pdf(
     story.append(Paragraph("COMPANION GUIDE", s["guideKicker"]))
     story.append(
         Paragraph(
-            f"Hi {_esc(customer_name)}. Start with the portrait Blueprint and the room-flow map. "
+            f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and the room-flow map. "
             "This guide keeps the essentials: safety, climate, why it helps, the shopping list, "
             "and each before and after from the same photo.",
             s["guideBody"],
@@ -1738,10 +1751,21 @@ def build_pdf(
     shopping.append(Paragraph(f"LIST TOTAL  {_esc(str(sections['list_total']))}", s["guideH3"]))
     if sections["stated_budget"]:
         shopping.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["guideBody"]))
-    if sections["links"] and sections["links_are_search"]:
-        shopping.append(
-            Paragraph("Links open a retailer search. Confirm the exact product before you buy.", s["guideBody"])
-        )
+    if sections["links"]:
+        if sections["links_are_search"]:
+            shopping.append(
+                Paragraph(
+                    "Links open a labeled retailer search. Confirm the exact product before you buy.",
+                    s["guideBody"],
+                )
+            )
+        else:
+            shopping.append(
+                Paragraph(
+                    "Product pages are linked where verified; search links are labeled. Confirm stock and price before you buy.",
+                    s["guideBody"],
+                )
+            )
     # One consolidated list: it moves to the next page whole rather than splitting.
     story.append(KeepTogether(shopping))
 
@@ -1771,7 +1795,7 @@ def build_pdf(
             if ready:
                 reference = (
                     "The organized view was edited from this photo, same camera. "
-                    "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+                    "Windows and room proportions follow your photos. Paint is optional and is not applied in the visual."
                 )
             else:
                 reference = (
@@ -1811,12 +1835,12 @@ def build_pdf(
         if before_bytes:
             reference = (
                 "This page shows the organized after beside your original photo. "
-                "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+                "Windows and room proportions follow your photos. Paint is optional and is not applied in the visual."
             )
         else:
             reference = (
                 "This page shows the organized after. "
-                "Same windows and walls (~95%). Paint is optional and is not applied in the visual."
+                "Windows and room proportions follow your photos. Paint is optional and is not applied in the visual."
             )
         _compare_page(
             [

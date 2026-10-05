@@ -96,13 +96,14 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert 1 <= len(reader.pages) <= 16
     text = _text(pdf)
     assert "FlowSpace" in text
-    assert "Ada Lovelace" in text
+    assert "Hi Ada." in text
+    assert "Ada Lovelace" not in text
     assert "Garage Organization Plan" in text
     assert "Bedroom Design Plan" not in text
     low = text.lower()
 
     assert "portrait blueprint" in low
-    assert "room-flow map" in low
+    assert "room-flow" in low and "map" in low
     assert "companion" in low
     assert "safety essentials" in low
     assert "climate comfort" in low
@@ -130,7 +131,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "measurements are approximate" not in low
     assert "15 ft" not in text
     assert "15ft" not in text
-    assert "95%" in text
+    assert "Windows and room proportions follow your photos" in text or "follow your photos" in text
 
 
 def test_long_material_stays_in_the_internal_record():
@@ -160,7 +161,7 @@ def test_pdf_handles_empty_deliverable():
     assert "Sam" in text
     assert "Closet Blueprint" in text
     assert "FlowSpace" in text
-    assert "95%" in text
+    assert "Windows and room proportions follow your photos" in text or "follow your photos" in text
     assert "organized view" in text.lower() or "shopping list" in text.lower()
     assert pdf[:5] == b"%PDF-"
     # No photo pair, so the guide stays on one page instead of a blank follow page.
@@ -327,7 +328,7 @@ def test_bakeoff_fixture_pdf_answers_ryan_questions():
     assert "why this plan" not in low
     assert "human need" not in low
     assert "customer instruction" not in low
-    assert "95%" in text
+    assert "Windows and room proportions follow your photos" in text or "follow your photos" in text
     assert "$100" in text or "100" in text
     assert "227" in text or "budget" in low
     assert "15 ft" not in text

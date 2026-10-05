@@ -59,7 +59,7 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert places["crib"]["zone"] == "Sleep"
     assert places["rocker"]["zone"] == "Comfort"
     assert view["plan"]["measured_outline"] is True
-    assert view["plan"]["board_caption"] == "Measured room outline. Furniture and zones approximate."
+    assert view["plan"]["board_caption"] == "Room outline based on your measurements. Furniture footprints and zones are approximate."
     assert view["plan"]["room_flow"]["outline_source"] == "measured"
     assert len(view["changes"]) == 4
     assert view["reset_title"] == "One-minute bedtime ritual"
