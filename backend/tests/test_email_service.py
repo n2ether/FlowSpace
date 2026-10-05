@@ -5,7 +5,14 @@ import io
 
 from PIL import Image
 
-from email_service import customer_email_html, send_blueprint, send_draft_package
+from email_service import (
+    BLUEPRINT_COPY,
+    ROOM_FLOW_COPY,
+    customer_email_html,
+    display_filename,
+    send_blueprint,
+    send_draft_package,
+)
 
 
 PDF = b"%PDF-1.4 fake-pdf-bytes"
@@ -165,12 +172,12 @@ def test_sends_image_board_and_companion(monkeypatch):
     assert sent is True
     assert err is None
     attachments = calls[0]["attachments"]
-    assert len(attachments) == 2
-    assert attachments[0]["content_type"] == "image/png"
-    assert attachments[0]["filename"] == "Kids-room-Organization-Plan-Blueprint.png"
+    assert len(attachments) == 3
+    assert [a["content_type"] for a in attachments] == ["image/png", "image/png", "application/pdf"]
+    assert attachments[0]["filename"] == attachments[1]["filename"] == "Kids' room Organization Plan — Blueprint.png"
     assert attachments[0].get("content_id") == "blueprint-preview"
-    assert attachments[1]["content_type"] == "application/pdf"
-    assert attachments[1]["filename"] == "Kids-room-Organization-Plan-Companion.pdf"
+    assert "content_id" not in attachments[1]
+    assert attachments[2]["filename"] == "Kids-room-Organization-Plan-Companion.pdf"
     html = calls[0]["html"].lower()
     assert "cid:blueprint-preview" in html
     assert html.find("blueprint") < html.find("companion")
@@ -219,9 +226,10 @@ def test_send_draft_package_not_final(monkeypatch):
     assert "not yet approved" in payload["html"].lower()
     assert "customer release held" in payload["html"].lower()
     assert "is ready" not in payload["html"].lower()
-    assert len(payload["attachments"]) == 2
-    assert "DRAFT" in payload["attachments"][0]["filename"]
-    assert payload["attachments"][0].get("content_id") == "blueprint-preview"
+    assert len(payload["attachments"]) == 3
+    assert [a.get("content_id") for a in payload["attachments"]] == ["blueprint-preview", None, None]
+    assert payload["attachments"][1]["filename"].endswith(" — Blueprint.png")
+    assert "DRAFT" in payload["attachments"][2]["filename"]
     html = payload["html"]
     low = html.lower()
     assert "cid:blueprint-preview" in low
@@ -322,21 +330,31 @@ def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
     )
     assert sent is True
     attachments = calls[0]["attachments"]
-    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None]
-    assert attachments[1]["filename"].endswith("-Room-Flow-DRAFT.png")
+    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None, None, None]
+    assert attachments[3]["filename"].endswith(" — Room Flow.png")
+    assert base64.b64decode(attachments[3]["content"]) == b"ZONEMAP"
     assert "cid:room-flow" in calls[0]["html"]
+
+
+BLUEPRINT_NAME = "Nicholas's Nursery — Blueprint.png"
+ROOM_FLOW_NAME = "Nicholas's Nursery — Room Flow.png"
 
 
 def _assert_visual_files(attachments, *, draft: bool):
     suffix = "-DRAFT" if draft else ""
     assert [a["filename"] for a in attachments] == [
-        f"Nicholas-Nursery-Blueprint{suffix}.png",
-        f"Nicholas-Nursery-Room-Flow{suffix}.png",
+        BLUEPRINT_NAME,
+        ROOM_FLOW_NAME,
+        BLUEPRINT_NAME,
+        ROOM_FLOW_NAME,
         "Organized-1.jpg",
         "Organized-2.jpg",
         f"Nicholas-Nursery-Companion{suffix}.pdf",
     ]
-    views = attachments[2:4]
+    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow"] + [None] * 5
+    assert attachments[0]["content"] == attachments[2]["content"]
+    assert attachments[1]["content"] == attachments[3]["content"]
+    views = attachments[4:6]
     for att in views:
         assert att["content_type"] == "image/jpeg"
         assert "content_id" not in att
@@ -371,11 +389,14 @@ def test_send_draft_attaches_full_size_views_and_keeps_embeds(monkeypatch):
     assert sent is True
     payload = calls[0]
     attachments = payload["attachments"]
-    assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None, None, None]
     assert attachments[-1]["filename"].endswith(".pdf")
     _assert_visual_files(attachments, draft=True)
     html = payload["html"]
     assert "cid:blueprint-preview" in html and "cid:room-flow" in html
+    assert BLUEPRINT_COPY in html and ROOM_FLOW_COPY in html
+    assert html.find(BLUEPRINT_COPY) < html.find('src="cid:blueprint-preview"')
+    assert html.find(ROOM_FLOW_COPY) < html.find('src="cid:room-flow"')
+    assert "Customer release held." in html and "Not yet approved." in html
     assert "Hi Camila." in html
     assert "Camila Sales" not in html
     assert "9dbedfba" not in payload["subject"]
@@ -402,10 +423,21 @@ def test_send_final_attaches_full_size_views_and_greets_by_first_name(monkeypatc
     customer = calls[0]
     _assert_visual_files(customer["attachments"], draft=False)
     assert customer["attachments"][-1]["content_type"] == "application/pdf"
+    assert BLUEPRINT_COPY in customer["html"] and ROOM_FLOW_COPY in customer["html"]
+    assert 'src="cid:blueprint-preview"' in customer["html"] and 'src="cid:room-flow"' in customer["html"]
     assert "Hi Camila." in customer["html"]
     assert "Camila Sales" not in customer["html"]
     assert "ready" not in customer["subject"].lower()
     assert "Nicholas's Nursery" in customer["subject"]
+
+
+def test_display_filenames_keep_the_apostrophe_and_em_dash():
+    assert BLUEPRINT_COPY == "The portrait Blueprint is shown below and attached as a full-size image."
+    assert ROOM_FLOW_COPY == "The Room Flow map is shown below and attached as a full-size image."
+    assert display_filename("Nicholas's Nursery", "Blueprint") == "Nicholas's Nursery — Blueprint.png"
+    assert display_filename("Nicholas's Nursery", "Room Flow") == "Nicholas's Nursery — Room Flow.png"
+    assert display_filename('A/B: "Den"?', "Blueprint") == "AB Den — Blueprint.png"
+    assert display_filename("", "Room Flow") == "FlowSpace — Room Flow.png"
 
 
 def test_room_flow_block_carries_the_outline_sentence():

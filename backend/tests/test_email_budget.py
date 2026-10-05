@@ -15,7 +15,10 @@ os.environ.setdefault("ADMIN_PASSWORD", "flowspace2025")
 
 import email_service  # noqa: E402
 from email_service import (  # noqa: E402
+    BLUEPRINT_COPY,
+    ROOM_FLOW_COPY,
     attachment_slug,
+    display_filename,
     email_body_html,
     encoded_message_size,
     package_attachments,
@@ -47,6 +50,7 @@ def _png(size=(64, 48)) -> bytes:
     return buf.getvalue()
 
 
+PNG_NAMES = ["Nicholas's Nursery — Blueprint.png", "Nicholas's Nursery — Room Flow.png"]
 PHOTOS = [_photo(seed=i) for i in range(2)]
 VISUALS = [{"label": "Organized-1", "bytes": PHOTOS[0]}, {"label": "Organized-2", "bytes": PHOTOS[1]}]
 
@@ -82,8 +86,8 @@ def test_views_keep_full_resolution_when_they_fit(caplog):
     with caplog.at_level(logging.WARNING, logger="email_service"):
         attachments = _package(10**9)
     assert [a["filename"] for a in attachments] == [
-        "Nicholas-Nursery-Blueprint.png",
-        "Nicholas-Nursery-Room-Flow.png",
+        *PNG_NAMES,
+        *PNG_NAMES,
         "Organized-1.jpg",
         "Organized-2.jpg",
         "Nicholas-Nursery-Companion.pdf",
@@ -101,20 +105,33 @@ def test_views_step_down_only_when_the_budget_requires_it(caplog):
     assert set(sizes) == {"Organized-1.jpg", "Organized-2.jpg"}
     assert all(max(size) <= 2400 for size in sizes.values())
     assert "stepped down" in caplog.text
-    board = next(a for a in attachments if a["filename"].endswith("Blueprint.png"))
-    assert base64.b64decode(board["content"]) == _png()
+    boards = [a for a in attachments if a["filename"] == PNG_NAMES[0]]
+    assert len(boards) == 2 and all(base64.b64decode(a["content"]) == _png() for a in boards)
 
 
 def test_views_are_dropped_last_and_the_send_still_goes(caplog):
     with caplog.at_level(logging.WARNING, logger="email_service"):
         attachments = _package(10)
     assert [a["filename"] for a in attachments] == [
-        "Nicholas-Nursery-Blueprint.png",
-        "Nicholas-Nursery-Room-Flow.png",
+        *PNG_NAMES,
+        *PNG_NAMES,
         "Nicholas-Nursery-Companion.pdf",
     ]
     assert "dropped 2 view photo attachments (Organized-1.jpg, Organized-2.jpg)" in caplog.text
     assert "sending anyway" in caplog.text
+
+
+def test_budget_counts_both_copies_of_the_board_and_room_flow():
+    board, zone_map = b"B" * 740_000, b"Z" * 180_000
+    attachments = package_attachments(
+        title=TITLE, html="", pdf_bytes=PDF, board_bytes=board, zone_map_bytes=zone_map, extra_visuals=VISUALS
+    )
+    pngs = [a for a in attachments if a["content_type"] == "image/png"]
+    assert [a["filename"] for a in pngs] == PNG_NAMES * 2
+    png_size = sum(len(a["content"]) for a in pngs)
+    assert png_size == 2 * (len(base64.b64encode(board)) + len(base64.b64encode(zone_map)))
+    assert encoded_message_size("", attachments) <= email_service.EMAIL_SIZE_BUDGET
+    assert _sizes(attachments) == {"Organized-1.jpg": (3200, 2400), "Organized-2.jpg": (3200, 2400)}
 
 
 def _capture(monkeypatch):
@@ -146,6 +163,7 @@ def test_both_sends_apply_the_budget_instead_of_failing(monkeypatch):
         names = [a["filename"] for a in payload["attachments"]]
         assert not any(name.endswith(".jpg") for name in names)
         assert names[-1].endswith(".pdf")
+        assert names[:4] == PNG_NAMES * 2
         assert "cid:blueprint-preview" in payload["html"] and "cid:room-flow" in payload["html"]
 
 
@@ -249,22 +267,28 @@ def test_send_draft_and_send_final_attach_organized_photos_but_not_befores(monke
     asyncio.run(server.send_final_package(LEAD["id"], _Request(), _=True))
     draft, final = calls[0], next(c for c in calls[1:] if c["to"] == [LEAD["email"]])
 
-    slug = attachment_slug(server._customer_title(LEAD, {"lead_id": LEAD["id"], "project_title": TITLE}))
+    title = server._customer_title(LEAD, {"lead_id": LEAD["id"], "project_title": TITLE})
+    slug = attachment_slug(title)
+    png_names = [display_filename(title, "Blueprint"), display_filename(title, "Room Flow")]
     for payload, suffix in ((draft, "-DRAFT"), (final, "")):
         attachments = payload["attachments"]
         assert [a["filename"] for a in attachments] == [
-            f"{slug}-Blueprint{suffix}.png",
-            f"{slug}-Room-Flow{suffix}.png",
+            *png_names,
+            *png_names,
             "Organized-1.jpg",
             "Organized-2.jpg",
             f"{slug}-Companion{suffix}.pdf",
         ]
-        assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None, None, None]
-        assert base64.b64decode(attachments[0]["content"]) == board
-        assert base64.b64decode(attachments[1]["content"]) == zone_map
+        assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow"] + [None] * 5
+        for inline, file, png in ((attachments[0], attachments[2], board), (attachments[1], attachments[3], zone_map)):
+            assert base64.b64decode(inline["content"]) == base64.b64decode(file["content"]) == png
+            assert "content_id" not in file
         assert base64.b64decode(attachments[-1]["content"]) == PDF
-        assert "cid:blueprint-preview" in payload["html"] and "cid:room-flow" in payload["html"]
+        html = payload["html"]
+        assert 'src="cid:blueprint-preview"' in html and 'src="cid:room-flow"' in html
+        assert BLUEPRINT_COPY in html and ROOM_FLOW_COPY in html
         for att in attachments:
+            assert not att["filename"].startswith("Before")
             assert "before" not in att["filename"].lower()
             for banned in ("SOURCE_", "AFTER_", "9dbedfba"):
                 assert banned not in att["filename"]

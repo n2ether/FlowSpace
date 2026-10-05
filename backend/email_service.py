@@ -41,6 +41,10 @@ def _first_name(customer_name: str) -> str:
     parts = str(customer_name or "").strip().split()
     return parts[0] if parts else "there"
 
+BLUEPRINT_COPY = "The portrait Blueprint is shown below and attached as a full-size image."
+ROOM_FLOW_COPY = "The Room Flow map is shown below and attached as a full-size image."
+
+
 def customer_email_html(
     customer_name: str,
     space_type: str,
@@ -65,8 +69,9 @@ def customer_email_html(
         outline = f" {outline_note.strip()}" if outline_note.strip() else ""
         room_flow = f"""
               <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Room flow</p>
+              <p style="margin:0 0 12px;font-size:16px;color:#475569;line-height:1.6;">{ROOM_FLOW_COPY}</p>
               <img src="{room_flow_src}" alt="{space} room flow map" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
-              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The zone map — each zone has one job, with a clear path through the room.{outline}</p>
+              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">Each zone has one job, with a clear path through the room.{outline}</p>
         """
     if preview_src:
         guide_link = ""
@@ -79,8 +84,8 @@ def customer_email_html(
         preview = f"""
               <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Your Blueprint</p>
               <p style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#1F3D2C;font-weight:600;">{space}</p>
-              <img src="{preview_src}" alt="{space} Blueprint" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
-              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The portrait plan — hero, what changed, and how the room flows. The same image is attached.</p>
+              <p style="margin:0 0 12px;font-size:16px;color:#475569;line-height:1.6;">{BLUEPRINT_COPY}</p>
+              <img src="{preview_src}" alt="{space} Blueprint" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 28px;border:0;">
               {room_flow}
               <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Companion guide</p>
               {guide_link}
@@ -178,6 +183,17 @@ def attachment_slug(title: str) -> str:
     return "-".join(words) or "Blueprint"
 
 
+def display_filename(title: str, kind: str) -> str:
+    """``Nicholas's Nursery`` + ``Blueprint`` -> ``Nicholas's Nursery — Blueprint.png``.
+
+    Apostrophes and the em dash stay (Resend encodes non-ASCII filenames);
+    only characters no filesystem accepts are removed.
+    """
+    text = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", title or "")
+    text = re.sub(r"\s+", " ", text).strip() or "FlowSpace"
+    return f"{text} — {kind}.png"
+
+
 def _attachment(filename: str, data: bytes, content_type: str, content_id: str = "") -> dict:
     att = {
         "filename": filename,
@@ -225,6 +241,10 @@ def package_attachments(
 ) -> List[dict]:
     """Board and zone map (PNG, full size), view photos (JPEG), then the companion PDF.
 
+    The board and zone map go out twice: once inline (``content_id``) so the
+    body shows them, and once as a plain attachment so mobile Gmail and Apple
+    Mail list a downloadable tile. Mail clients do not list inline parts.
+
     View photos are the only part that bends to the size budget: quality and
     long edge step down, and as a last resort they are left out (they are
     still in the email body and the PDF). Size never fails a send.
@@ -232,11 +252,17 @@ def package_attachments(
     budget = EMAIL_SIZE_BUDGET if budget is None else budget
     slug = attachment_slug(title)
     suffix = "-DRAFT" if draft else ""
-    head: List[dict] = []
+    inline: List[dict] = []
+    files: List[dict] = []
     if board_bytes:
-        head.append(_attachment(f"{slug}-Blueprint{suffix}.png", board_bytes, "image/png", "blueprint-preview"))
+        pngs = [("Blueprint", board_bytes, "blueprint-preview")]
         if zone_map_bytes:
-            head.append(_attachment(f"{slug}-Room-Flow{suffix}.png", zone_map_bytes, "image/png", "room-flow"))
+            pngs.append(("Room Flow", zone_map_bytes, "room-flow"))
+        for kind, data, cid in pngs:
+            name = display_filename(title, kind)
+            inline.append(_attachment(name, data, "image/png", cid))
+            files.append(_attachment(name, data, "image/png"))
+    head = inline + files
     pdf = _attachment(f"{slug}-Companion{suffix}.pdf", pdf_bytes, "application/pdf")
     base = head + [pdf]
     sources = _view_sources(extra_visuals)
