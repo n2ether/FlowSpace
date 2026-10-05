@@ -737,10 +737,14 @@ def _draw_window(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float)
             draw.line((x, box[1] + 1.5 * u, x, box[3] - 1.5 * u), fill=WALL, width=max(1, int(1.2 * u)))
 
 
-def _draw_dimensions(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, min_px: float) -> None:
+def _draw_dimensions(
+    base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, min_px: float
+) -> List[Tuple[float, float, float, float]]:
+    """Wall-length labels outside the outline. Returns each label's painted box."""
     outline = flow["outline"]
     draw = ImageDraw.Draw(base)
     face = font("sans-medium", max(7.5 * u, min_px))
+    boxes: List[Tuple[float, float, float, float]] = []
     for index in range(len(outline)):
         text = _wall_label(flow, index)
         if not text:
@@ -752,14 +756,36 @@ def _draw_dimensions(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: fl
         vertical = abs(b[0] - a[0]) < abs(b[1] - a[1]) * 0.5
         offset = 18 * u if horizontal else 16 * u
         cx, cy = mid[0] + nx * offset, mid[1] + ny * offset
+        tracking = 0.9 * u if horizontal else 0.6 * u
+        half_w = _spaced_width(draw, text, face, tracking) / 2
+        half_h = face.size * 0.75
         if horizontal:
-            spaced_text(draw, (cx, cy - face.size / 2), text, face, MUTED, 0.9 * u, anchor="m")
+            spaced_text(draw, (cx, cy - face.size / 2), text, face, MUTED, tracking, anchor="m")
+            boxes.append((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
         elif vertical:
             angle = 90 if nx < 0 else -90
-            _rotated_text(base, (cx, cy), text, face, MUTED, angle, 0.6 * u)
+            _rotated_text(base, (cx, cy), text, face, MUTED, angle, tracking)
             draw = ImageDraw.Draw(base)
+            boxes.append((cx - half_h, cy - half_w, cx + half_h, cy + half_w))
         else:
-            spaced_text(draw, (cx, cy - face.size / 2), text, face, MUTED, 0.6 * u, anchor="m")
+            spaced_text(draw, (cx, cy - face.size / 2), text, face, MUTED, tracking, anchor="m")
+            boxes.append((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
+    return boxes
+
+
+def _label_safe_box(
+    box: Tuple[float, float, float, float], flow: Dict[str, Any], u: float, min_px: float
+) -> Tuple[float, float, float, float]:
+    """Shrink ``box`` so wall labels drawn outside the outline still land inside it."""
+    if not wall_labels(flow):
+        return box
+    size = max(7.5 * u, min_px)
+    pad_y = 18 * u + size * 0.75 + 4
+    pad_x = 16 * u + size * 0.75 + 4
+    x0, y0, x1, y1 = box
+    if x1 - x0 <= 2 * pad_x + 40 or y1 - y0 <= 2 * pad_y + 40:
+        return box
+    return (x0 + pad_x, y0 + pad_y, x1 - pad_x, y1 - pad_y)
 
 
 def _label_block(draw, center_x: float, top: float, lines: Sequence[Tuple[str, Any, Tuple[int, int, int], float]]) -> None:
@@ -830,17 +856,22 @@ def draw_floor_plan(
     *,
     compact: bool = False,
     min_px: float = 0.0,
+    contain_labels: bool = False,
 ) -> Dict[str, Any]:
     """Top-down map of ``flow`` fitted inside ``box``. Returns the fitted geometry.
 
     ``base`` must be RGBA. ``compact`` drops the zone sub-labels for small cards.
+    ``contain_labels`` keeps the wall-length labels inside ``box`` too, for a
+    card where other content sits right outside it.
     """
     outline = flow.get("outline") or []
     if len(outline) < 3:
         return {}
-    mp = _Mapper(outline, box)
     # Strokes and type are in reference pixels; the reference map box is 327 x 337.
     unit = max(0.6, min((box[2] - box[0]) / 327.0, (box[3] - box[1]) / 337.0))
+    if contain_labels:
+        box = _label_safe_box(box, flow, unit, min_px)
+    mp = _Mapper(outline, box)
     poly = [mp.pt(*p) for p in outline]
     ImageDraw.Draw(base).polygon(poly, fill=FLOOR)
     zones = list(flow.get("zones") or [])
@@ -862,8 +893,13 @@ def draw_floor_plan(
     _draw_window(base, mp, flow, unit)
     _draw_door(base, mp, flow, unit)
     _draw_labels(base, mp, flow, unit, compact, min_px)
-    _draw_dimensions(base, mp, flow, unit, min_px)
-    return {"room": tuple(int(v) for v in (min(p[0] for p in poly), min(p[1] for p in poly), max(p[0] for p in poly), max(p[1] for p in poly))), "polygon": poly, "unit": unit}
+    label_boxes = _draw_dimensions(base, mp, flow, unit, min_px)
+    return {
+        "room": tuple(int(v) for v in (min(p[0] for p in poly), min(p[1] for p in poly), max(p[0] for p in poly), max(p[1] for p in poly))),
+        "polygon": poly,
+        "unit": unit,
+        "label_boxes": label_boxes,
+    }
 
 
 # ──────────────────────────── Page ─────────────────────────────
