@@ -22,6 +22,11 @@ FIXTURE = BACKEND / "fixtures" / "nursery_nico.json"
 GARAGE = BACKEND / "fixtures" / "bakeoff" / "garage_org_space.json"
 LEAD_ID = "9dbedfba-81fc-45e0-b99d-36e0a1de01bb"
 FOUR_VIEWS = {"source_pairs": [{"label": f"SOURCE_0{i}"} for i in range(1, 5)]}
+CAMILA_WHY = (
+    "FlowSpace gives each part of the room a clear job\u2014sleep, change, comfort, or play + storage. "
+    "With an open path and a simple home for everyday items, daily routines require fewer decisions, "
+    "resets happen faster, and the room becomes calmer and easier to use."
+)
 
 
 def _load(path=FIXTURE):
@@ -116,7 +121,7 @@ def test_map_carries_camilas_facts(monkeypatch):
         "Less visual noise.",
         "Fewer decisions.",
         "Easier resets.",
-        "03 WHY THIS HELPS",
+        "03 WHY THE FLOWSPACE ZONE APPROACH HELPS",
         "DRAFT CONCEPT FOR REVIEW",
     ):
         assert text in glyphs, text
@@ -124,7 +129,9 @@ def test_map_carries_camilas_facts(monkeypatch):
     assert "DOOR" not in glyphs
     spec = zone_map_spec(lead, deliverable, FOUR_VIEWS)
     assert spec["flow_note"] == "A clear route supports calmer bedtime transitions for both parent and child."
-    assert spec["why_headline"] == "The room becomes easier to read, easier to reset, and easier to live in."
+    assert spec["why_heading"] == "WHY THE FLOWSPACE ZONE APPROACH HELPS"
+    assert spec["why_body"] == CAMILA_WHY
+    assert "easier to live in" not in zone_map_text(spec)
     jobs = {z["title"]: z["job"] for z in spec["zones"]}
     assert jobs["Sleep"] == "Crib as the quiet anchor of the room."
     assert jobs["Change"] == "Everyday care kept within easy reach."
@@ -206,3 +213,93 @@ def test_outline_caption_matches_the_board_for_both_sources():
     assert outline_caption({"id": "no-outline-0000", "space_type": "closet"}, {}) == (
         "Approximate room outline. Furniture footprints and zones are approximate."
     )
+
+
+def _map_geometry(flow):
+    from room_flow import _s, draw_floor_plan
+
+    base = Image.new("RGBA", (1434, 2048), (247, 241, 232, 255))
+    return draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), flow, markers=True), base
+
+
+def _overlaps(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_map_markers_sit_in_their_zones_clear_of_labels_and_dimensions():
+    from room_flow import _Mapper, _in_zone
+
+    lead, deliverable = _load()
+    flow = resolve_room_flow(lead, deliverable)
+    geo, _base = _map_geometry(flow)
+    markers = geo["markers"]
+    assert [m["number"] for m in markers] == ["01", "02", "03", "04"]
+    assert [m["zone"] for m in markers] == ["sleep", "change", "comfort", "play"]
+    from room_flow import _s
+
+    mp = _Mapper(flow["outline"], (_s(118), _s(300), _s(445), _s(637)))
+    zones = {z["id"]: z for z in flow["zones"]}
+    for marker in markers:
+        x0, y0, x1, y1 = marker["box"]
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        # Small: about the size of the zones-column circle, never a blob.
+        assert 30 <= x1 - x0 <= 46
+        assert _in_zone(zones[marker["zone"]], mp, cx, cy)
+        for box in geo["text_boxes"] + geo["label_boxes"]:
+            assert not _overlaps(marker["box"], box), (marker["number"], box)
+    for i, a in enumerate(markers):
+        for b in markers[i + 1:]:
+            assert not _overlaps(a["box"], b["box"])
+
+
+def test_map_markers_use_the_zones_column_colours(monkeypatch):
+    from room_flow import ZONE_STYLES
+
+    lead, deliverable = _load()
+    flow = resolve_room_flow(lead, deliverable)
+    geo, base = _map_geometry(flow)
+    rgb = base.convert("RGB")
+    for marker in geo["markers"]:
+        x0, y0, x1, y1 = marker["box"]
+        style = ZONE_STYLES[marker["zone"]]
+        # Ring pixel on the left edge and fill pixel just inside it.
+        mid = int(round((y0 + y1) / 2))
+        edge = [rgb.getpixel((x, mid)) for x in range(int(x0) - 1, int(x0) + 4)]
+        fill = rgb.getpixel((int(round(x0 + 6)), mid))
+        assert style["ring"] in edge, (marker["number"], edge)
+        assert fill == style["fill"], (marker["number"], fill)
+
+
+def test_zone_map_paints_each_number_in_the_column_and_on_the_map(monkeypatch):
+    lead, deliverable = _load()
+    _png, _glyphs, lines = _drawn(monkeypatch, lead=lead, deliverable=deliverable, images=FOUR_VIEWS)
+    drawn = lines.split("\n")
+    for number in ("01", "02", "03", "04"):
+        assert drawn.count(number) == 2, number
+    assert "DOOR" not in drawn
+
+
+def test_board_card_keeps_its_plan_without_map_markers():
+    from image_board import board_spec
+
+    lead, deliverable = _load()
+    spec = board_spec(lead, deliverable, {})
+    assert spec["topdown"]["measured_outline"] is True
+
+
+def test_why_copy_is_one_string_for_map_and_guide():
+    from blueprint_consistency import companion_sections
+
+    lead, deliverable = _load()
+    spec = zone_map_spec(lead, deliverable, FOUR_VIEWS)
+    sections, _doc = companion_sections(lead, deliverable)
+    assert sections["why"] == spec["why_body"] == CAMILA_WHY
+
+
+def test_why_copy_names_the_default_zones_for_other_projects():
+    lead, deliverable = _load(GARAGE)
+    spec = zone_map_spec(lead, deliverable)
+    titles = [z["title"].lower() for z in spec["zones"]]
+    assert spec["why_body"].startswith("FlowSpace gives each part of the room a clear job\u2014")
+    assert titles[-1] in spec["why_body"]
+    assert ", or " in spec["why_body"] or " or " in spec["why_body"]
