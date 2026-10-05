@@ -30,6 +30,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor, Color
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -489,6 +490,54 @@ def _fit_image(
         return _placeholder(width, height, "Image unavailable")
 
 
+PDF_PHOTO_DPI = 200
+PDF_PHOTO_JPEG_QUALITY = 85
+# Phone pages print on letter paper scaled up by this much; photos hold PDF_PHOTO_DPI there.
+LETTER_PRINT_SCALE = max(1.0, min(PAGE_W / PHONE_W, PAGE_H / PHONE_H))
+
+
+def _is_graphic(img: PILImage.Image) -> bool:
+    """Flat-color art (zone map, board) keeps lossless PNG; photos go to JPEG."""
+    probe = img.convert("RGB")
+    probe.thumbnail((256, 256), PILImage.NEAREST)
+    return probe.getcolors(maxcolors=2048) is not None
+
+
+def pdf_photo_bytes(data: bytes, draw_w_pt: float, draw_h_pt: float, *, dpi: int = PDF_PHOTO_DPI) -> bytes:
+    """Bytes to embed for a photo drawn at ``draw_w_pt`` × ``draw_h_pt`` points.
+
+    Resampled to ``dpi`` at its letter-print size (never upscaled). Photos become
+    JPEG; flat graphics and images with real transparency stay PNG. Returns the
+    original bytes when re-encoding would not make them smaller.
+    """
+    try:
+        img = PILImage.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        return data
+    iw, ih = img.size
+    target = max(draw_w_pt / iw, draw_h_pt / ih) * LETTER_PRINT_SCALE * dpi / 72.0
+    scale = min(1.0, target)
+    size = (max(1, round(iw * scale)), max(1, round(ih * scale)))
+    alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+    if alpha:
+        rgba = img.convert("RGBA")
+        alpha = rgba.getchannel("A").getextrema()[0] < 255
+    buf = io.BytesIO()
+    if alpha or _is_graphic(img):
+        out = img.convert("RGBA" if alpha else "RGB")
+        if scale < 1.0:
+            out = out.resize(size, PILImage.LANCZOS)
+        out.save(buf, format="PNG", optimize=True)
+    else:
+        out = img.convert("RGB")
+        if scale < 1.0:
+            out = out.resize(size, PILImage.LANCZOS)
+        out.save(buf, format="JPEG", quality=PDF_PHOTO_JPEG_QUALITY, optimize=True)
+    encoded = buf.getvalue()
+    return encoded if len(encoded) < len(data) else data
+
+
 class ClippedPhoto(Flowable):
     """Draw a photo inside a box. The default contains the full frame."""
 
@@ -498,11 +547,13 @@ class ClippedPhoto(Flowable):
         self.width = width
         self.height = max(height, 24)
         self.fill = fill
-        self._ir = ImageReader(io.BytesIO(data))
-        iw, ih = self._ir.getSize()
+        iw, ih = ImageReader(io.BytesIO(data)).getSize()
         if iw <= 0 or ih <= 0:
             raise ValueError("empty")
+        # Geometry uses the source pixel size; only the embedded bytes are resampled.
         self._iw, self._ih = iw, ih
+        dw, dh = self.placed_size()
+        self._ir = ImageReader(io.BytesIO(pdf_photo_bytes(data, dw, dh)))
 
     def placed_size(self) -> Tuple[float, float]:
         """Pixel size of the drawn image. Contain stays inside the box."""

@@ -119,8 +119,17 @@ def upright_bytes(data: Optional[bytes]) -> Optional[bytes]:
         return data
 
 
-def upright_png_bytes(data: Optional[bytes]) -> Optional[bytes]:
-    """Gravity-correct and re-encode as PNG (metadata stripped). None if undecodable."""
+def upright_jpeg_bytes(
+    data: Optional[bytes],
+    *,
+    quality: int = 88,
+    max_edge: Optional[int] = None,
+) -> Optional[bytes]:
+    """Gravity-correct and re-encode as JPEG with EXIF stripped. None if undecodable.
+
+    Full resolution unless ``max_edge`` is set and the long edge exceeds it.
+    The ICC profile is kept so colors match the original.
+    """
     if not data:
         return None
     try:
@@ -128,12 +137,16 @@ def upright_png_bytes(data: Optional[bytes]) -> Optional[bytes]:
         img.load()
     except (UnidentifiedImageError, OSError, ValueError):
         return None
-    upright = ImageOps.exif_transpose(img) or img
-    if upright.mode not in ("RGB", "RGBA"):
-        has_alpha = upright.mode in ("LA", "PA") or "transparency" in upright.info
-        upright = upright.convert("RGBA" if has_alpha else "RGB")
+    icc = img.info.get("icc_profile")
+    rgb = _to_rgb(ImageOps.exif_transpose(img) or img)
+    if max_edge and max(rgb.size) > max_edge:
+        rgb = rgb.copy()
+        rgb.thumbnail((max_edge, max_edge), Image.LANCZOS)
     buf = io.BytesIO()
-    upright.save(buf, format="PNG", optimize=True)
+    options: Dict[str, Any] = {"format": "JPEG", "quality": quality, "optimize": True, "progressive": True}
+    if icc:
+        options["icc_profile"] = icc
+    rgb.save(buf, **options)
     return buf.getvalue()
 
 
