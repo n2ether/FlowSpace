@@ -120,6 +120,8 @@ def test_map_carries_camilas_facts(monkeypatch):
         "DRAFT CONCEPT FOR REVIEW",
     ):
         assert text in glyphs, text
+    # Camila's sheet marks the door with the diagonal opening only, no label.
+    assert "DOOR" not in glyphs
     spec = zone_map_spec(lead, deliverable, FOUR_VIEWS)
     assert spec["flow_note"] == "A clear route supports calmer bedtime transitions for both parent and child."
     assert spec["why_headline"] == "The room becomes easier to read, easier to reset, and easier to live in."

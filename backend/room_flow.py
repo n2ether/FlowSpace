@@ -390,7 +390,6 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         spec["source_rule"],
         spec["footer_status"],
         "CLEAR PATH",
-        "DOOR",
     ]
     for zone in spec["zones"]:
         parts += [str(zone.get("number") or ""), str(zone.get("title") or "").upper(), str(zone.get("job") or "")]
@@ -704,7 +703,7 @@ def _draw_walls(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float) 
         draw.ellipse((x - r, y - r, x + r, y + r), fill=WALL)
 
 
-def _draw_door(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, *, label: bool = True) -> None:
+def _draw_door(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float) -> None:
     door = flow.get("door") or {}
     if door.get("wall") is None:
         return
@@ -719,12 +718,6 @@ def _draw_door(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, *
     # Swing marks at both jambs, as in the reference: one into the room, one outside.
     _dashed(draw, [pb, (pb[0] - nx * leaf * 0.42, pb[1] - ny * leaf * 0.42)], DOOR, mark_w, 3.5 * u, 3 * u)
     _dashed(draw, [pa, (pa[0] + nx * leaf * 0.32, pa[1] + ny * leaf * 0.32)], DOOR, mark_w, 3.5 * u, 3 * u)
-    if label:
-        face = font("sans-semibold", max(7 * u, 11))
-        half_w = _spaced_width(draw, "DOOR", face, 0.6 * u) / 2
-        reach = 8 * u + abs(nx) * half_w + abs(ny) * face.size * 0.6
-        mid = ((pa[0] + pb[0]) / 2 + nx * reach, (pa[1] + pb[1]) / 2 + ny * reach)
-        spaced_text(draw, (mid[0], mid[1] - face.size / 2), "DOOR", face, DOOR, 0.6 * u, anchor="m")
 
 
 def _draw_window(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float) -> None:

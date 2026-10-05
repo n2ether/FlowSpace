@@ -1451,7 +1451,6 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
     topdown = spec.get("topdown") or {}
     parts.append(str(topdown.get("board_caption") or ""))
     parts.append(str(topdown.get("window") or ""))
-    parts.append(str(topdown.get("door") or ""))
     parts.append(str(topdown.get("circulation") or ""))
     parts.append("MEASURED OUTLINE" if topdown.get("measured_outline") else "APPROXIMATE")
     for place in topdown.get("places") or []:
