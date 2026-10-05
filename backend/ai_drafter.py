@@ -91,7 +91,7 @@ Hard rules:
 - Ceiling fans, lights, vents, and fixtures stay on the ceiling. Do not relocate them onto walls.
 - Treat the attached photo as gravity-correct: floor at the bottom, ceiling at the top. Do not describe the room as rotated.
 - Wall paint is OPTIONAL and OFF by default. Default wall_color_name to "Keep existing / no paint change", wall_color_code "", wall_color_hex "", wall_color_note "No paint change — keep the existing wall color from the photo." Only fill a real paint color if the customer explicitly asked to paint or change wall color. Do not invent optional Warm Taupe / accent-wall colors that imply a makeover. Color preferences describe textiles and accessories only, never walls. Never put "paint the walls" in action_plan. The visual transform will not apply paint unless they asked.
-- notes must mention ~95% window/dimension accuracy and that wall paint stays as photographed unless the customer asked.
+- notes must say windows and room proportions follow the customer's photos and that wall paint stays as photographed unless the customer asked.
 
 Brain-layer rules:
 - Observation: only what the photo/answers show. Name possessions. No invented dims.
@@ -620,7 +620,7 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
         "benefits": as_str_list(plan.get("benefits")),
         "notes": as_str(plan.get("notes"))
         or (
-            "Windows and room proportions stay ~95% true to your photo. "
+            "Windows and room proportions follow your photos. "
             "Wall paint stays as photographed — no paint change unless you asked."
         ),
         "summary": as_str(plan.get("summary")),

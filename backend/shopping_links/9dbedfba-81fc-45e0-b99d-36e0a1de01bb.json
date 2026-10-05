@@ -1,0 +1,108 @@
+{
+  "lead_id": "9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+  "verified_at": "2026-10-05",
+  "list_total_note": "Guide prices kept at $240; live retailer HTML did not expose stable prices to bots.",
+  "items": [
+    {
+      "name": "Furniture anti-tip kit (2-pack, dresser + shelves)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/qdos-zero-screw-furniture-anti-tip-kit-white-2pk/-/A-82320730",
+      "link_type": "product",
+      "label": "Qdos anti-tip kit at Target",
+      "price": 18,
+      "qty": 1,
+      "verified": "curl 200 + title match (Qdos Zero-Screw Furniture Anti-Tip Kit White 2pk)"
+    },
+    {
+      "name": "Thermal blackout curtain panel (single, 52×84 in., warm taupe or oatmeal linen-look)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/lenox-serene-blackout-single-window-curtain-panel-taupe-52-w-x-84-l/-/A-1012628480",
+      "link_type": "product",
+      "label": "Lenox Serene panel at Target",
+      "price": 30,
+      "qty": 2,
+      "verified": "curl 200 + title match (Lenox Serene Blackout Single Window Curtain Panel Taupe 52x84)"
+    },
+    {
+      "name": "Adhesive window insulation film kit (reduces drafts, clear)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/3m-5pk-indoor-window-insulator-kit/-/A-94632174",
+      "link_type": "product",
+      "label": "3M window insulator kit at Target",
+      "price": 15,
+      "qty": 1,
+      "verified": "curl 200 + title match (3M 5pk Indoor Window Insulator Kit)"
+    },
+    {
+      "name": "Draft stopper for door (fabric tube, earth tone)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/evideco-french-home-goods-taupe-draft-stopper-32/-/A-1010599541",
+      "link_type": "product",
+      "label": "Evideco taupe draft stopper at Target",
+      "price": 12,
+      "qty": 1,
+      "verified": "curl 200 + title match (Evideco Taupe Draft Stopper 32)"
+    },
+    {
+      "name": "Wall-mounted nursery organizer caddy (steel or wood, for changing supplies)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/baby-diaper-caddy-and-nursery-organizer-for-baby-39-s-essentials/-/A-94794473",
+      "link_type": "product",
+      "label": "Nursery organizer caddy at Target",
+      "price": 22,
+      "qty": 1,
+      "verified": "curl 200 + title match (Baby Diaper Caddy and Nursery Organizer)"
+    },
+    {
+      "name": "Cordless rechargeable LED night-light (dimmable, warm white)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/ihome-magnetic-rechargeable-motion-sensor-night-light-auto-sensing-cordless-2-modes-mounts-anywhere/-/A-1010867043",
+      "link_type": "product",
+      "label": "iHome cordless night light at Target",
+      "price": 16,
+      "qty": 1,
+      "verified": "curl 200 + title match (iHome Magnetic Rechargeable Motion Sensor Night Light)"
+    },
+    {
+      "name": "Digital room thermometer with humidity monitor (no cords near crib)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/thermopro-tp49w-mini-hygrometer-thermometer-with-large-digital-view-indoor-thermometer-humidity-gauge-monitor-for-greenhouse-cellar-in-white/-/A-80783749",
+      "link_type": "product",
+      "label": "TempPro TP49 thermometer at Target",
+      "price": 14,
+      "qty": 1,
+      "verified": "curl 200 + title match (TempPro TP49 Mini Hygrometer Thermometer)"
+    },
+    {
+      "name": "Felt wall decor — moon or planet accent (warm gray or terra cotta, lightweight, 8–10 in.)",
+      "retailer": "Target",
+      "url": "https://www.target.com/s?searchTerm=felt%20moon%20planet%20wall%20decor",
+      "link_type": "search",
+      "label": "Search at Target",
+      "search_term": "felt moon planet wall decor",
+      "price": 10,
+      "qty": 2,
+      "verified": "curl 200 on Target search results; no reliable direct felt moon/planet 8-10in product page found"
+    },
+    {
+      "name": "Low-profile woven storage basket with handles (natural jute or seagrass, 12×12 in., for rotating toys)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/household-essentials-natural-seagrass-basket-with-handles-natural-woven-wicker-storage-basket-great-for-decoration-or-organization/-/A-1011210373",
+      "link_type": "product",
+      "label": "Seagrass basket at Target",
+      "price": 18,
+      "qty": 1,
+      "verified": "curl 200 + title match (Household Essentials Natural Seagrass Basket with Handles)"
+    },
+    {
+      "name": "Soft cotton area rug or rug pad (non-slip, earth tone, 4×6 ft, optional layering under existing rug)",
+      "retailer": "Target",
+      "url": "https://www.target.com/p/nuloom-deepika-contemporary-abstract-cotton-area-rug-4-x-6-beige/-/A-93015688",
+      "link_type": "product",
+      "label": "nuLOOM Deepika 4x6 rug at Target",
+      "price": 45,
+      "qty": 1,
+      "verified": "curl 200 + title match (Nuloom Deepika Contemporary Abstract Cotton Indoor Area Rug 4x6 Beige)"
+    }
+  ]
+}

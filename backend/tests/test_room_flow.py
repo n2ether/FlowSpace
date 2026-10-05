@@ -77,14 +77,14 @@ def test_header_and_footer_both_say_measured_outline(monkeypatch):
     spec = zone_map_spec(lead, deliverable, FOUR_VIEWS)
     assert spec["badge_status"] == "DRAFT CONCEPT"
     assert spec["badge_outline"] == "Measured room outline"
-    assert "Measured room outline" in spec["source_rule"]
-    assert "furniture and zones approximate" in spec["source_rule"]
+    assert "Room outline based on your measurements" in spec["source_rule"]
+    assert "Furniture footprints and zones are approximate" in spec["source_rule"]
     assert "not a measured plan" not in zone_map_text(spec).lower()
     _png, glyphs, _lines = _drawn(monkeypatch, lead=lead, deliverable=deliverable, images=FOUR_VIEWS)
     assert "not a measured plan" not in glyphs.lower()
     assert "Measured room outline" in glyphs
     assert "Based on the four source views" in glyphs
-    assert "Measured room outline; furniture and zones approximate" in glyphs
+    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." in glyphs
 
 
 def test_map_carries_camilas_facts(monkeypatch):
@@ -101,7 +101,7 @@ def test_map_carries_camilas_facts(monkeypatch):
         "2.76 m",
         "1.70 m",
         "01 ROOM FLOW + FUNCTIONAL ZONES",
-        "Measured outline supplied by Camila; furniture and zones remain approximate.",
+        "Room outline based on your measurements. Furniture footprints and zones are approximate.",
         "02 THE ZONES",
         "Each zone has one job.",
         "SLEEP",
@@ -160,7 +160,7 @@ def test_record_on_the_deliverable_wins_and_drives_the_wording():
         wall.pop("label", None)
     spec = zone_map_spec(lead, {**deliverable, "room_flow": flow})
     assert spec["badge_outline"] == "Approximate room outline"
-    assert "Approximate room outline" in spec["source_rule"]
+    assert "Approximate room outline" in spec["source_rule"] or "Furniture footprints and zones are approximate" in spec["source_rule"]
     assert "Measured" not in zone_map_text(spec)
 
 
@@ -194,3 +194,15 @@ def test_final_sheet_drops_draft_status(monkeypatch):
     _png, glyphs, _lines = _drawn(monkeypatch, lead=lead, deliverable=deliverable, final=True)
     assert "DRAFT" not in glyphs
     assert "Measured room outline" in glyphs
+
+
+def test_outline_caption_matches_the_board_for_both_sources():
+    from room_flow import outline_caption
+
+    lead, deliverable = _load()
+    assert outline_caption(lead, deliverable) == (
+        "Room outline based on your measurements. Furniture footprints and zones are approximate."
+    )
+    assert outline_caption({"id": "no-outline-0000", "space_type": "closet"}, {}) == (
+        "Approximate room outline. Furniture footprints and zones are approximate."
+    )

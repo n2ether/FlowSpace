@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import copy
 import re
-from typing import Any, Dict, List, Tuple
-from urllib.parse import quote_plus
+from typing import Any, Dict, List, Optional, Tuple
 
 from blueprint_layers import BUDGET_LABELS
 from space_rails import NURSERY_DO_NOT, is_nursery_space, mentions_six_drawer
@@ -628,32 +627,21 @@ def prepare_deliverable(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     return out
 
 
-def search_links(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Prefer admin-curated links. Otherwise a retailer search, not an invented SKU."""
-    provided = []
-    for link in deliverable.get("shopping_links") or []:
-        if not isinstance(link, dict):
-            continue
-        name = str(link.get("name") or link.get("url") or "").strip()
-        url = str(link.get("url") or "").strip()
-        if name or url:
-            provided.append({"name": name or url, "url": url})
-    if provided:
-        return provided
-    links = []
-    for item in deliverable.get("shopping_list") or []:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        if not name:
-            continue
-        links.append(
-            {
-                "name": name,
-                "url": f"https://www.target.com/s?searchTerm={quote_plus(name)}",
-            }
-        )
-    return links
+
+def _links_are_search(links: List[Dict[str, str]]) -> bool:
+    from shopping_links import links_are_search_only
+
+    return links_are_search_only(links)
+
+
+def search_links(
+    deliverable: Dict[str, Any],
+    lead: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """Prefer per-lead curated product pages, then deliverable links, then short searches."""
+    from shopping_links import resolve_shopping_links
+
+    return resolve_shopping_links(lead, deliverable)
 
 
 def _warning_markers(text: str) -> List[str]:
@@ -864,6 +852,7 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
     )
     removed = _REMOVED_NOTE if _REMOVED_NOTE in str(doc.get("notes") or "") else ""
     reset_title, reset_body = nightly_instruction(lead, doc)
+    shop_links = search_links(doc, lead)
     sections = {
         "intro": intro,
         "needs": needs,
@@ -876,10 +865,8 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "list_total": doc.get("budget_display") or "—",
         "stated_budget": doc.get("stated_budget") or "",
         "budget_note": str(doc.get("budget_note") or ""),
-        "links": search_links(doc),
-        "links_are_search": not any(
-            isinstance(link, dict) and link.get("url") for link in (deliverable or {}).get("shopping_links") or []
-        ),
+        "links": shop_links,
+        "links_are_search": _links_are_search(shop_links),
         "removed_note": removed,
         "notes": str(doc.get("notes") or "").strip(),
         "safety_essentials": safety_essentials(lead, doc),

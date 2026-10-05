@@ -328,7 +328,7 @@ def test_room_flow_card_is_the_measured_zone_map():
     assert topdown["drawing"] == "zone_map"
     assert topdown["measured_outline"] is True
     assert topdown["approximate"] is True
-    assert topdown["board_caption"] == "Measured room outline. Furniture and zones approximate."
+    assert topdown["board_caption"] == "Room outline based on your measurements. Furniture footprints and zones are approximate."
     assert "not a measured" not in topdown["caption"].lower()
     assert [item["name"] for item in topdown["legend"]] == ["Sleep", "Change", "Comfort", "Play + Storage"]
     assert {"DRESSER", "CRIB", "ROCKER", "RUG + BASKET"} <= set(topdown["furniture"])
@@ -411,7 +411,7 @@ def test_board_paints_zones_title_and_shopping_lines(monkeypatch):
     assert "Nicholas's Nursery" in blob
     assert "Camila's Kids" not in blob
     assert "Change" in blob
-    assert "Measured room outline. Furniture and zones approximate." in blob
+    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." in blob
     assert "Not measured" not in blob
     assert "Play/Storage" not in blob
     assert "SHOPPING" in blob
