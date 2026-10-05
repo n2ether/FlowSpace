@@ -49,15 +49,24 @@ def customer_email_html(
     project_title: str = "",
     preview_src: str = "",
     guide_href: str = "",
+    room_flow_src: str = "",
 ) -> str:
     """Customer email layout a final send uses.
 
-    The Blueprint preview is the first block in the body. The companion
-    guide follows it. No review codes, no package status.
-    ``preview_src`` is ``cid:blueprint-preview`` on a real send, or a
-    browser-readable URL or data URI when rendering the same layout locally.
+    The Blueprint preview is the first block in the body, then the room-flow
+    zone map when one is attached. The companion guide follows. No review
+    codes, no package status. ``preview_src`` / ``room_flow_src`` are
+    ``cid:`` references on a real send, or a browser-readable URL or data URI
+    when rendering the same layout locally.
     """
     space = (project_title or plan_title(space_type)).strip() or plan_title(space_type)
+    room_flow = ""
+    if room_flow_src:
+        room_flow = f"""
+              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Room flow</p>
+              <img src="{room_flow_src}" alt="{space} room flow map" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
+              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The zone map — each zone has one job, with a clear path through the room.</p>
+        """
     if preview_src:
         guide_link = ""
         if guide_href:
@@ -71,9 +80,10 @@ def customer_email_html(
               <p style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#1F3D2C;font-weight:600;">{space}</p>
               <img src="{preview_src}" alt="{space} Blueprint" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
               <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">The portrait plan — hero, what changed, and how the room flows. The same image is attached.</p>
+              {room_flow}
               <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Companion guide</p>
               {guide_link}
-              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">Next, open the attached companion guide on your phone for the steps, shopping list, safety, climate, and weekly reset.</p>
+              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">Next, open the attached companion guide on your phone for safety essentials, climate comfort, why it helps, the shopping list, and each before and after.</p>
         """
     else:
         preview = f"""
@@ -147,6 +157,15 @@ def customer_email_html(
 """
 
 
+def _zone_map_attachment(filename: str, png: bytes) -> dict:
+    return {
+        "filename": filename,
+        "content": base64.b64encode(png).decode("utf-8"),
+        "content_type": "image/png",
+        "content_id": "room-flow",
+    }
+
+
 def _customer_html(
     customer_name: str,
     space_type: str,
@@ -154,12 +173,14 @@ def _customer_html(
     two_files: bool,
     project_title: str = "",
     preview_src: str = "cid:blueprint-preview",
+    room_flow_src: str = "",
 ) -> str:
     return customer_email_html(
         customer_name,
         space_type,
         project_title=project_title,
         preview_src=preview_src if two_files else "",
+        room_flow_src=room_flow_src if two_files else "",
     )
 
 
@@ -190,9 +211,10 @@ async def send_blueprint(
     pdf_bytes: bytes,
     board_bytes: Optional[bytes] = None,
     project_title: str = "",
+    zone_map_bytes: Optional[bytes] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Send the companion PDF and, when present, the image board.
+    Send the companion PDF and, when present, the image board and zone map.
 
     Returns (True, None) on customer-email success. Admin notify failures are
     logged but do not fail the customer send. Returns (False, reason) if the
@@ -229,6 +251,8 @@ async def send_blueprint(
                 "content_id": "blueprint-preview",
             }
         )
+    if board_bytes and zone_map_bytes:
+        attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_Room_Flow_{safe_name}.png", zone_map_bytes))
     attachments.append(
         {
             "filename": pdf_filename,
@@ -249,6 +273,7 @@ async def send_blueprint(
                     space_type,
                     two_files=bool(board_bytes),
                     project_title=shown,
+                    room_flow_src="cid:room-flow" if zone_map_bytes else "",
                 ),
                 "attachments": attachments,
             },
@@ -343,6 +368,7 @@ def _draft_package_html(
     *,
     project_title: str = "",
     preview_src: str = "",
+    room_flow_src: str = "",
 ) -> str:
     """Draft review uses the customer email layout, with a review-version banner.
 
@@ -354,6 +380,7 @@ def _draft_package_html(
         space_type,
         project_title=project_title,
         preview_src=preview_src,
+        room_flow_src=room_flow_src,
     )
     inner = inner.replace(
         f"Your Blueprint is ready, {customer_name}",
@@ -393,8 +420,9 @@ async def send_draft_package(
     board_bytes: Optional[bytes] = None,
     cc_emails: Optional[list] = None,
     project_title: str = "",
+    zone_map_bytes: Optional[bytes] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """Email DRAFT board + companion PDF for review. Does not mark a package final."""
+    """Email DRAFT board, zone map, and companion PDF for review. Does not mark a package final."""
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
         logger.error("RESEND_API_KEY not configured — skipping draft package email")
@@ -418,6 +446,8 @@ async def send_draft_package(
                 "content_id": "blueprint-preview",
             }
         )
+    if board_bytes and zone_map_bytes:
+        attachments.append(_zone_map_attachment(f"FlowSpace_{stem}_DRAFT_Room_Flow_{safe_name}.png", zone_map_bytes))
     attachments.append(
         {
             "filename": f"FlowSpace_{stem}_DRAFT_Companion_{safe_name}.pdf",
@@ -435,6 +465,7 @@ async def send_draft_package(
             space_type,
             project_title=(project_title or "").strip(),
             preview_src="cid:blueprint-preview" if board_bytes else "",
+            room_flow_src="cid:room-flow" if board_bytes and zone_map_bytes else "",
         ),
         "attachments": attachments,
     }

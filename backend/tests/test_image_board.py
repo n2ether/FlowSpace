@@ -202,27 +202,38 @@ def test_nursery_pdf_hides_invent_disclaimer_when_the_after_exists():
     assert "organized view unavailable" in missing_low
 
 
-def test_companion_keeps_the_full_zone_sentence_and_one_total():
+def test_companion_is_the_short_customer_guide_with_one_total():
     lead, deliverable = _load()
     pdf = build_pdf(lead=lead, deliverable=deliverable, images={})
     text = " ".join(
         "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages).split()
     )
-    assert "bottom drawer" in text
-    assert "bulky bedding" in text
-    assert "Diaper & Dress Zone" in text
+    low = text.lower()
+    for heading in ("SAFETY ESSENTIALS", "CLIMATE COMFORT", "WHY IT HELPS", "SHOPPING LIST", "LIST TOTAL"):
+        assert heading in text
+    for idea in ("clear path", "fewer decisions", "reset", "calmer"):
+        assert idea in low
+    assert "six-drawer dresser" in low
     assert "$174" in text
     assert "Nicholas's Nursery" in text
     assert "Camila's Kids" not in text
-    assert "Kids' room Organization Plan" not in text
     assert "$124" not in text
     assert "$154" not in text
     assert "Large open cubby unit" not in text
     assert "Basket set to replace" not in text
-    assert "safety" in text.lower()
-    assert "climate" in text.lower()
     assert "68" in text
-    assert "one-minute bedtime ritual" in text.lower()
+    # The Do Not list, notes, zone essays, steps, and the ritual stay in the internal record.
+    assert "do not" not in low
+    assert "notes:" not in low
+    assert "Diaper & Dress Zone" not in text
+    assert "step by step" not in low
+    assert "one-minute bedtime ritual" not in low
+    assert "towel" not in low
+    assert "rabbit" not in low
+    assert "measurements are approximate" not in low
+    assert "9dbedfba" not in text
+    assert "SOURCE_" not in text and "AFTER_" not in text
+    assert not re.search(r"\bQA\b", text)
 
 
 def _png(color, size):
@@ -471,15 +482,19 @@ def test_nursery_companion_reflow_keeps_photo_pages_and_drops_blank_ones():
         # A heading with no body and no photo is an orphan page.
         # A text page under 500 characters is the notes-only sheet this reflow removes.
         assert not (images == 0 and len(text) < 500)
-        low = text.lower()
-        if images == 0 and "notes:" in low:
-            assert "one-minute bedtime ritual" in low
         if "same camera" in text.lower():
             pair_pages.append(page)
             assert images >= 2
     assert len(pair_pages) == 4
-    joined = "\n".join((page.extract_text() or "") for page in reader.pages).lower()
-    assert "one-minute bedtime ritual" in joined
-    assert joined.count("do not add a portable heater") == 1
+    joined = " ".join("\n".join((page.extract_text() or "") for page in reader.pages).lower().split())
+    assert joined.count("no portable heater") == 1
+    assert "do not" not in joined
     assert "source_" not in joined
     assert "after_" not in joined
+    names = ("window and crib", "crib wall", "rocker", "dresser and door")
+    for index, (page, name) in enumerate(zip(pair_pages, names)):
+        assert name in " ".join((page.extract_text() or "").split()).lower()
+        # Each page shows its own source and the after edited from it, in that order.
+        colors = [img.image.convert("RGB").resize((1, 1)).getpixel((0, 0)) for img in page.images]
+        assert sum(_near(c, (140, 40 + index * 20, 40), tol=12) for c in colors) == 1
+        assert sum(_near(c, (20, 80 + index * 10, 90), tol=12) for c in colors) == 1

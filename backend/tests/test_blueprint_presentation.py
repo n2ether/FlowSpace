@@ -44,6 +44,8 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert view["safety"]
     assert view["climate"]
     assert view["reset"]
+    assert "fewer decisions" in view["why_it_helps"]
+    assert not any("do not" in line.lower() for line in view["safety"])
     assert view["shopping_total"] == "$174"
     assert view["headline"] == "Nicholas's Nursery"
     assert [item["name"] for item in view["plan"]["legend"]] == [

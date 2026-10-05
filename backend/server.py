@@ -22,6 +22,7 @@ import httpx
 
 from image_board import build_image_board
 from room_flow import build_zone_map
+from blueprint_consistency import internal_record
 from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
@@ -1036,6 +1037,16 @@ async def render_deliverable_board(lead_id: str, request: Request, _: bool = Dep
     )
 
 
+@api_router.get("/admin/leads/{lead_id}/deliverable/internal-record")
+async def deliverable_internal_record(lead_id: str, _: bool = Depends(require_admin)):
+    """Do Not list, extended notes, and full safety copy kept off the customer guide. Admin only."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+    return {"lead_id": lead_id, "final": False, **internal_record(lead, d)}
+
+
 @api_router.get("/admin/leads/{lead_id}/deliverable/zone-map")
 async def render_deliverable_zone_map(
     lead_id: str,
@@ -1066,12 +1077,14 @@ async def render_customer_email_preview(lead_id: str, request: Request, _: bool 
     """Customer email HTML with the Blueprint in the body. Does not send or mark final."""
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     board = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    zone_map = build_zone_map(lead=lead, deliverable=deliverable, images=images)
     preview_src = "data:image/png;base64," + base64.b64encode(board).decode("ascii")
     html = customer_email_html(
         lead.get("name") or "there",
         lead.get("space_type") or "space",
         project_title=_customer_title(lead, deliverable),
         preview_src=preview_src,
+        room_flow_src="data:image/png;base64," + base64.b64encode(zone_map).decode("ascii"),
     )
     return Response(
         content=html,
@@ -1181,6 +1194,7 @@ async def send_draft_package_endpoint(
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images)
     recipient = (to or lead.get("email") or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
     cc_raw = (request.query_params.get("cc") or "").strip()
     cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
@@ -1193,6 +1207,7 @@ async def send_draft_package_endpoint(
         board_bytes=board_bytes,
         cc_emails=cc_emails or None,
         project_title=_customer_title(lead, deliverable),
+        zone_map_bytes=zone_map_bytes,
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
@@ -1215,6 +1230,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
+    zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=True)
     sent, error = await send_blueprint(
         customer_name=lead.get("name") or "there",
         customer_email=lead.get("email") or "",
@@ -1223,6 +1239,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         pdf_bytes=pdf_bytes,
         board_bytes=board_bytes,
         project_title=_customer_title(lead, deliverable),
+        zone_map_bytes=zone_map_bytes,
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:

@@ -2,15 +2,17 @@
 FlowSpace companion PDF — the long-form half of a two-file Blueprint.
 
 The primary visual is ``image_board.build_image_board`` (a portrait PNG).
-This PDF is the phone-friendly companion guide:
+This PDF is the short, phone-friendly companion guide:
 
-  - Full zone explanations and needs (no mid-word clipping)
-  - Shopping list, retailer links, and one list total
-  - Step-by-step work, safety, climate, maintenance, and the weekly reset
-  - A before | after reference page only when a real photo exists
+  - Safety essentials and climate comfort (short lists)
+  - One "why it helps" paragraph
+  - The consolidated shopping list with links and one list total
+  - One before | after page per source photo, only when a real photo exists
 
-The portrait Blueprint carries the hero, the room plan,
-what's-new callouts, palette, and roadmap. Do not cram those into this PDF.
+The portrait Blueprint carries the hero, what's-new callouts, palette, and
+roadmap; ``room_flow`` carries the zone map. The Do Not list, extended
+notes, steps, and full safety copy stay in the internal record
+(``blueprint_consistency.internal_record``), not in this PDF.
 
 Hard rules:
   - Windows and room proportions stay ~95% true to the customer photo.
@@ -1554,23 +1556,35 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
     return table
 
 
-def _shopping_blocks(items: List[Dict[str, Any]]) -> List[Any]:
-    """One item per block so the list stays readable on a phone-width page."""
+def _shopping_blocks(
+    items: List[Dict[str, Any]],
+    links: Optional[Sequence[Dict[str, str]]] = None,
+) -> List[Any]:
+    """One item per block, with its link, so the list stays readable on a phone."""
     s = _styles()
     flows: List[Any] = []
     rows = [it for it in (items or []) if isinstance(it, dict)][:12]
     if not rows:
         flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
         return flows
+    by_name = {
+        str(link.get("name") or "").strip().lower(): str(link.get("url") or "")
+        for link in (links or [])
+        if isinstance(link, dict)
+    }
     for it in rows:
         qty, price, sub = _line_total(it)
         name = str(it.get("name") or "Organizer")
         qty_label = str(int(qty) if float(qty).is_integer() else qty)
         price_label = _money(price) if price else "Typical"
         sub_label = _money(sub) if sub else "—"
+        url = by_name.get(name.strip().lower(), "")
+        label = f"<b>{_esc(name)}</b>"
+        if url:
+            label = f'<link href="{_esc(url)}" color="#047857"><u><b>{_esc(name)}</b></u></link>'
         flows.append(
             Paragraph(
-                f"<b>{_esc(name)}</b><br/>Qty {qty_label} · {price_label} each · {sub_label}",
+                f"{label}<br/>Qty {qty_label} · {price_label} each · {sub_label}",
                 s["guideBody"],
             )
         )
@@ -1697,113 +1711,39 @@ def build_pdf(
 
     story: List[Any] = []
     story.append(Paragraph(_esc(title_text), s["guideTitle"]))
-    story.append(Paragraph("PORTRAIT BLUEPRINT FIRST, THEN THIS GUIDE", s["guideKicker"]))
+    story.append(Paragraph("COMPANION GUIDE", s["guideKicker"]))
     story.append(
         Paragraph(
-            f"Hi {_esc(customer_name)}. Open the portrait Blueprint first — the hero, "
-            "what changed, and the room flow. This companion guide is next, and it is "
-            "meant to be read on your phone: full steps, the shopping list, safety, "
-            f"climate, the {_esc(str(sections.get('reset_title') or 'weekly reset').lower())}, "
-            "and each before and after from the same photo. "
-            "Measurements are approximate.",
+            f"Hi {_esc(customer_name)}. Start with the portrait Blueprint and the room-flow map. "
+            "This guide keeps the essentials: safety, climate, why it helps, the shopping list, "
+            "and each before and after from the same photo.",
             s["guideBody"],
         )
     )
-    story.append(Paragraph(_esc(sections["intro"]), s["guideBody"]))
 
-    story.append(Paragraph("WHAT THIS PLAN COVERS", s["guideH"]))
-    for need in sections["needs"]:
-        story.append(Paragraph(f"• {_esc(need)}", s["guideBody"]))
-
-    if sections["zones"]:
-        story.append(Paragraph("ZONES", s["guideH"]))
-        for zone in sections["zones"]:
-            story.append(Paragraph(_esc(zone["title"]), s["guideH3"]))
-            if zone.get("desc"):
-                story.append(Paragraph(_esc(zone["desc"]), s["guideBody"]))
-
-    benefits = [str(x).strip() for x in (deliverable.get("benefits") or []) if str(x).strip()]
-    if benefits:
-        story.append(Paragraph("WHY IT HELPS", s["guideH"]))
-        for benefit in benefits:
-            story.append(Paragraph(f"• {_esc(benefit)}", s["guideBody"]))
-
-    paint = _paint_block(deliverable, content_w)
-    if paint:
-        story.append(Paragraph(OPTIONAL_PAINT_HEADING, s["guideH"]))
-        story.append(paint)
-
-    story.append(Paragraph("SHOPPING LIST", s["guideH"]))
-    if sections["budget_note"]:
-        story.append(Paragraph(_esc(sections["budget_note"]), s["guideBody"]))
-    story.append(Spacer(1, 4))
-    story.extend(_shopping_blocks(deliverable.get("shopping_list") or []))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph(f"THIS LIST TOTALS  {_esc(str(sections['list_total']))}", s["guideH"]))
-    if sections["stated_budget"]:
-        story.append(
-            Paragraph(
-                f"Your stated budget: {_esc(sections['stated_budget'])}. "
-                "That is the budget you gave us. The list total above is what this kit costs.",
-                s["guideBody"],
-            )
-        )
-    story.append(Paragraph("Shopping Links", s["guideH"]))
-    links = sections["links"]
-    if links:
-        for link in links[:12]:
-            url = link.get("url") or ""
-            name = link.get("name") or url
-            if url:
-                story.append(
-                    Paragraph(
-                        f'<link href="{_esc(url)}" color="#047857"><u>{_esc(name)}</u></link>',
-                        s["guideLink"],
-                    )
-                )
-            elif name:
-                story.append(Paragraph(_esc(name), s["guideLink"]))
-        if sections["links_are_search"]:
-            story.append(
-                Paragraph(
-                    "Search links open a retailer search. Confirm the exact product before you buy.",
-                    s["guideBody"],
-                )
-            )
-    else:
-        story.append(Paragraph("Shopping links will follow once the list has items.", s["guideBody"]))
-
-    story.append(Paragraph("STEP BY STEP", s["guideH"]))
-    for index, step in enumerate(sections["steps"], 1):
-        story.append(Paragraph(f"{index}. {_esc(step)}", s["guideBody"]))
-
-    story.append(Paragraph("SAFETY", s["guideH"]))
-    for line in sections["safety"]:
+    story.append(Paragraph("SAFETY ESSENTIALS", s["guideH"]))
+    for line in sections["safety_essentials"]:
         story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
 
-    story.append(Paragraph("CLIMATE", s["guideH"]))
-    for line in sections["climate"]:
-        story.append(Paragraph(_esc(line), s["guideBody"]))
+    story.append(Paragraph("CLIMATE COMFORT", s["guideH"]))
+    for line in sections["climate_essentials"]:
+        story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
 
-    notes = sections["notes"]
-    removed = sections["removed_note"]
-    # The removed-storage note is already part of notes when both are set.
-    # Printing it twice left a short page that only repeated that sentence.
-    if removed and removed not in (notes or ""):
-        notes = f"{notes} {removed}".strip() if notes and notes != DEFAULT_NOTES else removed
-    # Keep the fidelity and removed-item notes with the nightly instruction.
-    # A separate NOTES heading did not fit the previous page and sat alone.
-    ritual: List[Any] = [
-        Paragraph(_esc(str(sections.get("reset_title") or "Weekly reset")).upper(), s["guideH"]),
-        Paragraph(_esc(sections["maintenance"]), s["guideBody"]),
-    ]
-    if notes and notes != DEFAULT_NOTES:
-        ritual.append(Paragraph(f"Notes: {_esc(notes)}", s["guideBody"]))
-    story.append(KeepTogether(ritual))
-    attachment_note = deliverable.get("attachment_note") or ""
-    if attachment_note:
-        story.append(Spacer(1, 4))
-        story.append(Paragraph(_esc(str(attachment_note)), s["guideBody"]))
+    story.append(Paragraph("WHY IT HELPS", s["guideH"]))
+    story.append(Paragraph(_esc(sections["why"]), s["guideBody"]))
+
+    shopping: List[Any] = [Paragraph("SHOPPING LIST", s["guideH"])]
+    shopping.extend(_shopping_blocks(deliverable.get("shopping_list") or [], sections["links"]))
+    shopping.append(Spacer(1, 4))
+    shopping.append(Paragraph(f"LIST TOTAL  {_esc(str(sections['list_total']))}", s["guideH3"]))
+    if sections["stated_budget"]:
+        shopping.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["guideBody"]))
+    if sections["links"] and sections["links_are_search"]:
+        shopping.append(
+            Paragraph("Links open a retailer search. Confirm the exact product before you buy.", s["guideBody"])
+        )
+    # One consolidated list: it moves to the next page whole rather than splitting.
+    story.append(KeepTogether(shopping))
 
     frame_h = _guide_frame_height()
     photo_h = _compare_photo_height(frame_h)
