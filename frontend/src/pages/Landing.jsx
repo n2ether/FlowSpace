@@ -167,7 +167,7 @@ const VALUES = [
 const FAQS = [
   {
     q: "What does FlowSpace actually do?",
-    a: "You upload photos of a cluttered closet, garage, laundry room, pantry, or similar space. Our AI organizes that same space — windows and proportions stay about 95% true to your photo — with bins, shelving, and a calmer layout.",
+    a: "You upload photos of a cluttered closet, garage, laundry room, pantry, or similar space. Our AI organizes that same space — windows and room proportions follow your photos — with bins, shelving, and a calmer layout.",
   },
   {
     q: "Do I need an account to get started?",
@@ -179,7 +179,7 @@ const FAQS = [
   },
   {
     q: "Will you change my windows or paint the walls?",
-    a: "No. Windows and room dimensions stay about 95% accurate to your photo — we don't invent openings or footage. Paint is never applied in the primary visual. The PDF may include an optional color to consider if it helps.",
+    a: "No. Windows and room proportions follow your photos — we don't invent openings or footage. Paint is never applied in the primary visual. The PDF may include an optional color to consider if it helps.",
   },
   {
     q: "Which spaces work best?",
@@ -220,8 +220,8 @@ export default function Landing() {
             </h1>
             <p className="max-w-xl text-lg leading-relaxed text-slate-600">
               Upload photos of a cluttered closet, garage, laundry room, or
-              pantry. Our AI organizes that same space — windows and proportions
-              stay about 95% true to your photo — with bins, labels, and a
+              pantry. Our AI organizes that same space — windows and room proportions
+              follow your photos — with bins, labels, and a
               layout you can actually follow.
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -343,7 +343,7 @@ export default function Landing() {
               {
                 n: 3,
                 title: "Get your AI transformation",
-                body: "See an organized after of your real space — windows and proportions stay about 95% true to your photo. We email a PDF with zones, shopping list, next steps, and optional paint to consider.",
+                body: "See an organized after of your real space — windows and room proportions follow your photos. We email a PDF with zones, shopping list, next steps, and optional paint to consider.",
               },
             ].map((s) => (
               <div
