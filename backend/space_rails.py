@@ -53,7 +53,7 @@ CRIB_INTERIOR_RAILS = (
 SPACE_THEME_IMAGE_RAILS = (
     "SPACE THEME LOCK: this kids' room already has a space theme. Keep it and make it clearer. "
     "Artwork, textiles, and small decor are planets, the moon, rockets, and astronauts. "
-    "CRIB WALL: make Nicholas's space-explorer theme personal — a coordinated focal panel or "
+    "CRIB WALL: make the child's space-explorer theme personal — a coordinated focal panel or "
     "restrained composition of planets, the moon, rockets, and/or astronauts on the crib wall. "
     "Reuse existing tactile sculptural space pieces from the photo where appropriate. "
     "Do not use generic nursery animals, woodland creatures, farm animals, rabbits, or unrelated cartoon art. "

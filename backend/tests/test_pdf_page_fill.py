@@ -85,8 +85,9 @@ def test_no_companion_page_is_near_empty(name):
 def test_before_after_pages_fill_the_frame():
     lead, deliverable, images = CASES["nursery curated, four portrait views"]
     fills = companion_page_fill(lead=lead, deliverable=deliverable, images=images)
-    assert len(fills) == 6
-    assert all(fill >= 0.85 for fill in fills[2:]), fills
+    # Four text modules (safety through shopping) plus one before/after page per view.
+    assert len(fills) == 8
+    assert all(fill >= 0.85 for fill in fills[4:]), fills
     assert all(fill >= 0.70 for fill in fills[:2]), fills
 
 
@@ -94,8 +95,9 @@ def test_shopping_tail_shares_its_page_with_the_photos():
     """A list that spills a few rows does not strand them on their own sheet."""
     lead, deliverable, images = CASES["garage, single hero"]
     fills = companion_page_fill(lead=lead, deliverable=deliverable, images=images)
-    assert len(fills) == 2
-    assert min(fills) >= 0.80, fills
+    assert len(fills) >= 2
+    assert min(fills) >= MIN_PAGE_FILL, fills
+    assert fills[-1] >= 0.80, fills
 
 
 def test_guide_type_is_not_shrunk():

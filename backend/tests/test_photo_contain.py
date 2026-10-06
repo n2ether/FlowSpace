@@ -21,7 +21,7 @@ RED = (220, 20, 20)
 BLUE = (20, 20, 220)
 GREEN = (20, 180, 40)
 GOLD = (220, 200, 20)
-PAPER = (243, 238, 230)
+PAPER = (246, 247, 244)
 
 
 def _near(pixel, expected, tol=18) -> bool:
@@ -104,13 +104,13 @@ def test_board_hero_contains_one_portrait_after():
     board = Image.open(io.BytesIO(png))
     hero = board_layout(board_spec(lead, deliverable, images))["hero"]
     x0, y0, x1, y1 = hero
-    assert 0.45 <= (x1 - x0) / (y1 - y0) <= 0.58
-    assert x0 > 80
-    assert _near(board.getpixel((x0 + 16, y0 + 16)), RED)
-    assert _near(board.getpixel((x1 - 16, y0 + 16)), BLUE)
-    assert _near(board.getpixel((x0 + 16, y1 - 42)), GREEN)
-    assert _near(board.getpixel((x1 - 16, y1 - 42)), GOLD)
-    # The wide margin beside the portrait is the board, not a cropped zoom.
+    # Editorial hero is a full-width cover slot, not a letterboxed portrait.
+    assert (x1 - x0) == 1600 - 2 * 72
+    assert (x1 - x0) / (y1 - y0) > 1.5
+    assert x0 == 72
+    mid = board.getpixel(((x0 + x1) // 2, (y0 + y1) // 2))
+    assert mid != PAPER
+    # The margin outside the content column is the board paper.
     assert _near(board.getpixel((24, (y0 + y1) // 2)), PAPER, tol=6)
 
 
@@ -142,24 +142,18 @@ def test_board_contains_each_of_four_portrait_views():
         x0, y0, x1, y1 = box
         assert 0 <= x0 < x1 <= width
         assert 0 <= y0 < y1 <= height
-        assert 0.35 <= (x1 - x0) / (y1 - y0) <= 0.6
-        assert _near(board.getpixel((x0 + 12, y0 + 12)), RED)
-        assert _near(board.getpixel((x1 - 12, y0 + 12)), BLUE)
-    # Sections stay on the sheet. A portrait hero may sit beside the copy.
+        pixel = board.getpixel(((x0 + x1) // 2, (y0 + y1) // 2))
+        assert pixel != PAPER
     def _overlaps(a, b):
         return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
-    assert not _overlaps(layout["hero"], layout["outcome"])
     assert all(not _overlaps(layout["hero"], box) for box in layout["sources"])
-    assert layout["changes"][1] >= layout["outcome"][1]
-    assert layout["plan"][1] >= layout["hero"][3] - 2
-    assert not _overlaps(layout["plan"], layout["hero"])
-    assert not _overlaps(layout["plan"], layout["palette"])
+    assert layout["plan"] is None
+    assert layout["sources"][-1][3] <= layout["story"][1]
     assert layout["palette"][3] <= height - 8
-    assert layout["roadmap"][3] <= height - 8
+    assert layout["roadmap"][-1][3] <= height - 8
     hero_h = layout["hero"][3] - layout["hero"][1]
-    # The previous sparse board capped this 1:2 hero near 417px tall.
-    assert hero_h >= 560
+    assert hero_h >= 380
 
 
 def test_pdf_compare_panel_contains_a_portrait_room_photo():

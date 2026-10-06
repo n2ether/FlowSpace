@@ -1,18 +1,20 @@
 """
-FlowSpace companion PDF — the long-form half of a two-file Blueprint.
+FlowSpace Companion Guide PDF — the long-form file beside the Design Plan.
 
-The primary visual is ``image_board.build_image_board`` (a portrait PNG).
-This PDF is the short, phone-friendly companion guide:
+The primary visual is the Design Plan board (``image_board.build_image_board``);
+``room_flow`` carries the zone map. This phone-friendly guide is modular
+(``design_plan_standards.COMPANION_GUIDE_MODULES``), in this order:
 
   - Safety essentials and climate comfort (short lists)
-  - One "why the FlowSpace zone approach helps" paragraph (same words as the Room Flow map)
+  - Maintenance (the reset or the nursery bedtime ritual)
+  - Styling rules (palette, what stays, how the room stays calm)
+  - Designer assessment (needs, zone by zone, what stays, and the
+    "why the FlowSpace zone approach helps" paragraph the Room Flow map prints)
   - The consolidated shopping list with links and one list total
   - One before | after page per source photo, only when a real photo exists
 
-The portrait Blueprint carries the hero, what's-new callouts, palette, and
-roadmap; ``room_flow`` carries the zone map. The Do Not list, extended
-notes, steps, and full safety copy stay in the internal record
-(``blueprint_consistency.internal_record``), not in this PDF.
+The Do Not list, extended notes, and full safety copy stay in the internal
+record (``blueprint_consistency.internal_record``), not in this PDF.
 
 Hard rules:
   - Windows and room proportions follow the customer photos.
@@ -45,6 +47,7 @@ from reportlab.platypus import (
     Flowable,
     Frame,
     CondPageBreak,
+    FrameBreak,
     KeepTogether,
     NextPageTemplate,
     PageTemplate,
@@ -56,6 +59,18 @@ from reportlab.platypus import (
 
 from blueprint_consistency import SHOPPING_DISCLAIMER, companion_sections, reference_total_line
 from blueprint_layers import BUDGET_LABELS, STORAGE
+from design_plan_standards import (
+    BRAND_CHAR,
+    BRAND_GREEN,
+    BRAND_OFF,
+    BRAND_SAGE,
+    BRAND_TINTS,
+    COMPANION_MODULE_TITLES,
+    COMPANION_NAME,
+    DESIGN_PLAN_NAME,
+    MONTSERRAT,
+    TAGLINE,
+)
 from photo_contain import contain_rect
 from room_flow import ZONE_APPROACH_HEADING, guide_outline_caption
 from shopping_links import fallback_search_links
@@ -74,23 +89,22 @@ from pdf_images import (
     normalize_pdf_images,
 )
 
-# ──────────────────────────── Palette (site design system) ─────────────────────────────
-EMERALD = HexColor("#059669")
-EMERALD_DEEP = HexColor("#047857")
-MINT = HexColor("#34d399")
-MINT_BG = HexColor("#ecfdf5")
-SLATE = HexColor("#0f172a")
-SLATE_MUTED = HexColor("#475569")
-SLATE_SOFT = HexColor("#64748b")
+# ──────────────────────────── Palette (FlowSpace brand) ─────────────────────────────
+EMERALD = HexColor(BRAND_GREEN)
+EMERALD_DEEP = HexColor(BRAND_GREEN)
+MINT = HexColor(BRAND_SAGE)
+MINT_BG = HexColor(BRAND_TINTS["sage_light"])
+SLATE = HexColor(BRAND_CHAR)
+SLATE_MUTED = HexColor(BRAND_TINTS["muted"])
+SLATE_SOFT = HexColor(BRAND_TINTS["muted"])
 SURFACE = HexColor("#ffffff")
-SOFT = HexColor("#f8fafc")
-BORDER = HexColor("#e2e8f0")
+SOFT = HexColor(BRAND_OFF)
+BORDER = HexColor(BRAND_TINTS["line"])
 WHITE = colors.white
-SAGE = HexColor("#10b981")
+SAGE = HexColor(BRAND_SAGE)
 INK = SLATE
 MUTED = SLATE_MUTED
 LINE = BORDER
-TAGLINE = "Clear space. Create flow. Live better."
 RADIUS = 8
 CALLOUT_LINES = (
     "Smart choices. Everything in its place.",
@@ -167,15 +181,16 @@ NEED_ICON_RULES: Sequence[Tuple[Tuple[str, ...], str]] = (
 )
 
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+# Montserrat hierarchy. The FSSerif names are the display weights (light story, semibold titles).
 _FONT_FILES = {
-    "FSSerif": "Fraunces-Regular.ttf",
-    "FSSerif-Bold": "Fraunces-Bold.ttf",
-    "FSSerif-Italic": "Fraunces-Regular.ttf",
-    "FSSans": "Inter-Regular.ttf",
-    "FSSans-Medium": "Inter-Medium.ttf",
-    "FSSans-Semi": "Inter-SemiBold.ttf",
-    "FSSans-Bold": "Inter-Bold.ttf",
-    "FSSans-Italic": "Inter-Italic.ttf",
+    "FSSerif": MONTSERRAT["light"],
+    "FSSerif-Bold": MONTSERRAT["semibold"],
+    "FSSerif-Italic": "Montserrat-Italic.ttf",
+    "FSSans": MONTSERRAT["regular"],
+    "FSSans-Medium": MONTSERRAT["medium"],
+    "FSSans-Semi": MONTSERRAT["semibold"],
+    "FSSans-Bold": MONTSERRAT["bold"],
+    "FSSans-Italic": "Montserrat-Italic.ttf",
 }
 _FALLBACKS = {
     "FSSerif": "Times-Roman",
@@ -1561,10 +1576,11 @@ class _ListBlock(KeepTogether):
     """Keeps a list whole on the next page, unless that would leave this page mostly empty.
 
     The rows flow from here instead when at least ``min_room`` of the frame is
-    free and either more content follows (it can fill the page the tail lands
-    on) or the spilled tail alone fills ``MIN_PAGE_FILL`` of a page. Inner
-    ``KeepTogether`` groups (heading + first rows, last rows + total) still
-    travel together.
+    free and either the spilled tail alone fills ``MIN_PAGE_FILL`` of a page, or
+    moving the list would leave this page under ``MIN_PAGE_FILL``. A full-page
+    before/after can need more room than a short tail leaves, so a following
+    block is not counted on to fill it. Inner ``KeepTogether`` groups (heading +
+    first rows, last rows + total) still travel together.
     """
 
     def __init__(self, flowables: List[Any], frame_h: float, *, followed: bool, min_room: float = 0.35) -> None:
@@ -1580,16 +1596,38 @@ class _ListBlock(KeepTogether):
             list(flowable._content) if isinstance(flowable, KeepTogether) else [flowable]
             for flowable in self._content
         ]
-        self._H = sum(_flowables_height(group, aW) for group in groups)
-        self._H0 = _flowables_height(groups[0], aW) if groups else 0
+        self._heights = [_flowables_height(group, aW) for group in groups]
+        self._H = sum(self._heights)
+        self._H0 = self._heights[0] if self._heights else 0
         return width, forced
+
+    def _balanced_cut(self, aH: float) -> Optional[int]:
+        """Pieces to keep here so this page and the next both reach ``MIN_PAGE_FILL``."""
+        need = MIN_PAGE_FILL * self._frame_h
+        low = max(0.0, need - (self._frame_h - aH))
+        high = min(aH, self._H - need)
+        if low > high:
+            return None
+        used = 0.0
+        for index, height in enumerate(self._heights):
+            used += height
+            if used > high:
+                return None
+            if used >= low:
+                return index + 1
+        return None
 
     def split(self, aW: float, aH: float) -> List[Any]:
         if getattr(self, "_wrapInfo", None) != (aW, aH):
             self.wrap(aW, aH)
         spill_fills = (self._H - aH) >= MIN_PAGE_FILL * self._frame_h
-        if self._H > aH and aH >= self._min_room_pt and (self._followed or spill_fills):
+        page_stays_full = (self._frame_h - aH) >= MIN_PAGE_FILL * self._frame_h
+        fits_next_page = self._H <= self._frame_h
+        if self._H > aH and aH >= self._min_room_pt and (spill_fills or not page_stays_full or not fits_next_page):
             pieces = list(self._content)
+            cut = None if spill_fills else self._balanced_cut(aH)
+            if cut is not None and 0 < cut < len(pieces):
+                pieces = [*pieces[:cut], FrameBreak(), *pieces[cut:]]
         else:
             pieces = super().split(aW, aH)
         # The frame adds the first piece without splitting it, and a KeepTogether
@@ -1896,6 +1934,79 @@ def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -
     return t
 
 
+# ──────────────────────────── Companion Guide modules ─────────────────────────────
+_MODULE_PHRASES = {
+    "safety": "safety",
+    "climate": "climate comfort",
+    "maintenance": "maintenance",
+    "styling": "styling rules",
+    "assessment": "the designer assessment",
+    "shopping": "the shopping list",
+    "views": "each before-and-after view",
+}
+
+
+def _module_phrase(modules: Sequence[str]) -> str:
+    phrases = [_MODULE_PHRASES[m] for m in modules if m in _MODULE_PHRASES]
+    if not phrases:
+        return "the plan's practical notes"
+    if len(phrases) == 1:
+        return phrases[0]
+    return ", ".join(phrases[:-1]) + ", and " + phrases[-1]
+
+
+def _bullets(lines: Sequence[str], style) -> List[Any]:
+    return [Paragraph(f"• {_esc(line)}", style) for line in lines if str(line).strip()]
+
+
+def _module_flowables(module: str, sections: Dict[str, Any], s: Dict[str, ParagraphStyle]) -> List[Any]:
+    """Text modules of the guide. Shopping and before/after pages are laid out by the caller."""
+    title = COMPANION_MODULE_TITLES.get(module, module.upper())
+    if module == "safety":
+        return [Paragraph(title, s["guideH"]), *_bullets(sections["safety_essentials"], s["guideBody"])]
+    if module == "climate":
+        return [Paragraph(title, s["guideH"]), *_bullets(sections["climate_essentials"], s["guideBody"])]
+    if module == "maintenance":
+        body = [p.strip() for p in str(sections.get("maintenance") or "").split("\n\n") if p.strip()]
+        if not body:
+            return []
+        out: List[Any] = [Paragraph(title, s["guideH"])]
+        reset_title = str(sections.get("reset_title") or "").strip()
+        if reset_title:
+            out.append(Paragraph(_esc(reset_title), s["guideH3"]))
+        out.extend(Paragraph(_esc(p), s["guideBody"]) for p in body)
+        return out
+    if module == "styling":
+        rules = sections.get("styling") or []
+        return [Paragraph(title, s["guideH"]), *_bullets(rules, s["guideBody"])] if rules else []
+    if module == "assessment":
+        assessment = sections.get("assessment") or {}
+        out = [Paragraph(title, s["guideH"])]
+        needs = assessment.get("needs") or []
+        if needs:
+            out.append(Paragraph("What the room needed", s["guideH3"]))
+            out.extend(_bullets(needs, s["guideBody"]))
+        zones = assessment.get("zones") or []
+        if zones:
+            out.append(Paragraph("Zone by zone", s["guideH3"]))
+            for zone in zones:
+                anchor = f" · {_esc(zone['object'])}" if zone.get("object") else ""
+                out.append(
+                    Paragraph(
+                        f'<font name="{_font("FSSans-Semi")}">{_esc(zone["number"])} {_esc(zone["title"])}</font>{anchor}. {_esc(zone["job"])}',
+                        s["guideBody"],
+                    )
+                )
+        kept = assessment.get("kept") or []
+        if kept:
+            out.append(Paragraph("What stays", s["guideH3"]))
+            out.append(Paragraph(_esc(", ".join(kept)) + ".", s["guideBody"]))
+        out.append(Paragraph(ZONE_APPROACH_HEADING, s["guideH3"]))
+        out.append(Paragraph(_esc(assessment.get("why") or sections.get("why") or ""), s["guideBody"]))
+        return out
+    return []
+
+
 # ──────────────────────────── Build ─────────────────────────────
 def build_pdf(
     *,
@@ -1951,37 +2062,27 @@ def _render_companion(
             PageTemplate(id="guide", frames=[int_frame], onPage=_make_on_page("guide", title_text, vibe)),
             PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe)),
         ],
-        title=f"{title_text} — FlowSpace Companion Guide",
+        title=f"{title_text} — FlowSpace {COMPANION_NAME}",
         author="FlowSpace",
     )
 
+    modules = sections.get("modules") or []
     story: List[Any] = []
     story.append(Paragraph(_esc(title_text), s["guideTitle"]))
-    story.append(Paragraph("COMPANION GUIDE", s["guideKicker"]))
+    story.append(Paragraph(COMPANION_NAME.upper(), s["guideKicker"]))
     if sections.get("story"):
         story.append(Paragraph(_esc(sections["story"]), s["guideStory"]))
     story.append(
         Paragraph(
-            f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and Room Flow map "
+            f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the {DESIGN_PLAN_NAME} and the Room Flow map "
             "to see the room's overall plan and organization. "
             f"{_esc(guide_outline_caption(lead, deliverable))} "
-            "This companion guide brings together the practical essentials: safety, climate comfort, "
-            "the reasoning behind the zone-based plan, the shopping list, and each source-matched "
-            "before-and-after view.",
+            f"This {COMPANION_NAME} holds the practical detail: {_module_phrase(modules)}.",
             s["guideBody"],
         )
     )
-
-    story.append(Paragraph("SAFETY ESSENTIALS", s["guideH"]))
-    for line in sections["safety_essentials"]:
-        story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
-
-    story.append(Paragraph("CLIMATE COMFORT", s["guideH"]))
-    for line in sections["climate_essentials"]:
-        story.append(Paragraph(f"• {_esc(line)}", s["guideBody"]))
-
-    story.append(Paragraph(ZONE_APPROACH_HEADING, s["guideH"]))
-    story.append(Paragraph(_esc(sections["why"]), s["guideBody"]))
+    for module in modules:
+        story.extend(_module_flowables(module, sections, s))
 
     items = _shopping_blocks(deliverable.get("shopping_list") or [], sections["links"])
     total_line = reference_total_line(str(sections["list_total"]))
@@ -2013,15 +2114,20 @@ def _render_companion(
         *items[head_rows:-2],
         KeepTogether([*items[-2:], *tail]),
     ]
-    source_pairs = images.get("source_pairs") or []
-    has_compare = bool(
+    show_views = "views" in modules
+    source_pairs = (images.get("source_pairs") or []) if show_views else []
+    has_compare = show_views and bool(
         (isinstance(source_pairs, list) and len(source_pairs) >= 2)
         or coerce_image_bytes(images.get("after"))
         or coerce_image_bytes(images.get("before"))
     )
-    # One consolidated list that moves to the next page whole, unless that would
-    # leave this page mostly empty.
-    story.append(_ListBlock(shopping, frame_h, followed=has_compare))
+    if "shopping" in modules:
+        # One consolidated list that moves to the next page whole, unless that would
+        # leave this page mostly empty.
+        story.append(_ListBlock(shopping, frame_h, followed=has_compare))
+    if not has_compare:
+        doc.build(story)
+        return buf.getvalue(), doc.fills()
 
     def _compare_page(text: List[Any], before: Optional[bytes], after: Optional[bytes], **panel: Any) -> None:
         story.append(NextPageTemplate("compare"))
@@ -2096,7 +2202,7 @@ def _render_companion(
             [
                 Paragraph("BEFORE &amp; AFTER — PHOTO REFERENCE", s["guideH"]),
                 Paragraph(
-                    "The portrait Blueprint is the primary visual. Your original photo is shown first. "
+                    f"The {DESIGN_PLAN_NAME} is the primary visual. Your original photo is shown first. "
                     "An organized after was not produced for this package. "
                     "Do not invent an after.",
                     s["guideBody"],

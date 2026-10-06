@@ -186,9 +186,11 @@ def test_customer_surfaces_keep_existing_gates(monkeypatch):
     # The phone-page model is an admin review view that carries the lead id and source labels.
     surfaces.pop("presentation")
     for surface, text in surfaces.items():
-        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready", "QA "):
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "QA "):
             assert banned not in text, f"{surface}: {banned}"
-    assert "MEASURED OUTLINE" in surfaces["board"]
+        assert not re.search(r"\b(?:plan|blueprint|package|guide) is ready\b", text, re.I), surface
+    # The measured outline is the Room Flow sheet's claim; the Design Plan does not draw the map.
+    assert "MEASURED OUTLINE" not in surfaces["board"]
     assert "Measured room outline" in surfaces["zone_map"]
 
 

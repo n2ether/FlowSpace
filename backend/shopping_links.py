@@ -114,6 +114,8 @@ def curated_replacements(
             continue
         row["qty"] = int(row["qty"]) if row["qty"].is_integer() else row["qty"]
         row["price"] = int(row["price"]) if row["price"].is_integer() else row["price"]
+        if _clean(item.get("short_name")):
+            row["short_name"] = _clean(item.get("short_name"))
         by_name[row["name"].lower()] = row
         for prefix in item.get("replaces") or []:
             prefix = _clean(prefix).lower()

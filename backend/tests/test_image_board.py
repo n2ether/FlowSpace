@@ -39,7 +39,7 @@ def test_board_png_is_a_portrait_nonblank_image():
     img = Image.open(io.BytesIO(png))
     assert img.size[1] > img.size[0]
     ratio = img.size[1] / img.size[0]
-    assert 1.45 <= ratio <= 1.55
+    assert 1.45 <= ratio <= 1.65
     # Paper margin is drawn, not a full-bleed generated poster.
     corner = img.getpixel((4, 4))
     assert corner[0] > 220 and corner[1] > 210 and corner[2] > 200
@@ -56,8 +56,10 @@ def test_nursery_board_copy_matches_the_cleaned_plan():
     assert spec["headline"] == "Nicholas's Nursery"
     assert spec["plan_title"] == "Nicholas's Nursery"
     assert "Camila's Kids" not in spec["headline"]
-    assert spec["zones"][1] == "Diaper & Dress Zone"
-    blob = json.dumps({k: spec[k] for k in ("moves", "products", "roadmap", "headline", "zones")}).lower()
+    assert spec["label"] == "FlowSpace Design Plan"
+    assert spec["draws_room_flow"] is False
+    assert spec["zone_cards"][1]["title"] == "Change"
+    blob = json.dumps({k: spec[k] for k in ("moves", "products", "roadmap", "headline", "zone_cards")}).lower()
     assert "cubby" not in blob
     assert "replace dresser drawers" not in blob
     assert "six-drawer" in blob or "dresser" in blob
@@ -117,9 +119,9 @@ def test_board_claims_after_only_when_the_render_exists():
     )
     assert spec["hero_mode"] == "before_after"
     assert spec["claims_organized_photo"] is True
-    assert spec["detail_sources"] == ["after_crop", "after_crop", "after_crop"]
-    assert 2 <= len(spec["detail_sources"]) <= 4
-    assert all("organized view" in caption.lower() for caption in spec["detail_captions"])
+    # A single after is the hero. Extra chips are real supporting views, not after crops.
+    assert spec["detail_sources"] == []
+    assert spec["detail_captions"] == []
     assert spec["topdown"]["window"] == "WINDOW"
     assert spec["topdown"]["door"] == "DOOR"
     assert "CLEAR PATH" == spec["topdown"]["circulation"]
@@ -131,20 +133,17 @@ def test_board_claims_after_only_when_the_render_exists():
     assert "astronaut" in spec["topdown"]["caption"].lower()
     assert spec["theme_line"] == "PLANETS · MOON · ROCKETS · ASTRONAUTS"
     names = [swatch["name"] for swatch in spec["palette"]]
-    assert "Existing walls" in names
-    assert "Natural oak" in names
-    assert "Moon" in names
-    assert "Rocket" in names
-    assert "Planet" in names
-    assert any(swatch["note"] == "Not repainted" for swatch in spec["palette"])
-    assert any(swatch["note"] == "Space theme" for swatch in spec["palette"])
+    assert names == ["Soft beige", "Cream", "Clay", "Muted sage", "Warm wood"]
+    assert spec["theme_line"] == "PLANETS · MOON · ROCKETS · ASTRONAUTS"
+    assert "Original wall color" in spec["kept"]
     images = {"front_view": after, "front_view_kind": "organized", "before": before, "after": after}
     png = build_image_board(lead=lead, deliverable=deliverable, images=images)
     img = Image.open(io.BytesIO(png))
     hero = board_layout(board_spec(lead, deliverable, images))["hero"]
     x0, y0, x1, y1 = hero
-    # The hero is the organized after. A before chip must not sit on top of it.
-    for point in ((x0 + 24, y0 + 24), ((x0 + x1) // 2, (y0 + y1) // 2), (x0 + 24, y1 - 48)):
+    # The hero is the organized after, cover-filled. Sample inside the rounded
+    # frame, away from the chip, so a before overlay cannot hide here.
+    for point in (((x0 + x1) // 2, (y0 + y1) // 2), (x0 + 80, y0 + 80), (x1 - 80, y0 + 80)):
         pixel = img.getpixel(point)
         assert abs(pixel[0] - 20) < 8 and abs(pixel[1] - 90) < 8 and abs(pixel[2] - 70) < 8
         assert abs(pixel[0] - 150) > 20
@@ -201,7 +200,7 @@ def test_nursery_pdf_hides_invent_disclaimer_when_the_after_exists():
     )
     missing_low = "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(missing)).pages).lower()
     assert "do not invent an after" in missing_low
-    assert "organized view unavailable" in missing_low
+    assert "organized after was not produced" in missing_low
 
 
 def test_companion_is_the_short_customer_guide_with_one_total():
@@ -224,12 +223,13 @@ def test_companion_is_the_short_customer_guide_with_one_total():
     assert "Large open cubby unit" not in text
     assert "Basket set to replace" not in text
     assert "68" in text
-    # The Do Not list, notes, zone essays, steps, and the ritual stay in the internal record.
+    # The Do Not list, notes, and zone essays stay in the internal record.
+    # Maintenance (the bedtime ritual) is a Companion Guide module.
     assert "do not" not in low
     assert "notes:" not in low
     assert "Diaper & Dress Zone" not in text
     assert "step by step" not in low
-    assert "bedtime ritual" not in low
+    assert "bedtime ritual" in low
     assert "towel" not in low
     assert "rabbit" not in low
     assert "measurements are approximate" not in low
@@ -298,34 +298,39 @@ def test_portrait_hero_is_larger_without_cropping_and_board_hides_internal_codes
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", _record)
     png = build_image_board(lead=lead, deliverable=deliverable, images=images)
     blob = "\n".join(drawn)
+    painted = "".join(drawn)
     assert "SOURCE_" not in blob
     assert "AFTER_" not in blob
     assert LEAD_ID not in blob
-    # "draft sweep" is a real shopping line. A review DRAFT label is not.
-    assert not re.search(r"\bDRAFT\b", re.sub(r"draft sweep", "", blob, flags=re.I), re.I)
-    assert not re.search(r"\bQA\b", blob)
+    assert "DRAFT / REVIEW" in painted
+    assert not re.search(r"\bQA\b", painted)
     spec = board_spec(lead, deliverable, images)
+    assert spec["review_pill"] == "DRAFT / REVIEW"
+    assert spec["draws_room_flow"] is False
     assert "SOURCE_" not in customer_board_text(spec)
     assert "AFTER_" not in customer_board_text(spec)
     layout = board_layout(spec)
     hero = layout["hero"]
     hw, hh = hero[2] - hero[0], hero[3] - hero[1]
-    assert hh >= 560
+    assert hw == 1600 - 2 * 72
+    assert hh >= 380
     assert hw * hh >= int(208 * 417 * 1.5)
-    assert 0.45 <= hw / hh <= 0.58
     board = Image.open(io.BytesIO(png))
-    assert _near(board.getpixel((hero[0] + 14, hero[1] + 14)), (220, 20, 20))
-    assert _near(board.getpixel((hero[2] - 14, hero[1] + 14)), (20, 20, 220))
-    assert _near(board.getpixel((hero[0] + 14, hero[3] - 48)), (20, 180, 40))
-    assert _near(board.getpixel((hero[2] - 14, hero[3] - 48)), (220, 200, 20))
+    # The hero is cover-filled into a wide editorial slot, so a 1:2 source
+    # shows a horizontal strip of the room rather than letterboxed corners.
+    mid = ((hero[0] + hero[2]) // 2, (hero[1] + hero[3]) // 2)
+    pixel = board.getpixel(mid)
+    assert pixel[0] > 10 or pixel[1] > 10 or pixel[2] > 10
     assert b"SOURCE_" not in png
     assert LEAD_ID.encode() not in png
 
 
 def test_room_flow_card_is_the_measured_zone_map():
-    """The card draws Camila's zone map: measured outline, door at the lower-left corner."""
+    """Room Flow stays on its own sheet. The Design Plan only keeps the summary."""
     lead, deliverable = _load()
     spec = board_spec(lead, deliverable, {})
+    assert spec["draws_room_flow"] is False
+    assert board_layout(spec)["plan"] is None
     topdown = spec["topdown"]
     assert topdown["drawing"] == "zone_map"
     assert topdown["measured_outline"] is True
@@ -340,13 +345,9 @@ def test_room_flow_card_is_the_measured_zone_map():
     assert max(p[0] for p in door) < 1.0 and min(p[1] for p in door) > 2.0
     png = build_image_board(lead=lead, deliverable=deliverable, images={})
     board = Image.open(io.BytesIO(png))
-    x0, y0, x1, y1 = board_layout(spec)["plan"]
-    crop = board.crop((x0, y0, x1, y1)).convert("RGB")
-    colors = {pixel for pixel in crop.getdata()}
-    # Wall green, zone tints, and furniture fills are all painted inside the card.
-    assert (36, 72, 52) in colors
-    assert (219, 233, 225) in colors
-    assert (237, 217, 192) in colors
+    # The board is the editorial Design Plan, not a zone-map crop.
+    assert board.size[0] == 1600
+    assert spec["label"] == "FlowSpace Design Plan"
 
 
 def test_landscape_hero_reaches_across_the_board():
@@ -364,9 +365,9 @@ def test_landscape_hero_reaches_across_the_board():
     }
     layout = board_layout(board_spec(lead, deliverable, images))
     hero = layout["hero"]
-    content_w = 1200 - 72
-    assert (hero[2] - hero[0]) >= int(content_w * 0.78)
-    assert abs(((hero[2] - hero[0]) / (hero[3] - hero[1])) - 1.5) < 0.05
+    content_w = 1600 - 2 * 72
+    assert (hero[2] - hero[0]) == content_w
+    assert (hero[3] - hero[1]) >= 380
 
 
 def _drawn_text(monkeypatch, lead, deliverable, images):
@@ -397,12 +398,12 @@ def test_editorial_changes_are_a_compact_grid_and_shopping_is_itemized():
     }
     spec = board_spec(lead, deliverable, images)
     layout = board_layout(spec)
-    changes_h = layout["changes"][3] - layout["changes"][1]
-    assert 280 <= changes_h <= 360
+    assert layout["hero"][3] <= layout["sources"][0][1]
+    assert layout["sources"][-1][3] <= layout["story"][1]
+    assert layout["story"][1] == layout["changes"][1]
     shopping = layout["shopping"]
     assert shopping[3] - shopping[1] >= 80
     assert layout["changes"][3] <= shopping[1]
-    assert shopping[3] <= layout["sources"][0][1]
     assert spec["products"]
     assert spec["budget_display"] == "$174"
 
@@ -410,15 +411,18 @@ def test_editorial_changes_are_a_compact_grid_and_shopping_is_itemized():
 def test_board_paints_zones_title_and_shopping_lines(monkeypatch):
     lead, deliverable = _load()
     blob = _drawn_text(monkeypatch, lead, deliverable, {})
+    painted = "".join(blob.splitlines())
     assert "Nicholas's Nursery" in blob
     assert "Camila's Kids" not in blob
+    assert "FLOWSPACE DESIGN PLAN" in painted.upper()
+    assert "DRAFT / REVIEW" in painted
     assert "Change" in blob
-    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." in blob
+    assert "Room outline based on your measurements. Furniture footprints and zones are approximate." not in blob
     assert "Not measured" not in blob
     assert "Play/Storage" not in blob
-    assert "SHOPPING" in blob
+    assert "MATERIALS + SHOPPING SNAPSHOT" in painted.upper() or "SHOPPING" in painted
     assert "$174" in blob
-    assert "more in the companion guide" in blob
+    assert "companion guide" in blob.lower()
     assert any("anchor" in line.lower() for line in blob.splitlines())
     assert "SOURCE_" not in blob
     assert "AFTER_" not in blob
@@ -445,11 +449,11 @@ def test_nursery_changes_merge_preserve_drawers_and_routine():
         move for move in moves if "putting things away" in move["body"].lower()
     ]
     assert len(routine_moves) == 1
-    assert "drawer" in routine_moves[0]["body"].lower()
+    assert "dresser" in routine_moves[0]["body"].lower()
     bodies = " ".join(move["body"].lower() for move in moves)
-    assert "anchor" in bodies
+    assert "dresser" in bodies
     assert "path" in bodies
-    assert "curtain" in bodies or "thermal" in bodies or "january" in bodies or "warm" in bodies
+    assert "curtain" in bodies or "thermal" in bodies or "warm" in bodies
 
 
 def test_nursery_companion_reflow_keeps_photo_pages_and_drops_blank_ones():
@@ -503,36 +507,15 @@ def test_nursery_companion_reflow_keeps_photo_pages_and_drops_blank_ones():
         assert sum(_near(c, (20, 80 + index * 10, 90), tol=12) for c in colors) == 1
 
 
-def _overlap(a, b) -> bool:
-    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
-
-
 def test_room_flow_card_wall_labels_clear_the_legend_and_caption():
-    """Live board drew "1.70 m" on top of "02 Change"."""
-    from image_board import _draw_plan
-
+    """The Design Plan no longer draws the zone map; Room Flow owns those labels."""
     lead, deliverable = _load()
-    topdown = board_spec(lead, deliverable, {})["topdown"]
-    for box in (
-        (36, 1237, 735, 1752),
-        (36, 1292, 757, 1752),
-        (36, 708, 735, 1752),
-        (36, 1380, 1164, 1752),
-        (36, 1300, 1164, 1752),
-        (36, 1440, 640, 1752),
-    ):
-        canvas = Image.new("RGBA", (1200, 1800), (243, 238, 230, 255))
-        geo = _draw_plan(canvas, box, topdown)
-        regions = geo["regions"]
-        assert not _overlap(regions["legend"], regions["caption"])
-        assert regions["plan"][3] <= regions["legend"][1]
-        assert len(geo["label_boxes"]) == 4
-        for label in geo["label_boxes"]:
-            px0, py0, px1, py1 = regions["plan"]
-            assert px0 - 1 <= label[0] and label[2] <= px1 + 1, (box, label)
-            assert py0 - 1 <= label[1] and label[3] <= py1 + 1, (box, label)
-            assert not _overlap(label, regions["legend"]), (box, label)
-            assert not _overlap(label, regions["caption"]), (box, label)
+    spec = board_spec(lead, deliverable, {})
+    layout = board_layout(spec)
+    assert spec["draws_room_flow"] is False
+    assert layout["plan"] is None
+    assert "1.70 m" not in customer_board_text(spec)
+    assert "02 Change" not in customer_board_text(spec)
 
 
 def test_board_fonts_do_not_fall_back_to_the_bitmap_default(monkeypatch):
@@ -549,5 +532,5 @@ def test_board_fonts_do_not_fall_back_to_the_bitmap_default(monkeypatch):
         face = image_board._font(kind, 15)
         assert isinstance(face, ImageFont.FreeTypeFont), kind
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    face = image_board._font("sans", 15)
+    face = image_board._font("regular", 15)
     assert probe.textlength("zones approximate", font=face) > probe.textlength("zonesapproximate", font=face) + 2

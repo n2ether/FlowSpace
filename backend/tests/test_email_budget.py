@@ -50,7 +50,7 @@ def _png(size=(64, 48)) -> bytes:
     return buf.getvalue()
 
 
-PNG_NAMES = ["Nicholas's Nursery — Blueprint.png", "Nicholas's Nursery — Room Flow.png"]
+PNG_NAMES = ["Nicholas's Nursery — Design Plan.png", "Nicholas's Nursery — Room Flow.png"]
 PHOTOS = [_photo(seed=i) for i in range(2)]
 VISUALS = [{"label": "Organized-1", "bytes": PHOTOS[0]}, {"label": "Organized-2", "bytes": PHOTOS[1]}]
 
@@ -79,7 +79,7 @@ def _sizes(attachments):
 def test_slug_is_readable_and_has_no_codes():
     assert attachment_slug(TITLE) == "Nicholas-Nursery"
     assert attachment_slug("Nicholas’s Nursery") == "Nicholas-Nursery"
-    assert attachment_slug("") == "Blueprint"
+    assert attachment_slug("") == "Design-Plan"
 
 
 def test_views_keep_full_resolution_when_they_fit(caplog):
@@ -269,7 +269,7 @@ def test_send_draft_and_send_final_attach_organized_photos_but_not_befores(monke
 
     title = server._customer_title(LEAD, {"lead_id": LEAD["id"], "project_title": TITLE})
     slug = attachment_slug(title)
-    png_names = [display_filename(title, "Blueprint"), display_filename(title, "Room Flow")]
+    png_names = [display_filename(title, "Design Plan"), display_filename(title, "Room Flow")]
     for payload, suffix in ((draft, "-DRAFT"), (final, "")):
         attachments = payload["attachments"]
         assert [a["filename"] for a in attachments] == [

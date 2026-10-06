@@ -3,6 +3,12 @@
   "outline_credit": "Camila",
   "source_views": 4,
   "subtitle": "A calmer flow for sleep, change, comfort & play",
+  "view_names": ["Window and crib", "Crib wall", "Rocker", "Dresser and door"],
+  "view_chips": ["Window + crib", "Sleep + comfort", "Rocker", "Dresser"],
+  "zone_locations": {
+    "sleep": "The crib stays on the wall opposite the dresser, with its near end toward the window.",
+    "comfort": "The rocker stays on the crib wall, farther from the window than the crib."
+  },
   "outline": [[0.0, 0.0], [2.26, 0.0], [2.26, 2.76], [0.56, 2.76], [0.0, 2.05]],
   "walls": [
     {"length_m": 2.26, "label": "WINDOW \u2022 2.26 m WALL"},

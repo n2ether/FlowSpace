@@ -69,4 +69,21 @@ def test_presentation_is_customer_copy_with_separate_cards():
     assert "QA" not in (view["hero_label"] or "").upper()
     png = build_image_board(lead=lead, deliverable=deliverable, images=images)
     board = Image.open(io.BytesIO(png))
-    assert board.size[1] / board.size[0] == 1.5
+    assert board.size == (1600, 2540)
+
+
+def test_presentation_carries_the_design_plan_sections_in_board_order():
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    view = build_presentation(doc["lead"], doc["deliverable"], {})
+    plan = view["design_plan"]
+    assert plan["label"] == "FlowSpace Design Plan"
+    assert plan["title"] == "Nicholas's Nursery"
+    assert plan["review_pill"] == "DRAFT / REVIEW"
+    assert view["review"]["released"] is False
+    assert [zone["title"] for zone in plan["zones"]] == ["Sleep", "Change", "Comfort", "Play + Storage"]
+    assert plan["snapshot"]["note"] == "Representative examples for reference; prices and availability may vary."
+    assert len(plan["snapshot"]["items"]) <= 5
+    assert len(plan["roadmap"]) == 3
+    assert plan["why"]["headline"] == "Each part of the room gets one clear job."
+    assert view["companion_modules"] == ["safety", "climate", "maintenance", "styling", "assessment", "shopping", "views"]
+    assert view["styling"] and view["assessment"]["zones"]

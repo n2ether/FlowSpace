@@ -1,8 +1,9 @@
 """
 Email delivery via Resend.
 
-Sends the completed FlowSpace Blueprint PDF to the customer
-and a notification copy to the admin inbox.
+Sends the FlowSpace Design Plan board, the Room Flow map, and the Companion
+Guide PDF to the customer, and a notification copy to the admin inbox. Copy
+and colors come from ``design_plan_standards``.
 """
 from __future__ import annotations
 
@@ -16,6 +17,21 @@ from typing import Optional, Tuple, List, Dict, Any
 
 import resend
 
+from design_plan_standards import (
+    BRAND_GREEN,
+    BRAND_GREIGE,
+    BRAND_OFF,
+    BRAND_TINTS,
+    COMPANION_NAME,
+    DESIGN_PLAN_LABEL,
+    DESIGN_PLAN_NAME,
+    EMAIL_COMPANION_COPY,
+    EMAIL_DESIGN_PLAN_COPY,
+    EMAIL_ROOM_FLOW_COPY,
+    FONT_STACK,
+    REVIEW_STATUS,
+    TAGLINE,
+)
 from image_orientation import upright_jpeg_bytes
 from pdf_generator import plan_title, space_label
 
@@ -42,8 +58,13 @@ def _first_name(customer_name: str) -> str:
     parts = str(customer_name or "").strip().split()
     return parts[0] if parts else "there"
 
-BLUEPRINT_COPY = "The portrait Blueprint is shown below and attached as a full-size image."
-ROOM_FLOW_COPY = "The Room Flow map is shown below and attached as a full-size image."
+BLUEPRINT_COPY = EMAIL_DESIGN_PLAN_COPY
+ROOM_FLOW_COPY = EMAIL_ROOM_FLOW_COPY
+
+_GREEN = BRAND_GREEN
+_MUTED = BRAND_TINTS["muted"]
+_LABEL = f"margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:{BRAND_GREEN};"
+_BODY = f"margin:0 0 12px;font-size:16px;color:{_MUTED};line-height:1.6;"
 
 
 def customer_email_html(
@@ -56,19 +77,21 @@ def customer_email_html(
     room_flow_src: str = "",
     outline_note: str = "",
     story: str = "",
+    released: bool = False,
 ) -> str:
     """Customer email layout a final send uses.
 
-    The Blueprint preview is the first block in the body, then the room-flow
-    zone map when one is attached. The companion guide follows. No review
-    codes, no package status. ``preview_src`` / ``room_flow_src`` are
-    ``cid:`` references on a real send, or a browser-readable URL or data URI
-    when rendering the same layout locally.
+    The Design Plan preview is the first block in the body, then the Room Flow
+    map as its own attachment when one is sent. The Companion Guide follows.
+    The heading is the review status until the package is released. No review
+    codes. ``preview_src`` / ``room_flow_src`` are ``cid:`` references on a
+    real send, or a browser-readable URL or data URI when rendering locally.
     """
     space = (project_title or plan_title(space_type)).strip() or plan_title(space_type)
     story = html.escape(" ".join(str(story or "").split()))
+    heading = html.escape(space) if released else REVIEW_STATUS
     story_block = (
-        f'<p style="margin:0 0 16px;font-size:19px;color:#1F3D2C;line-height:1.5;font-style:italic;">{story}</p>\n              '
+        f'<p style="margin:0 0 16px;font-size:19px;color:{_GREEN};line-height:1.5;font-weight:300;">{story}</p>\n              '
         if story
         else ""
     )
@@ -76,38 +99,38 @@ def customer_email_html(
     if room_flow_src:
         outline = f" {outline_note.strip()}" if outline_note.strip() else ""
         room_flow = f"""
-              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Room flow</p>
-              <p style="margin:0 0 12px;font-size:16px;color:#475569;line-height:1.6;">{ROOM_FLOW_COPY}</p>
-              <img src="{room_flow_src}" alt="{space} room flow map" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
-              <p style="margin:0 0 28px;font-size:16px;color:#475569;line-height:1.6;">Each zone has one job, with a clear path through the room.{outline}</p>
+              <p style="{_LABEL}">Room Flow</p>
+              <p style="{_BODY}">{ROOM_FLOW_COPY}</p>
+              <img src="{room_flow_src}" alt="{space} Room Flow map" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 12px;border:0;">
+              <p style="margin:0 0 28px;font-size:16px;color:{_MUTED};line-height:1.6;">Each zone has one job, with a clear path through the room.{outline}</p>
         """
     if preview_src:
         guide_link = ""
         if guide_href:
             guide_link = f"""
               <p style="margin:0 0 16px;">
-                <a href="{guide_href}" style="color:#1F3D2C;font-size:16px;font-weight:700;">Open the companion guide</a>
+                <a href="{guide_href}" style="color:{_GREEN};font-size:16px;font-weight:600;">Open the {COMPANION_NAME}</a>
               </p>
             """
         preview = f"""
-              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Your Blueprint</p>
-              <p style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#1F3D2C;font-weight:600;">{space}</p>
-              <p style="margin:0 0 12px;font-size:16px;color:#475569;line-height:1.6;">{BLUEPRINT_COPY}</p>
-              <img src="{preview_src}" alt="{space} Blueprint" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 28px;border:0;">
+              <p style="{_LABEL}">{DESIGN_PLAN_LABEL}</p>
+              <p style="margin:0 0 12px;font-size:22px;line-height:1.25;color:{_GREEN};font-weight:600;">{space}</p>
+              <p style="{_BODY}">{BLUEPRINT_COPY}</p>
+              <img src="{preview_src}" alt="{space} {DESIGN_PLAN_NAME}" width="560" style="width:100%;max-width:560px;height:auto;border-radius:16px;display:block;margin:0 0 28px;border:0;">
               {room_flow}
-              <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1F3D2C;">Companion guide</p>
+              <p style="{_LABEL}">{COMPANION_NAME}</p>
               {guide_link}
-              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.6;">Next, open the attached companion guide on your phone for safety essentials, climate comfort, why it helps, the shopping list, and each before and after.</p>
+              <p style="margin:0 0 24px;font-size:16px;color:{_MUTED};line-height:1.6;">{EMAIL_COMPANION_COPY}</p>
         """
     else:
         preview = f"""
-              <p style="margin:0 0 24px;font-size:16px;color:#475569;line-height:1.7;">
+              <p style="margin:0 0 24px;font-size:16px;color:{_MUTED};line-height:1.7;">
                 Your personalized <strong>{space}</strong> is attached.
               </p>
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
                 <tr>
-                  <td align="center" style="background:#1F3D2C;border-radius:999px;padding:14px 18px;">
-                    <span style="color:#ffffff;font-size:16px;font-weight:700;">Open your Blueprint</span>
+                  <td align="center" style="background:{_GREEN};border-radius:999px;padding:14px 18px;">
+                    <span style="color:#ffffff;font-size:16px;font-weight:600;">Open your {DESIGN_PLAN_NAME}</span>
                   </td>
                 </tr>
               </table>
@@ -118,45 +141,45 @@ def customer_email_html(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{REVIEW_STATUS}</title>
+  <title>{heading}</title>
 </head>
-<body style="margin:0;padding:0;background:#f3eee6;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eee6;padding:24px 0;">
+<body style="margin:0;padding:0;background:{BRAND_OFF};font-family:{FONT_STACK};">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:{BRAND_OFF};padding:24px 0;">
     <tr>
       <td align="center" style="padding:0 16px;">
         <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;">
 
           <tr>
-            <td style="background:#1F3D2C;padding:24px 20px;">
-              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">FlowSpace</span>
-              <div style="font-size:13px;color:#cfe2d7;margin-top:4px;">Clear space. Create flow. Live better.</div>
+            <td style="background:{_GREEN};padding:24px 20px;">
+              <span style="font-size:22px;font-weight:500;color:#ffffff;letter-spacing:-0.3px;">FlowSpace</span>
+              <div style="font-size:13px;color:{BRAND_TINTS['sage_light']};margin-top:4px;">{TAGLINE}</div>
             </td>
           </tr>
 
           <tr>
             <td style="padding:28px 20px 24px;">
-              <h1 style="margin:0 0 12px;font-size:28px;font-weight:500;color:#1F3D2C;letter-spacing:-0.4px;line-height:1.2;">
-                {REVIEW_STATUS}
+              <h1 style="margin:0 0 12px;font-size:26px;font-weight:600;color:{_GREEN};letter-spacing:-0.3px;line-height:1.2;">
+                {heading}
               </h1>
-              {story_block}<p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
-                Hi {_first_name(customer_name)}. Start with the portrait plan below.
+              {story_block}<p style="margin:0 0 20px;font-size:16px;color:{_MUTED};line-height:1.6;">
+                Hi {_first_name(customer_name)}. Start with your {DESIGN_PLAN_NAME} below.
               </p>
               {preview}
-              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
+              <p style="margin:0 0 20px;font-size:16px;color:{_MUTED};line-height:1.6;">
                 An organized space is about a lighter day, not just a prettier photo.
               </p>
-              <p style="margin:0;font-size:16px;color:#64748b;line-height:1.6;">
+              <p style="margin:0;font-size:16px;color:{_MUTED};line-height:1.6;">
                 Warmly,<br>
-                <strong style="color:#1F3D2C;">The FlowSpace Team</strong><br>
-                <a href="https://flowspace.solutions" style="color:#1F3D2C;">flowspace.solutions</a>
+                <strong style="color:{_GREEN};">The FlowSpace Team</strong><br>
+                <a href="https://flowspace.solutions" style="color:{_GREEN};">flowspace.solutions</a>
               </p>
             </td>
           </tr>
 
           <tr>
-            <td style="background:#f7f4ef;padding:16px 20px;border-top:1px solid #e7e1d6;">
-              <p style="margin:0;font-size:13px;color:#6e655c;text-align:center;line-height:1.5;">
-                FlowSpace · Better spaces, better living.<br>
+            <td style="background:{BRAND_GREIGE};padding:16px 20px;">
+              <p style="margin:0;font-size:13px;color:{_MUTED};text-align:center;line-height:1.5;">
+                {TAGLINE}<br>
                 Questions? Reply to this email anytime.
               </p>
             </td>
@@ -188,11 +211,11 @@ def attachment_slug(title: str) -> str:
     """``Nicholas's Nursery`` -> ``Nicholas-Nursery``. Never a lead id or a pipeline code."""
     text = re.sub(r"['’]s\b", "", title or "")
     words = re.findall(r"[A-Za-z0-9]+", text)
-    return "-".join(words) or "Blueprint"
+    return "-".join(words) or "Design-Plan"
 
 
 def display_filename(title: str, kind: str) -> str:
-    """``Nicholas's Nursery`` + ``Blueprint`` -> ``Nicholas's Nursery — Blueprint.png``.
+    """``Nicholas's Nursery`` + ``Design Plan`` -> ``Nicholas's Nursery — Design Plan.png``.
 
     Apostrophes and the em dash stay (Resend encodes non-ASCII filenames);
     only characters no filesystem accepts are removed.
@@ -263,7 +286,7 @@ def package_attachments(
     inline: List[dict] = []
     files: List[dict] = []
     if board_bytes:
-        pngs = [("Blueprint", board_bytes, "blueprint-preview")]
+        pngs = [(DESIGN_PLAN_NAME, board_bytes, "blueprint-preview")]
         if zone_map_bytes:
             pngs.append(("Room Flow", zone_map_bytes, "room-flow"))
         for kind, data, cid in pngs:
@@ -318,6 +341,7 @@ def _customer_html(
     room_flow_src: str = "",
     outline_note: str = "",
     story: str = "",
+    released: bool = False,
 ) -> str:
     return customer_email_html(
         customer_name,
@@ -327,6 +351,7 @@ def _customer_html(
         room_flow_src=room_flow_src if two_files else "",
         outline_note=outline_note,
         story=story,
+        released=released,
     )
 
 
@@ -341,8 +366,13 @@ def email_body_html(
     lead_id: str = "",
     preview_src: str = "",
     room_flow_src: str = "",
+    released: bool = False,
 ) -> str:
-    """The exact HTML a send uses. The preview endpoint passes data URIs where a send passes ``cid:``."""
+    """The exact HTML a send uses. The preview endpoint passes data URIs where a send passes ``cid:``.
+
+    A draft is always a review version. A customer layout keeps the review heading
+    until ``released`` (``design_plan_standards.is_released``).
+    """
     title = (project_title or "").strip()
     room_flow_src = room_flow_src if preview_src else ""
     if draft:
@@ -365,6 +395,7 @@ def email_body_html(
         room_flow_src=room_flow_src,
         outline_note=outline_note,
         story=story,
+        released=released,
     )
 
 
@@ -380,7 +411,7 @@ def _admin_html(customer_name: str, customer_email: str, space_type: str, lead_i
 <!DOCTYPE html>
 <html>
 <body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
-  <h2 style="color:#1F3D2C;">New FlowSpace Blueprint Delivered ✅</h2>
+  <h2 style="color:{BRAND_GREEN};">New FlowSpace {DESIGN_PLAN_NAME} Delivered ✅</h2>
   <table style="border-collapse:collapse;width:100%;max-width:480px;">
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Customer</td><td>{customer_name}</td></tr>
     <tr><td style="padding:8px 0;font-weight:600;color:#475569;">Email</td><td>{customer_email}</td></tr>
@@ -406,9 +437,10 @@ async def send_blueprint(
     extra_visuals: Optional[List[Dict[str, Any]]] = None,
     outline_note: str = "",
     story: str = "",
+    released: bool = False,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Send the companion PDF and, when present, the image board and zone map.
+    Send the companion PDF and, when present, the Design Plan board and zone map.
 
     Returns (True, None) on customer-email success. Admin notify failures are
     logged but do not fail the customer send. Returns (False, reason) if the
@@ -425,7 +457,7 @@ async def send_blueprint(
     resend.api_key = api_key
     space = plan_title(space_type)
     shown = (project_title or "").strip()
-    subject = f"Your FlowSpace Blueprint — {shown}" if shown else f"Your FlowSpace {space}"
+    subject = f"Your FlowSpace {DESIGN_PLAN_NAME} — {shown}" if shown else f"Your FlowSpace {space}"
     sender = _from_email()
     html = email_body_html(
         customer_name=customer_name,
@@ -433,6 +465,7 @@ async def send_blueprint(
         project_title=shown,
         outline_note=outline_note,
         story=story,
+        released=released,
         **_cid_sources(board_bytes, zone_map_bytes),
     )
     attachments = await asyncio.to_thread(
@@ -467,7 +500,7 @@ async def send_blueprint(
             {
                 "from": sender,
                 "to": [_admin_email()],
-                "subject": f"[FlowSpace] Blueprint delivered — {customer_name} ({space})",
+                "subject": f"[FlowSpace] {DESIGN_PLAN_NAME} delivered — {customer_name} ({space})",
                 "html": _admin_html(customer_name, customer_email, space_type, lead_id),
                 "attachments": attachments,
             },
@@ -479,16 +512,13 @@ async def send_blueprint(
     return True, None
 
 
-REVIEW_STATUS = "DRAFT. Review version. Not yet approved. Customer release held."
-
-
 def _review_sheet_html(customer_name: str, lead_id: str, *, incomplete: bool) -> str:
     missing = " A required after is still missing, so customer release held." if incomplete else ""
     return f"""
 <!DOCTYPE html>
 <html>
 <body style="font-family:Helvetica,Arial,sans-serif;color:#1f2937;padding:20px;">
-  <h2 style="color:#1F3D2C;">FlowSpace contact sheet — DRAFT</h2>
+  <h2 style="color:{BRAND_GREEN};">FlowSpace contact sheet — DRAFT</h2>
   <p>{REVIEW_STATUS}{missing}</p>
   <p>This is a review sheet for {customer_name} (lead <code>{lead_id}</code>).</p>
   <p>Each row is one source photo and the after edited from that same camera. It is not the customer image board and not the companion PDF.</p>
@@ -563,22 +593,18 @@ def _draft_package_html(
         room_flow_src=room_flow_src,
         outline_note=outline_note,
         story=story,
+        released=False,
     )
-    inner = inner.replace(
-        f"Your Blueprint is ready, {customer_name}",
-        REVIEW_STATUS,
-    )
-    inner = inner.replace("Your FlowSpace Blueprint is Ready", "FlowSpace DRAFT — review version")
     preview = _preview_url(lead_id)
     banner = f"""
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1F3D2C;padding:16px 0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:{BRAND_GREEN};padding:16px 0;">
     <tr>
       <td align="center" style="padding:0 16px;">
         <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
           <tr>
-            <td style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;">
+            <td style="color:#ffffff;font-family:{FONT_STACK};font-size:14px;line-height:1.5;">
               <strong>{REVIEW_STATUS}</strong>
-              <a href="{preview}" style="color:#cfe2d7;">Open the mobile preview</a>
+              <a href="{preview}" style="color:{BRAND_TINTS['sage_light']};">Open the mobile preview</a>
             </td>
           </tr>
         </table>
@@ -586,9 +612,9 @@ def _draft_package_html(
     </tr>
   </table>
 """
-    marker = '<body style="margin:0;padding:0;background:#f3eee6;font-family:\'Helvetica Neue\',Helvetica,Arial,sans-serif;">'
-    if marker in inner:
-        return inner.replace(marker, marker + banner, 1)
+    marker = re.search(r"<body[^>]*>", inner)
+    if marker:
+        return inner[: marker.end()] + banner + inner[marker.end() :]
     return banner + inner
 
 
