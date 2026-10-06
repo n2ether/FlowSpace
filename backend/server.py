@@ -24,6 +24,7 @@ from image_board import build_image_board
 from room_flow import build_zone_map, outline_caption
 from blueprint_consistency import internal_record, project_story_line
 from blueprint_presentation import build_presentation
+from design_plan_standards import is_released
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
@@ -261,6 +262,8 @@ class Deliverable(BaseModel):
     source_afters: List[Dict[str, Any]] = []
     non_room_uploads: List[Dict[str, Any]] = []
     package_status: Optional[str] = None
+    # Reviewer sign-off on the Design Plan. Until set, every surface reads DRAFT / REVIEW.
+    design_plan_approved: bool = False
     contact_sheet_url: Optional[str] = None
     include_customer_photos: bool = True
     blueprint_layers: Optional[Dict[str, Any]] = None
@@ -978,16 +981,16 @@ def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, A
     stem = "".join(ch if ch.isalnum() else "_" for ch in title)
     while "__" in stem:
         stem = stem.replace("__", "_")
-    stem = stem.strip("_") or "Blueprint"
-    board = f"FlowSpace_{stem}_Blueprint_{safe_name}.png"
-    pdf = f"FlowSpace_{stem}_Companion_{safe_name}.pdf"
-    package = f"FlowSpace_{stem}_Blueprint_{safe_name}.zip"
+    stem = stem.strip("_") or "Design_Plan"
+    board = f"FlowSpace_{stem}_Design_Plan_{safe_name}.png"
+    pdf = f"FlowSpace_{stem}_Companion_Guide_{safe_name}.pdf"
+    package = f"FlowSpace_{stem}_Design_Plan_{safe_name}.zip"
     return board, pdf, package
 
 
 def _zone_map_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str, str]:
     board, pdf, package = _blueprint_filenames(lead, deliverable)
-    return board, pdf, package, board.replace("_Blueprint_", "_Room_Flow_", 1)
+    return board, pdf, package, board.replace("_Design_Plan_", "_Room_Flow_", 1)
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/presentation")
@@ -1105,6 +1108,7 @@ async def render_customer_email_preview(
     html = email_body_html(
         **_email_inputs(lead, deliverable),
         draft=draft,
+        released=is_released(deliverable),
         lead_id=lead_id,
         preview_src=_png_data_uri(board),
         room_flow_src=_png_data_uri(zone_map) if board else "",
@@ -1458,6 +1462,7 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         board_bytes=board_bytes,
         zone_map_bytes=zone_map_bytes,
         extra_visuals=_client_facing_visuals(images),
+        released=is_released(deliverable),
     )
     now = _iso(datetime.now(timezone.utc))
     if not sent:

@@ -1,6 +1,7 @@
 """Unit tests for branded PDF generation (no Mongo / live API)."""
 import io
 import json
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -102,8 +103,8 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "Bedroom Design Plan" not in text
     low = text.lower()
 
-    assert "portrait blueprint" in low
-    assert "room flow map" in low
+    assert "design plan" in low
+    assert "room flow" in low
     assert "companion" in low
     assert "safety essentials" in low
     assert "climate comfort" in low
@@ -175,7 +176,7 @@ def test_pdf_placeholder_when_images_missing():
     assert _page_image_count(pdf, 0) == 0
     assert "BEFORE & AFTER" not in text
     assert COMPARE_BEFORE_BANNER not in text
-    assert "do not invent an after" in text.lower() or "portrait blueprint" in text.lower()
+    assert "do not invent an after" in text.lower() or "design plan" in text.lower()
 
 
 def test_pdf_embeds_front_view_bytes_in_hero():
@@ -363,15 +364,16 @@ def test_curated_shopping_links_are_labeled_and_unmatched_rows_get_a_search():
     assert "Hi Camila." in flat
     assert "Camila Sales" not in flat
     assert "The room outline follows your measurements, while furniture footprints and zones remain approximate." in flat
-    for banned in ("95%", "SOURCE_", "AFTER_", "9dbedfba", "not a measured", "is ready"):
+    for banned in ("95%", "SOURCE_", "AFTER_", "9dbedfba", "not a measured"):
         assert banned not in flat
+    assert not re.search(r"\b(?:plan|blueprint|package|guide) is ready\b", flat, re.I)
 
 
 CAMILA_OPENING = (
-    "Hi Camila. Start with the portrait Blueprint and Room Flow map to see the room's overall plan and "
+    "Hi Camila. Start with the Design Plan and the Room Flow map to see the room's overall plan and "
     "organization. The room outline follows your measurements, while furniture footprints and zones remain "
-    "approximate. This companion guide brings together the practical essentials: safety, climate comfort, "
-    "the reasoning behind the zone-based plan, the shopping list, and each source-matched before-and-after view."
+    "approximate. This Companion Guide holds the practical detail: safety, climate comfort, maintenance, "
+    "styling rules, the designer assessment, the shopping list, and each before-and-after view."
 )
 CAMILA_WHY = (
     "FlowSpace gives each part of the room a clear job\u2014sleep, change, comfort, or play + storage. "
@@ -407,15 +409,16 @@ def test_companion_opening_and_zone_approach_copy_are_exact():
     lead, deliverable, images = _camila_curated()
     pdf = build_pdf(lead=lead, deliverable=deliverable, images=images)
     first = _flat(_page_text(pdf, 0))
+    full = _flat(_text(pdf))
     assert CAMILA_OPENING in first
-    assert "WHY THE FLOWSPACE ZONE APPROACH HELPS " + CAMILA_WHY in first
-    assert "WHY IT HELPS" not in _flat(_text(pdf))
+    assert "WHY THE FLOWSPACE ZONE APPROACH HELPS " + CAMILA_WHY in full
+    assert "WHY IT HELPS" not in full
 
 
 def test_opening_names_an_approximate_outline_when_none_was_measured():
     pdf = build_pdf(lead=LEAD, deliverable=DELIVERABLE, images={})
     first = _flat(_page_text(pdf, 0))
-    assert "Start with the portrait Blueprint and Room Flow map" in first
+    assert "Start with the Design Plan and the Room Flow map" in first
     assert "The room outline is approximate" in first
     assert "follows your measurements" not in first
 
@@ -425,25 +428,29 @@ def test_curated_list_total_and_link_note_share_the_shopping_page():
     pdf = build_pdf(lead=lead, deliverable=deliverable, images=images)
     reader = PdfReader(io.BytesIO(pdf))
     pages = [_flat(page.extract_text() or "") for page in reader.pages]
-    # Guide, shopping list, then one before/after page per source photo. No spill page.
-    assert len(pages) == 6
-    shop = next(i for i, text in enumerate(pages) if "SHOPPING LIST" in text)
-    page = pages[shop]
-    assert "Illustrative reference total: $195." in page
-    assert "Product pages are linked where verified; search links are labeled." in page
-    assert "Soft cotton area rug" not in page and "Furniture anti-tip kit" in page
-    assert "Felt wall decor — moon or planet accent" in page and "Search at Target" in page
+    # Guide modules, shopping list, then one before/after page per source photo.
+    assert len(pages) == 8
+    shop_pages = [text for text in pages if "Qty " in text and "each" in text]
+    assert shop_pages
+    joined_shop = " ".join(shop_pages)
+    total_page = next(text for text in pages if "Illustrative reference total: $195." in text)
+    assert "Product pages are linked where verified; search links are labeled." in total_page
+    assert "Soft cotton area rug" not in joined_shop and "Furniture anti-tip kit" in joined_shop
+    assert "Felt wall decor — moon or planet accent" in joined_shop and "Search at Target" in joined_shop
     assert sum("Illustrative reference total" in text for text in pages) == 1
     for text in pages:
         body = text.split("Windows and room proportions follow your photos.", 1)[-1]
         assert len(body) > 120, text
     links = [
         annot.get_object().get("/A", {}).get("/URI")
-        for annot in reader.pages[shop].get("/Annots") or []
+        for page in reader.pages
+        for annot in page.get("/Annots") or []
     ]
     assert sum(1 for url in links if url and url.startswith("https://www.target.com/")) == 9
     assert not any(url and "nuloom-deepika" in url for url in links)
     assert len(pdf) < 5 * 1024 * 1024
     for text in pages:
-        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "QA", "is ready"):
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba"):
             assert banned not in text
+        assert not re.search(r"\bQA\b", text)
+        assert not re.search(r"\b(?:plan|blueprint|package|guide) is ready\b", text, re.I)

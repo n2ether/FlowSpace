@@ -183,8 +183,11 @@ def test_board_shows_every_source_after_and_does_not_crop_fill_a_gap():
     assert len(layout["sources"]) == 2
     supporting = img.getpixel(mid(layout["sources"][0]))
     assert supporting[0] > 140 and supporting[1] < 80
-    missing = img.getpixel(mid(layout["sources"][1]))
+    # The empty third view is a greige panel, not a crop of another after.
+    empty = layout["sources"][1]
+    missing = img.getpixel((empty[0] + 10, empty[1] + 10))
     assert missing[0] > 180 and missing[1] > 180
+    assert img.getpixel(mid(layout["sources"][1])) != supporting
 
 
 def test_pdf_prints_one_before_after_pair_per_source():
@@ -204,8 +207,8 @@ def test_pdf_prints_one_before_after_pair_per_source():
     reader = PdfReader(io.BytesIO(pdf))
     text = "\n".join((page.extract_text() or "") for page in reader.pages)
     flat = " ".join(text.split())
-    assert "Window and crib" in flat
-    assert "Crib wall" in flat
+    assert "Organized view" in flat
+    assert "Room view 2" in flat
     assert "same camera" in flat.lower()
     assert "SOURCE_" not in flat
     assert "AFTER_" not in flat

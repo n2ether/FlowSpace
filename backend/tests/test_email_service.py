@@ -174,7 +174,7 @@ def test_sends_image_board_and_companion(monkeypatch):
     attachments = calls[0]["attachments"]
     assert len(attachments) == 3
     assert [a["content_type"] for a in attachments] == ["image/png", "image/png", "application/pdf"]
-    assert attachments[0]["filename"] == attachments[1]["filename"] == "Kids' room Organization Plan — Blueprint.png"
+    assert attachments[0]["filename"] == attachments[1]["filename"] == "Kids' room Organization Plan — Design Plan.png"
     assert attachments[0].get("content_id") == "blueprint-preview"
     assert "content_id" not in attachments[1]
     assert attachments[2]["filename"] == "Kids-room-Organization-Plan-Companion.pdf"
@@ -228,7 +228,7 @@ def test_send_draft_package_not_final(monkeypatch):
     assert "is ready" not in payload["html"].lower()
     assert len(payload["attachments"]) == 3
     assert [a.get("content_id") for a in payload["attachments"]] == ["blueprint-preview", None, None]
-    assert payload["attachments"][1]["filename"].endswith(" — Blueprint.png")
+    assert payload["attachments"][1]["filename"].endswith(" — Design Plan.png")
     assert "DRAFT" in payload["attachments"][2]["filename"]
     html = payload["html"]
     low = html.lower()
@@ -306,7 +306,7 @@ def test_email_preview_shows_the_room_flow_map_without_codes():
     low = html.lower()
     assert "data:image/png;base64,zonemap" in html
     assert low.find("base64,board") < low.find("room flow") < low.find("companion guide")
-    assert "safety essentials, climate comfort, why it helps, the shopping list, and each before and after" in html
+    assert "safety, climate comfort, maintenance, styling rules, the designer assessment, the shopping list, and each before and after" in html
     assert "weekly reset" not in low
     assert "DRAFT. Review version. Not yet approved. Customer release held." in html
     for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready"):
@@ -336,7 +336,7 @@ def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
     assert "cid:room-flow" in calls[0]["html"]
 
 
-BLUEPRINT_NAME = "Nicholas's Nursery — Blueprint.png"
+BLUEPRINT_NAME = "Nicholas's Nursery — Design Plan.png"
 ROOM_FLOW_NAME = "Nicholas's Nursery — Room Flow.png"
 
 
@@ -432,11 +432,11 @@ def test_send_final_attaches_full_size_views_and_greets_by_first_name(monkeypatc
 
 
 def test_display_filenames_keep_the_apostrophe_and_em_dash():
-    assert BLUEPRINT_COPY == "The portrait Blueprint is shown below and attached as a full-size image."
-    assert ROOM_FLOW_COPY == "The Room Flow map is shown below and attached as a full-size image."
-    assert display_filename("Nicholas's Nursery", "Blueprint") == "Nicholas's Nursery — Blueprint.png"
+    assert BLUEPRINT_COPY == "Your Design Plan is shown below and attached as a full-size image."
+    assert ROOM_FLOW_COPY == "The Room Flow map is its own page, shown below and attached as a separate full-size image."
+    assert display_filename("Nicholas's Nursery", "Design Plan") == "Nicholas's Nursery — Design Plan.png"
     assert display_filename("Nicholas's Nursery", "Room Flow") == "Nicholas's Nursery — Room Flow.png"
-    assert display_filename('A/B: "Den"?', "Blueprint") == "AB Den — Blueprint.png"
+    assert display_filename('A/B: "Den"?', "Design Plan") == "AB Den — Design Plan.png"
     assert display_filename("", "Room Flow") == "FlowSpace — Room Flow.png"
 
 

@@ -19,6 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from blueprint_layers import BUDGET_LABELS
+from design_plan_standards import COMPANION_NAME, SHOPPING_DISCLAIMER, SNAPSHOT_TOTAL_LABEL, companion_modules
 from evergreen_copy import BEDTIME_RITUAL_BODY, BEDTIME_RITUAL_TITLE, apply_evergreen, evergreen_text
 from space_rails import NURSERY_DO_NOT, is_nursery_space, mentions_six_drawer
 
@@ -178,14 +179,8 @@ _BLANKET_NOTE = (
     "We left bedding blankets off the shopping list. The crib stays bare except a fitted sheet, "
     "and a warmer window is a thermal curtain or shade, not a blanket."
 )
-# Location lines for this nursery. The photos put the crib's near end toward the
-# window, on the wall opposite the dresser, and the rocker farther from the window.
-_CRIB_LOCATION = (
-    "The crib stays on the wall opposite the dresser, with its near end toward the window."
-)
-_ROCKER_LOCATION = (
-    "The rocker stays on the crib wall, farther from the window than the crib."
-)
+# A room's photo-checked location lines live in its Room Flow record
+# (``zone_locations``); a plan sentence that contradicts them is replaced.
 _CRIB_WRONG_LOCATION = re.compile(
     r"\b(?:away from the window|far from the window|current corner|away from the dresser)\b",
     re.I,
@@ -231,14 +226,13 @@ _GENERIC_SAFETY_ESSENTIALS = (
 NURSERY_BEDTIME_TITLE = BEDTIME_RITUAL_TITLE
 NURSERY_BEDTIME = BEDTIME_RITUAL_BODY
 
-SHOPPING_DISCLAIMER = "Representative examples for reference; prices and availability may vary."
-COMPANION_ESSENTIALS_NOTE = "The Companion Guide includes the room's safety and climate essentials."
+COMPANION_ESSENTIALS_NOTE = f"The {COMPANION_NAME} includes the room's safety and climate essentials."
 
 
 def reference_total_line(display: str) -> str:
     """Shopping total as the customer reads it: ``Illustrative reference total: $195.``"""
     display = str(display or "").strip()
-    return f"Illustrative reference total: {display}." if display and display not in {"—", "-"} else ""
+    return f"{SNAPSHOT_TOTAL_LABEL}: {display}." if display and display not in {"—", "-"} else ""
 
 _WARNING_MARKERS = (
     "heater",
@@ -345,18 +339,28 @@ def _swap_location_sentences(text: str, pattern: re.Pattern[str], replacement: s
     return " ".join(kept).strip()
 
 
-def align_nursery_zone_locations(zones: List[Any]) -> None:
-    """Make crib and rocker locations match the photos. Other sentences stay."""
+def align_nursery_zone_locations(zones: List[Any], lead: Optional[Dict[str, Any]] = None) -> None:
+    """Make crib and rocker locations match the photos. Other sentences stay.
+
+    Only a room whose Room Flow record states the locations is corrected; another
+    nursery's crib may really sit away from the window.
+    """
+    from room_flow import record_zone_locations
+
+    locations = record_zone_locations(lead)
+    crib, rocker = locations.get("sleep", ""), locations.get("comfort", "")
+    if not (crib or rocker):
+        return
     for zone in zones or []:
         if not isinstance(zone, dict):
             continue
         title = str(zone.get("title") or "")
         desc = str(zone.get("desc") or "")
         blob = f"{title} {desc}".lower()
-        if any(word in blob for word in ("crib", "sleep")):
-            desc = _swap_location_sentences(desc, _CRIB_WRONG_LOCATION, _CRIB_LOCATION)
-        if any(word in blob for word in ("rocker", "rocking", "feed", "feeding")):
-            desc = _swap_location_sentences(desc, _ROCKER_WRONG_LOCATION, _ROCKER_LOCATION)
+        if crib and any(word in blob for word in ("crib", "sleep")):
+            desc = _swap_location_sentences(desc, _CRIB_WRONG_LOCATION, crib)
+        if rocker and any(word in blob for word in ("rocker", "rocking", "feed", "feeding")):
+            desc = _swap_location_sentences(desc, _ROCKER_WRONG_LOCATION, rocker)
         zone["desc"] = desc
 
 
@@ -410,7 +414,7 @@ def apply_nursery_rules(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Li
         if isinstance(zone, dict):
             zone["title"] = clarify_plan_text(str(zone.get("title") or ""))
             zone["desc"] = clarify_plan_text(str(zone.get("desc") or ""))
-    align_nursery_zone_locations(deliverable.get("zones") or [])
+    align_nursery_zone_locations(deliverable.get("zones") or [], lead)
 
     strategy = list(deliverable.get("strategy") or [])
     keep = dresser_keep_line(lead, deliverable)
@@ -683,6 +687,8 @@ def apply_curated_shopping(lead: Dict[str, Any], deliverable: Dict[str, Any]) ->
             continue
         present.add(target["name"].lower())
         new = {**item, "name": target["name"], "qty": target["qty"], "price": target["price"]}
+        if target.get("short_name"):
+            new["short_name"] = target["short_name"]
         if new != item:
             changed = True
         rows.append(new)
@@ -848,6 +854,52 @@ def why_it_helps(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None
     return why_zone_approach(lead or {}, deliverable or {})
 
 
+def styling_rules(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> List[str]:
+    """Companion Guide styling rules: palette, what stays, and how to keep the room calm."""
+    from ai_drafter import is_keep_existing_wall
+    from image_board import _palette
+    from space_rails import is_space_theme
+
+    lead = lead or {}
+    doc = deliverable or {}
+    rules: List[str] = []
+    if is_keep_existing_wall(doc):
+        rules.append("Keep the original wall color; the palette lives in textiles, wood, and small accents.")
+    else:
+        name = " ".join(str(doc.get("wall_color_name") or "").split()) or "the optional paint color"
+        rules.append(f"Paint is optional: {name}. Textiles, wood, and small accents carry the rest of the palette.")
+    names = [str(s.get("name") or "").lower() for s in _palette(lead, doc) if s.get("note") != "Optional paint"]
+    if names:
+        listed = ", ".join(names[:-1]) + (f", and {names[-1]}" if len(names) > 1 else names[0])
+        rules.append(f"Stay with a small warm-neutral palette: {listed}.")
+    if is_nursery_space(lead):
+        rules.append("Choose soft, washable textiles in the palette colors.")
+        if is_space_theme(lead, doc):
+            rules.append("Keep the space theme in one intentional grouping: planets, the moon, rockets, and astronauts.")
+    else:
+        rules.append("Use matching containers in one or two palette colors, so storage reads as one system.")
+    rules.append("Keep one calm grouping per wall, with open space around it.")
+    rules.append("Give every everyday item one home, and return it there after use.")
+    return rules
+
+
+def designer_assessment(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, needs: List[str]) -> Dict[str, Any]:
+    """The full designer assessment: what the room needed, each zone's job, what stays, and why it works."""
+    from image_board import _kept_items, _zone_cards
+    from room_flow import resolve_room_flow
+    from space_rails import is_space_theme
+
+    lead = lead or {}
+    doc = deliverable or {}
+    flow = resolve_room_flow(lead, doc)
+    return {
+        "needs": list(needs),
+        "zones": _zone_cards(lead, doc, flow),
+        "kept": _kept_items(lead, doc, flow, is_space_theme(lead, doc)),
+        "why": why_it_helps(lead, doc),
+    }
+
+
 def internal_record(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Dict[str, Any]:
     """Review and QA material kept off the customer companion guide."""
     lead = lead or {}
@@ -931,5 +983,8 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "climate_essentials": climate_essentials(lead, doc),
         "why": why_it_helps(lead, doc),
         "story": str(doc.get("project_story") or ""),
+        "styling": styling_rules(lead, doc),
+        "modules": list(companion_modules(doc)),
     }
+    sections["assessment"] = designer_assessment(lead, doc, needs)
     return sections, doc

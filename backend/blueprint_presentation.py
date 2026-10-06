@@ -1,7 +1,7 @@
-"""Customer-facing Blueprint presentation.
+"""Customer-facing Design Plan presentation.
 
-The portrait PNG, the phone page, the companion PDF, and the final email
-all read this same plan. It carries copy and honesty flags only — never
+The Design Plan PNG, the phone page, the Companion Guide PDF, and the final
+email all read this same plan. It carries copy and honesty flags only — never
 image-model text, and never internal review language.
 """
 from __future__ import annotations
@@ -138,9 +138,42 @@ def build_presentation(
         "reset": sections.get("maintenance") or "",
         "reset_paragraphs": [p.strip() for p in str(sections.get("maintenance") or "").split("\n\n") if p.strip()],
         "benefits": benefits,
+        "styling": sections.get("styling") or [],
+        "assessment": sections.get("assessment") or {},
+        "companion_modules": sections.get("modules") or [],
+        "design_plan": _design_plan(spec),
         "preview_path": f"/admin/leads/{lead_id}/blueprint" if lead_id else "",
         "review": {
             "final": False,
             "package_status": str(deliverable.get("package_status") or ""),
+            "released": bool(spec.get("released")),
+            "pill": spec.get("review_pill") or "",
         },
+    }
+
+
+def _design_plan(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """The Design Plan board's sections, in board order, for a selectable phone layout."""
+    snapshot = spec.get("snapshot") or {}
+    return {
+        "label": spec.get("label") or "",
+        "title": spec.get("headline") or "",
+        "subtitle": spec.get("title_sub") or "",
+        "review_pill": spec.get("review_pill") or "",
+        "review_note": list(spec.get("review_note") or ()),
+        "story": {"headline": spec.get("story_headline") or "", "body": spec.get("story") or ""},
+        "changes": spec.get("moves") or [],
+        "zones": spec.get("zone_cards") or [],
+        "snapshot": {
+            "items": [{"name": row.get("short"), "price": row.get("price")} for row in snapshot.get("items") or []],
+            "more": snapshot.get("more_line") or "",
+            "total": snapshot.get("total") or "",
+            "note": SHOPPING_DISCLAIMER,
+        },
+        "palette": spec.get("palette") or [],
+        "palette_blurb": spec.get("palette_blurb") or "",
+        "kept": spec.get("kept") or [],
+        "roadmap": spec.get("roadmap") or [],
+        "why": spec.get("why") or {},
+        "footer": spec.get("footer_left") or "",
     }

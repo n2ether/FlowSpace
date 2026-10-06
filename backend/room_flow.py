@@ -29,6 +29,20 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+from design_plan_standards import (
+    BRAND_CHAR,
+    BRAND_GREEN,
+    BRAND_OFF,
+    BRAND_TINTS,
+    DEFAULT_SUBTITLE,
+    MONTSERRAT,
+    NURSERY_SUBTITLE,
+    NURSERY_ZONES,
+    REVIEW_STATUS,
+    TAGLINE,
+    hex_rgb,
+)
+
 BACKEND = Path(__file__).resolve().parent
 RECORDS_DIR = BACKEND / "room_flows"
 FONTS_DIR = BACKEND / "fonts"
@@ -39,22 +53,19 @@ REF_W, REF_H = 717, 1024
 SCALE = 2
 W, H = REF_W * SCALE, REF_H * SCALE
 
-PAPER = (247, 241, 232)
-CARD_EDGE = (221, 208, 190)
-INK = (46, 44, 40)
-MUTED = (104, 98, 90)
-GREEN = (36, 72, 52)
-GREEN_TEXT = (209, 228, 215)
+PAPER = hex_rgb(BRAND_OFF)
+CARD_EDGE = hex_rgb(BRAND_TINTS["line"])
+INK = hex_rgb(BRAND_CHAR)
+MUTED = hex_rgb(BRAND_TINTS["muted"])
+GREEN = hex_rgb(BRAND_GREEN)
+GREEN_TEXT = hex_rgb(BRAND_TINTS["sage_light"])
 CLAY = (160, 104, 70)
-WALL = (36, 72, 52)
+WALL = hex_rgb(BRAND_GREEN)
 DOOR = (150, 62, 62)
-FLOOR = (251, 248, 241)
-WHY_FILL = (227, 229, 214)
-MARK = (98, 112, 104)
+FLOOR = (252, 252, 250)
+WHY_FILL = hex_rgb(BRAND_TINTS["sage_light"])
+MARK = hex_rgb(BRAND_TINTS["muted"])
 WHITE = (255, 255, 255)
-
-REVIEW_STATUS = "DRAFT. Review version. Not yet approved. Customer release held."
-TAGLINE = "Clear space. Create flow. Live better."
 
 ZONE_STYLES: Dict[str, Dict[str, Tuple[int, int, int]]] = {
     "sleep": {"fill": (219, 233, 225), "ring": (70, 128, 108), "edge": (140, 152, 146)},
@@ -188,8 +199,43 @@ _DEFAULT_AREAS = {
 }
 
 
+def _nursery_default_flow() -> Dict[str, Any]:
+    zones = []
+    for index, (base, area) in enumerate(zip(NURSERY_ZONES, _DEFAULT_AREAS[4])):
+        zones.append(
+            {
+                "id": base["id"],
+                "number": f"{index + 1:02d}",
+                "title": base["title"],
+                "job": base["job"],
+                "map_label": base["map_label"],
+                "rect": list(area),
+            }
+        )
+    return {"zones": zones, "subtitle": NURSERY_SUBTITLE}
+
+
 def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, Any]:
-    """Standard layout when no outline was supplied. Says it is approximate."""
+    """Standard layout when no outline was supplied. Says it is approximate.
+
+    A nursery uses the standard Sleep / Change / Comfort / Play + Storage zones,
+    so the Room Flow sheet and the Design Plan name the same four zones.
+    """
+    from space_rails import is_nursery_space
+
+    base = {
+        "outline_source": "approximate",
+        "outline": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.15], [0.0, 1.15]],
+        "walls": [{"label": "WINDOW WALL"}, {}, {}, {}],
+        "window": {"wall": 0, "from_m": 0.35, "to_m": 0.65},
+        "door": {"wall": 3, "from_m": 0.10, "to_m": 0.34},
+        "furniture": [],
+        "path": [[0.04, 0.93], [0.36, 0.62], [0.52, 0.56]],
+        "flow_principle": ["Less visual noise.", "Fewer decisions.", "Easier resets."],
+        "flow_note": "A clear route through the room makes everyday routines calmer.",
+    }
+    if is_nursery_space(lead):
+        return {**base, **_nursery_default_flow()}
     zones_in: List[Tuple[str, str]] = []
     for zone in deliverable.get("zones") or []:
         if isinstance(zone, dict):
@@ -226,19 +272,27 @@ def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict
     subtitle = "A calmer flow for " + (
         ", ".join(titles[:-1]) + " & " + titles[-1] if len(titles) > 1 else titles[0]
     )
-    return {
-        "outline_source": "approximate",
-        "outline": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.15], [0.0, 1.15]],
-        "walls": [{"label": "WINDOW WALL"}, {}, {}, {}],
-        "window": {"wall": 0, "from_m": 0.35, "to_m": 0.65},
-        "door": {"wall": 3, "from_m": 0.10, "to_m": 0.34},
-        "zones": zones,
-        "furniture": [],
-        "path": [[0.04, 0.93], [0.36, 0.62], [0.52, 0.56]],
-        "subtitle": subtitle,
-        "flow_principle": ["Less visual noise.", "Fewer decisions.", "Easier resets."],
-        "flow_note": "A clear route through the room makes everyday routines calmer.",
-    }
+    return {**base, "zones": zones, "subtitle": subtitle}
+
+
+def record_view_names(lead: Optional[Dict[str, Any]]) -> List[str]:
+    """Customer names for this lead's room photos, in photo order. Empty without a record."""
+    record = load_record(str((lead or {}).get("id") or "")) or {}
+    return [_clean(name) for name in record.get("view_names") or [] if _clean(name)]
+
+
+def record_view_chips(lead: Optional[Dict[str, Any]]) -> List[str]:
+    """Short Design Plan chips for the same photos. Falls back to the view names."""
+    record = load_record(str((lead or {}).get("id") or "")) or {}
+    chips = [_clean(name) for name in record.get("view_chips") or [] if _clean(name)]
+    return chips or record_view_names(lead)
+
+
+def record_zone_locations(lead: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Photo-checked location sentences for this room (``{"sleep": ..., "comfort": ...}``)."""
+    record = load_record(str((lead or {}).get("id") or "")) or {}
+    raw = record.get("zone_locations") or {}
+    return {str(k): _clean(v) for k, v in raw.items() if _clean(v)} if isinstance(raw, dict) else {}
 
 
 def load_record(lead_id: str) -> Optional[Dict[str, Any]]:
@@ -390,7 +444,7 @@ def zone_map_spec(
     status = "ROOM FLOW PLAN" if final else "DRAFT CONCEPT"
     return {
         "title": title.upper(),
-        "subtitle": _clean(flow.get("subtitle")) or "A calmer flow for the room you already have",
+        "subtitle": _clean(flow.get("subtitle")) or DEFAULT_SUBTITLE,
         "badge_status": status,
         "badge_outline": phrases["badge"],
         "phrases": phrases,
@@ -441,13 +495,14 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
 
 # ──────────────────────────── Drawing helpers ─────────────────────────────
 
+# Montserrat throughout; the "serif" kinds are the light and medium display weights.
 _FONT_FILES = {
-    "sans": ("Inter-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-    "sans-medium": ("Inter-Medium.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-    "sans-semibold": ("Inter-SemiBold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-    "sans-bold": ("Inter-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-    "serif": ("Fraunces-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
-    "serif-medium": ("Fraunces-Medium.ttf", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+    "sans": (MONTSERRAT["regular"], "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    "sans-medium": (MONTSERRAT["medium"], "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    "sans-semibold": (MONTSERRAT["semibold"], "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    "sans-bold": (MONTSERRAT["bold"], "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    "serif": (MONTSERRAT["light"], "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    "serif-medium": (MONTSERRAT["medium"], "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
 }
 _fonts: Dict[Tuple[str, int], ImageFont.ImageFont] = {}
 

@@ -123,11 +123,14 @@ def surfaces():
 def test_board_tiles_roadmap_and_room_flow_copy(monkeypatch, surfaces):
     drawn = _drawn(monkeypatch, surfaces["lead"], surfaces["deliverable"], surfaces["images"])
     flat = _flat(" ".join(drawn))
-    assert NEW["roadmap"] in drawn
+    # Roadmap titles are sentence case on the Design Plan; the words are Camila's.
+    assert NEW["roadmap"] in [line.upper() for line in drawn]
     assert NEW["drafts"] in drawn
     assert NEW["keep"] in flat
     assert "close the gap under the door" in flat
-    assert NEW["total"] in drawn
+    # The snapshot shows the total as a label and the figure.
+    assert "$195" in drawn
+    assert "ILLUSTRATIVE REFERENCE TOTAL" in surfaces["board_spec"]
     assert NEW["disclaimer"] in drawn
     spec = board_spec(surfaces["lead"], surfaces["deliverable"], surfaces["images"])
     assert spec["topdown"]["caption"].endswith(NEW["theme"])
@@ -153,7 +156,7 @@ def test_app_results_copy(surfaces):
     assert view["plan"]["caption"].endswith(NEW["theme"])
     assert view["shopping_total_line"] == NEW["total"]
     assert view["shopping_note"] == NEW["disclaimer"]
-    assert [step["title"] for step in view["roadmap"]][-1] == NEW["roadmap"]
+    assert [step["title"].upper() for step in view["roadmap"]][-1] == NEW["roadmap"]
     assert NEW["drafts"] in [move["title"] for move in view["changes"]]
     app = surfaces["app"]
     assert NEW["views"] in app
@@ -188,12 +191,60 @@ def test_evergreen_lint_allows_only_the_approved_ritual(surfaces):
 def test_customer_surfaces_keep_prior_gates(surfaces):
     for name in ("pdf", "board_spec", "zone_map", "email"):
         text = surfaces[name]
-        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready"):
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba"):
             assert banned not in text, (name, banned)
+        assert not re.search(r"\b(?:plan|blueprint|package|guide) is ready\b", text, re.I), name
     assert STORY in surfaces["email"]
     assert "Measured room outline" in surfaces["zone_map"]
     lead, deliverable, images = surfaces["lead"], surfaces["deliverable"], surfaces["images"]
     spec = board_spec(lead, deliverable, images)
     assert spec["budget_display"] == "$195" and len(spec["products"]) == 9
     fills = companion_page_fill(lead=lead, deliverable=deliverable, images=images)
-    assert len(fills) == 6 and min(fills) >= 0.40, fills
+    # Four text pages (with maintenance, styling, and the assessment) and four before/after pages.
+    assert len(fills) == 8 and min(fills) >= 0.40, fills
+
+
+def test_design_plan_board_matches_the_approved_v5(surfaces):
+    """Camila's approved Design Plan v5, section by section."""
+    spec = board_spec(surfaces["lead"], surfaces["deliverable"], surfaces["images"])
+    assert spec["label"] == "FlowSpace Design Plan"
+    assert spec["headline"] == "Nicholas's Nursery"
+    assert spec["title_sub"] == "A calmer flow for sleep, change, comfort & play"
+    assert spec["review_pill"] == "DRAFT / REVIEW"
+    assert spec["story_headline"] == "A calmer room for everyday routines."
+    assert spec["story"] == STORY
+    assert [m["title"] for m in spec["moves"]] == [
+        "KEEP THIS ROOM",
+        "REDUCE DRAFTS",
+        "CLEAR THE PATH",
+        "EVERYDAY CARE AT THE DRESSER",
+    ]
+    assert [(z["title"], z["object"], z["job"]) for z in spec["zone_cards"]] == [
+        ("Sleep", "Crib", "The quiet anchor, kept simple."),
+        ("Change", "Six-drawer dresser", "Everyday care within easy reach."),
+        ("Comfort", "Rocker", "For feeding, connection, and rest."),
+        ("Play + Storage", "Rug + basket", "Open floor and one easy-reset basket."),
+    ]
+    snapshot = spec["snapshot"]
+    assert [(row["short"], row["price"]) for row in snapshot["items"]] == [
+        ("Furniture anti-tip kit (2-pack)", "$18"),
+        ("Thermal curtain panels (2)", "$60"),
+        ("Window insulation film kit", "$15"),
+        ("Door draft stopper", "$12"),
+        ("Wall-mounted organizer caddy", "$22"),
+    ]
+    assert snapshot["more_line"] == "Includes 4 more items ($68) in the Companion Guide"
+    assert snapshot["total"] == "$195"
+    assert [(s["name"], s["hex"]) for s in spec["palette"]] == [
+        ("Soft beige", "#E6E1DB"),
+        ("Cream", "#F4EFE6"),
+        ("Clay", "#C08A6C"),
+        ("Muted sage", "#A8C3B0"),
+        ("Warm wood", "#A97B52"),
+    ]
+    assert spec["kept"] == ["Original wall color", "Six-drawer dresser", "Crib + rocker", "Space-themed art"]
+    assert [step["title"] for step in spec["roadmap"]] == ["Clear the path", "Soften the drafts", "Make daily care easy"]
+    assert spec["why"]["headline"] == "Each part of the room gets one clear job."
+    assert spec["hero_chip"] == "WINDOW + CRIB"
+    assert spec["detail_chips"] == ["SLEEP + COMFORT", "ROCKER", "DRESSER"]
+    assert spec["draws_room_flow"] is False

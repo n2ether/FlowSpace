@@ -1,4 +1,4 @@
-"""Budget and nursery storage must agree before a Blueprint is drawn."""
+"""Budget and nursery storage must agree before a Design Plan is drawn."""
 import io
 import json
 from pathlib import Path
@@ -203,10 +203,18 @@ def test_nursery_safety_and_climate_are_each_written_once():
 
 
 def test_nursery_zone_locations_match_the_photos():
-    """Live zone copy put the crib away from the window and the rocker beside it."""
+    """Live zone copy put the crib away from the window and the rocker beside it.
+
+    The photo-checked locations come from this room's Room Flow record.
+    """
     from pdf_generator import build_pdf
 
-    lead = {"name": "Camila Sales", "space_type": "kids_room", "must_stay": "Six-drawer dresser, crib, rocker"}
+    lead = {
+        "id": "9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+        "name": "Camila Sales",
+        "space_type": "kids_room",
+        "must_stay": "Six-drawer dresser, crib, rocker",
+    }
     deliverable = {
         "zones": [
             {
@@ -254,3 +262,11 @@ def test_nursery_zone_locations_match_the_photos():
     assert "close to the window" not in text.lower()
     assert "fitted sheet" in text.lower()
     assert "portable heater" in text.lower()
+
+
+def test_another_nursery_keeps_its_own_zone_locations():
+    """Camila's crib and rocker positions are her room's record, not a rule for every nursery."""
+    lead = {"id": "0a1b2c3d-new-lead", "name": "Ada Lee", "space_type": "nursery"}
+    desc = "The crib stays in its current corner, away from the window and dresser."
+    prepared = prepare_deliverable(lead, {"zones": [{"title": "Safe Sleep Zone", "desc": desc}]})
+    assert prepared["zones"][0]["desc"] == desc

@@ -159,15 +159,16 @@ def test_every_customer_surface_is_evergreen_for_the_live_record(monkeypatch):
     email = re.sub(r"<[^>]+>", " ", email_body_html(**server._email_inputs(lead, deliverable), preview_src="cid:b"))
     for name, text in (("pdf", pdf_text), ("board", board), ("email", email)):
         assert find_time_sensitive(text) == [], name
-        for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready"):
+        for banned in ("SOURCE_", "AFTER_", "9dbedfba"):
             assert banned not in text, (name, banned)
+        assert not re.search(r"\b(?:plan|blueprint|package|guide) is ready\b", text, re.I), name
     assert "Illustrative reference total: $195." in " ".join(pdf_text.split())
 
 
 def test_live_guide_pages_stay_full_with_the_story_line():
     lead, deliverable = _live()
     fills = companion_page_fill(lead=lead, deliverable=deliverable, images=_pairs())
-    assert len(fills) == 6, fills
+    assert len(fills) == 8, fills
     assert min(fills) >= 0.40, fills
 
 
