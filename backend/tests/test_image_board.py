@@ -211,7 +211,7 @@ def test_companion_is_the_short_customer_guide_with_one_total():
         "\n".join((page.extract_text() or "") for page in PdfReader(io.BytesIO(pdf)).pages).split()
     )
     low = text.lower()
-    for heading in ("SAFETY ESSENTIALS", "CLIMATE COMFORT", "WHY THE FLOWSPACE ZONE APPROACH HELPS", "SHOPPING LIST", "LIST TOTAL"):
+    for heading in ("SAFETY ESSENTIALS", "CLIMATE COMFORT", "WHY THE FLOWSPACE ZONE APPROACH HELPS", "SHOPPING LIST", "Illustrative reference total"):
         assert heading in text
     for idea in ("open path", "fewer decisions", "reset", "calmer"):
         assert idea in low
@@ -442,7 +442,7 @@ def test_nursery_changes_merge_preserve_drawers_and_routine():
         assert not ends_dangling(move["title"]) and not move["title"].endswith(".")
         assert move["body"].endswith(".") and not ends_dangling(move["body"])
     routine_moves = [
-        move for move in moves if "routine" in move["body"].lower() or "one step" in move["body"].lower()
+        move for move in moves if "putting things away" in move["body"].lower()
     ]
     assert len(routine_moves) == 1
     assert "drawer" in routine_moves[0]["body"].lower()

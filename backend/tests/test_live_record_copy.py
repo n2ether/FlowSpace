@@ -161,7 +161,7 @@ def test_every_customer_surface_is_evergreen_for_the_live_record(monkeypatch):
         assert find_time_sensitive(text) == [], name
         for banned in ("SOURCE_", "AFTER_", "9dbedfba", "is ready"):
             assert banned not in text, (name, banned)
-    assert "LIST TOTAL $195" in " ".join(pdf_text.split())
+    assert "Illustrative reference total: $195." in " ".join(pdf_text.split())
 
 
 def test_live_guide_pages_stay_full_with_the_story_line():

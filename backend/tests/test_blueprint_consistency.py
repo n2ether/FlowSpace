@@ -160,7 +160,7 @@ def test_blanket_sku_and_150_vs_230_cannot_disagree():
     assert "$230" not in text
     assert "$150" in text
     assert "blanket layer" not in low
-    assert "list total" in low
+    assert "illustrative reference total" in low
     assert safety_essentials(lead, prepared)[0] in " ".join(text.split())
 
 
@@ -196,8 +196,8 @@ def test_nursery_safety_and_climate_are_each_written_once():
     assert "portable heater" not in climate
     assert "68" in climate
     assert "thermal window layer" in climate
-    assert sections["reset_title"] == "Bedtime ritual"
-    assert sections["maintenance"].lower().startswith("bedtime ritual")
+    assert sections["reset_title"] == "ONE-MINUTE BEDTIME RITUAL"
+    assert sections["maintenance"].startswith("Bring your baby into the ritual from the beginning.")
     for line in sections["safety"]:
         assert line.lower() not in sections["maintenance"].lower()
 

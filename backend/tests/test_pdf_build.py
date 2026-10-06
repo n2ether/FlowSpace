@@ -110,7 +110,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "why the flowspace zone approach helps" in low
     assert "fewer decisions" in low
     assert "shopping list" in low
-    assert "list total" in low
+    assert "illustrative reference total" in low
     assert "$150" in text
     assert "The FlowSpace Design Team" in text
 
@@ -429,11 +429,11 @@ def test_curated_list_total_and_link_note_share_the_shopping_page():
     assert len(pages) == 6
     shop = next(i for i, text in enumerate(pages) if "SHOPPING LIST" in text)
     page = pages[shop]
-    assert "LIST TOTAL $195" in page
+    assert "Illustrative reference total: $195." in page
     assert "Product pages are linked where verified; search links are labeled." in page
     assert "Soft cotton area rug" not in page and "Furniture anti-tip kit" in page
     assert "Felt wall decor — moon or planet accent" in page and "Search at Target" in page
-    assert sum("LIST TOTAL" in text for text in pages) == 1
+    assert sum("Illustrative reference total" in text for text in pages) == 1
     for text in pages:
         body = text.split("Windows and room proportions follow your photos.", 1)[-1]
         assert len(body) > 120, text
