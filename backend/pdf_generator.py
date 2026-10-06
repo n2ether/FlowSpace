@@ -227,7 +227,10 @@ def plan_title(space_type: Optional[str]) -> str:
     return f"{label} Organization Plan"
 
 
-_CHILD_TURNING = re.compile(r"\b([A-Z][a-z]{2,})\s+is\s+turning\b")
+_CHILD_TURNING = re.compile(
+    r"\b([A-Z][a-z]{2,})\s+(?:is\s+turning|just\s+turned|turned|turns)\b"
+    r"|\bAs\s+([A-Z][a-z]{2,})\s+grows\b"
+)
 # "Nicholas's nursery" or "Nicholas' nursery", after curly apostrophes are flattened.
 _CHILD_POSSESSIVE = re.compile(r"\b([A-Z][a-z]{2,})(?:'s|')\s+nursery\b")
 _CURLY_APOSTROPHE = str.maketrans({"\u2018": "'", "\u2019": "'", "\u02bc": "'", "\u2032": "'"})
@@ -279,7 +282,7 @@ def _child_first_name(
     blob = _plan_copy(lead, deliverable or {})
     turning = _CHILD_TURNING.search(blob)
     if turning:
-        return turning.group(1)
+        return turning.group(1) or turning.group(2)
     customer = _customer_first_name(lead).lower()
     for match in _CHILD_POSSESSIVE.finditer(blob):
         name = match.group(1)
@@ -1699,7 +1702,7 @@ def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -
     col_w = (width - gap * 2) / 3
     week = _card(
         [
-            Paragraph("THIS WEEK — DIY STEPS", s["section"]),
+            Paragraph("DIY STEPS", s["section"]),
             Paragraph(_esc(_clip(str(start), 140)), s["muted"]),
             Spacer(1, 3),
             *_check_items(steps, numbered=True, limit=5),
@@ -1719,7 +1722,7 @@ def _diy_columns(layers: Dict[str, Any], action_plan: List[str], width: float) -
     )
     weekly = _card(
         [
-            Paragraph("10-MINUTE WEEKLY RESET", s["section"]),
+            Paragraph("QUICK RESET", s["section"]),
             *_check_items(reset, limit=5),
             Spacer(1, 3),
             Paragraph("A short reset keeps the system — not a remodel.", s["muted"]),

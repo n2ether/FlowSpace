@@ -196,8 +196,8 @@ def test_nursery_safety_and_climate_are_each_written_once():
     assert "portable heater" not in climate
     assert "68" in climate
     assert "thermal window layer" in climate
-    assert sections["reset_title"] == "One-minute bedtime ritual"
-    assert sections["maintenance"].lower().startswith("one-minute bedtime ritual")
+    assert sections["reset_title"] == "Bedtime ritual"
+    assert sections["maintenance"].lower().startswith("bedtime ritual")
     for line in sections["safety"]:
         assert line.lower() not in sections["maintenance"].lower()
 
