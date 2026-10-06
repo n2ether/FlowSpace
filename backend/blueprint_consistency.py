@@ -618,10 +618,55 @@ def prepare_deliverable(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     """Return a copy safe to render. Idempotent."""
     lead = lead or {}
     out = copy.deepcopy(deliverable or {})
-    issues = apply_nursery_rules(lead, out)
+    issues = apply_curated_shopping(lead, out)
+    issues.extend(apply_nursery_rules(lead, out))
     issues.extend(align_budget(lead, out))
     _record(out, issues)
     return out
+
+
+def apply_curated_shopping(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[str]:
+    """Bring stored shopping rows in line with the per-lead curated record.
+
+    A row named like a curated item takes that item's qty and price. A row a
+    curated item ``replaces`` (by name prefix) becomes that item, or is dropped
+    when the record ``retires`` it. Rows the record does not know stay put.
+    """
+    from shopping_links import curated_replacements
+
+    lead_id = str((lead or {}).get("id") or deliverable.get("lead_id") or "")
+    by_name, replaces, retired = curated_replacements(lead_id)
+    if not (by_name or replaces or retired):
+        return []
+    rows: List[Dict[str, Any]] = []
+    present = set()
+    changed = False
+    for item in deliverable.get("shopping_list") or []:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split())
+        key = name.lower()
+        if any(key.startswith(prefix) for prefix in retired):
+            changed = True
+            continue
+        target = by_name.get(key)
+        if target is None:
+            target = next((row for prefix, row in replaces if key.startswith(prefix)), None)
+        if target is None:
+            rows.append(item)
+            continue
+        if target["name"].lower() in present:
+            changed = True
+            continue
+        present.add(target["name"].lower())
+        new = {**item, "name": target["name"], "qty": target["qty"], "price": target["price"]}
+        if new != item:
+            changed = True
+        rows.append(new)
+    if not changed:
+        return []
+    deliverable["shopping_list"] = rows
+    return ["shopping rows now match the curated product list"]
 
 
 

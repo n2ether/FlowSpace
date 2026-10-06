@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
 RECORDS_DIR = Path(__file__).resolve().parent / "shopping_links"
@@ -86,6 +86,41 @@ def curated_links(lead_id: str) -> List[Dict[str, str]]:
         if row["name"] and row["url"]:
             out.append(row)
     return out
+
+
+def curated_replacements(
+    lead_id: str,
+) -> Tuple[Dict[str, Dict[str, Any]], List[Tuple[str, Dict[str, Any]]], List[str]]:
+    """Curated rows by lowercased name, (old-name prefix, row) swaps, and retired prefixes.
+
+    An item's ``replaces`` lists name prefixes of shopping rows it supersedes.
+    The record's ``retired`` lists name prefixes of rows dropped with no swap.
+    """
+    record = load_record(lead_id) if lead_id else None
+    if not record:
+        return {}, [], []
+    by_name: Dict[str, Dict[str, Any]] = {}
+    replaces: List[Tuple[str, Dict[str, Any]]] = []
+    for item in record.get("items") or []:
+        if not isinstance(item, dict) or not _clean(item.get("name")):
+            continue
+        try:
+            row = {
+                "name": _clean(item.get("name")),
+                "qty": float(item.get("qty", 1) or 1),
+                "price": float(item.get("price", 0) or 0),
+            }
+        except (TypeError, ValueError):
+            continue
+        row["qty"] = int(row["qty"]) if row["qty"].is_integer() else row["qty"]
+        row["price"] = int(row["price"]) if row["price"].is_integer() else row["price"]
+        by_name[row["name"].lower()] = row
+        for prefix in item.get("replaces") or []:
+            prefix = _clean(prefix).lower()
+            if prefix:
+                replaces.append((prefix, row))
+    retired = [_clean(p).lower() for p in record.get("retired") or [] if _clean(p)]
+    return by_name, replaces, retired
 
 
 def deliverable_links(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:

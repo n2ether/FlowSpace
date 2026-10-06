@@ -429,9 +429,9 @@ def test_curated_list_total_and_link_note_share_the_shopping_page():
     assert len(pages) == 6
     shop = next(i for i, text in enumerate(pages) if "SHOPPING LIST" in text)
     page = pages[shop]
-    assert "LIST TOTAL $240" in page
+    assert "LIST TOTAL $195" in page
     assert "Product pages are linked where verified; search links are labeled." in page
-    assert "Soft cotton area rug" in page and "Furniture anti-tip kit" in page
+    assert "Soft cotton area rug" not in page and "Furniture anti-tip kit" in page
     assert "Felt wall decor — moon or planet accent" in page and "Search at Target" in page
     assert sum("LIST TOTAL" in text for text in pages) == 1
     for text in pages:
@@ -441,7 +441,8 @@ def test_curated_list_total_and_link_note_share_the_shopping_page():
         annot.get_object().get("/A", {}).get("/URI")
         for annot in reader.pages[shop].get("/Annots") or []
     ]
-    assert sum(1 for url in links if url and url.startswith("https://www.target.com/")) == 10
+    assert sum(1 for url in links if url and url.startswith("https://www.target.com/")) == 9
+    assert not any(url and "nuloom-deepika" in url for url in links)
     assert len(pdf) < 5 * 1024 * 1024
     for text in pages:
         for banned in ("SOURCE_", "AFTER_", "9dbedfba", "QA", "is ready"):

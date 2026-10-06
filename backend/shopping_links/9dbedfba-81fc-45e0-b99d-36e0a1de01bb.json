@@ -1,7 +1,11 @@
 {
   "lead_id": "9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
-  "verified_at": "2026-10-05",
-  "list_total_note": "Guide prices kept at $240; live retailer HTML did not expose stable prices to bots.",
+  "verified_at": "2026-10-06",
+  "list_total_note": "Guide prices total $195 after the rug line was retired; live retailer HTML did not expose stable prices to bots.",
+  "retired": [
+    "Soft cotton area rug"
+  ],
+  "retired_note": "The 4x6 nuLOOM Deepika rug did not suit a child's room or match the existing ~5 ft round rug. No Target product verified on 2026-10-06 met every requirement (round, about 5 ft, low pile, machine washable, non-slip backing, warm neutral): HEBE beige round is 6 ft only; nuLOOM Jeni 5 ft round is 0.85 in. medium pile; Safavieh Easy Care ECR229 5 ft round has medium pile and no backing; Nourison Astra 5'3\" round has no backing; Nourison New Concept Washables 5'3\" round is non-slip but only navy, olive, grey, or brick. The line and its link were removed and the existing round rug stays.",
   "items": [
     {
       "name": "Furniture anti-tip kit (2-pack, dresser + shelves)",
@@ -93,16 +97,6 @@
       "price": 18,
       "qty": 1,
       "verified": "curl 200 + title match (Household Essentials Natural Seagrass Basket with Handles)"
-    },
-    {
-      "name": "Soft cotton area rug or rug pad (non-slip, earth tone, 4×6 ft, optional layering under existing rug)",
-      "retailer": "Target",
-      "url": "https://www.target.com/p/nuloom-deepika-contemporary-abstract-cotton-area-rug-4-x-6-beige/-/A-93015688",
-      "link_type": "product",
-      "label": "nuLOOM Deepika 4x6 rug at Target",
-      "price": 45,
-      "qty": 1,
-      "verified": "curl 200 + title match (Nuloom Deepika Contemporary Abstract Cotton Indoor Area Rug 4x6 Beige)"
     }
   ]
 }
