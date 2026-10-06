@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
 import logging
 import os
 import re
@@ -54,6 +55,7 @@ def customer_email_html(
     guide_href: str = "",
     room_flow_src: str = "",
     outline_note: str = "",
+    story: str = "",
 ) -> str:
     """Customer email layout a final send uses.
 
@@ -64,6 +66,12 @@ def customer_email_html(
     when rendering the same layout locally.
     """
     space = (project_title or plan_title(space_type)).strip() or plan_title(space_type)
+    story = html.escape(" ".join(str(story or "").split()))
+    story_block = (
+        f'<p style="margin:0 0 16px;font-size:19px;color:#1F3D2C;line-height:1.5;font-style:italic;">{story}</p>\n              '
+        if story
+        else ""
+    )
     room_flow = ""
     if room_flow_src:
         outline = f" {outline_note.strip()}" if outline_note.strip() else ""
@@ -130,7 +138,7 @@ def customer_email_html(
               <h1 style="margin:0 0 12px;font-size:28px;font-weight:500;color:#1F3D2C;letter-spacing:-0.4px;line-height:1.2;">
                 {REVIEW_STATUS}
               </h1>
-              <p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
+              {story_block}<p style="margin:0 0 20px;font-size:16px;color:#475569;line-height:1.6;">
                 Hi {_first_name(customer_name)}. Start with the portrait plan below.
               </p>
               {preview}
@@ -309,6 +317,7 @@ def _customer_html(
     preview_src: str = "cid:blueprint-preview",
     room_flow_src: str = "",
     outline_note: str = "",
+    story: str = "",
 ) -> str:
     return customer_email_html(
         customer_name,
@@ -317,6 +326,7 @@ def _customer_html(
         preview_src=preview_src if two_files else "",
         room_flow_src=room_flow_src if two_files else "",
         outline_note=outline_note,
+        story=story,
     )
 
 
@@ -326,6 +336,7 @@ def email_body_html(
     space_type: str,
     project_title: str = "",
     outline_note: str = "",
+    story: str = "",
     draft: bool = False,
     lead_id: str = "",
     preview_src: str = "",
@@ -343,6 +354,7 @@ def email_body_html(
             preview_src=preview_src,
             room_flow_src=room_flow_src,
             outline_note=outline_note,
+            story=story,
         )
     return _customer_html(
         customer_name or "there",
@@ -352,6 +364,7 @@ def email_body_html(
         preview_src=preview_src,
         room_flow_src=room_flow_src,
         outline_note=outline_note,
+        story=story,
     )
 
 
@@ -392,6 +405,7 @@ async def send_blueprint(
     zone_map_bytes: Optional[bytes] = None,
     extra_visuals: Optional[List[Dict[str, Any]]] = None,
     outline_note: str = "",
+    story: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """
     Send the companion PDF and, when present, the image board and zone map.
@@ -418,6 +432,7 @@ async def send_blueprint(
         space_type=space_type,
         project_title=shown,
         outline_note=outline_note,
+        story=story,
         **_cid_sources(board_bytes, zone_map_bytes),
     )
     attachments = await asyncio.to_thread(
@@ -533,6 +548,7 @@ def _draft_package_html(
     preview_src: str = "",
     room_flow_src: str = "",
     outline_note: str = "",
+    story: str = "",
 ) -> str:
     """Draft review uses the customer email layout, with a review-version banner.
 
@@ -546,6 +562,7 @@ def _draft_package_html(
         preview_src=preview_src,
         room_flow_src=room_flow_src,
         outline_note=outline_note,
+        story=story,
     )
     inner = inner.replace(
         f"Your Blueprint is ready, {customer_name}",
@@ -588,6 +605,7 @@ async def send_draft_package(
     zone_map_bytes: Optional[bytes] = None,
     extra_visuals: Optional[List[Dict[str, Any]]] = None,
     outline_note: str = "",
+    story: str = "",
 ) -> Tuple[bool, Optional[str]]:
     """Email DRAFT board, zone map, and companion PDF for review. Does not mark a package final."""
     api_key = os.environ.get("RESEND_API_KEY")
@@ -606,6 +624,7 @@ async def send_draft_package(
         space_type=space_type,
         project_title=shown,
         outline_note=outline_note,
+        story=story,
         draft=True,
         lead_id=lead_id,
         **_cid_sources(board_bytes, zone_map_bytes),

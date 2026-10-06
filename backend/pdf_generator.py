@@ -230,6 +230,7 @@ def plan_title(space_type: Optional[str]) -> str:
 _CHILD_TURNING = re.compile(
     r"\b([A-Z][a-z]{2,})\s+(?:is\s+turning|just\s+turned|turned|turns)\b"
     r"|\bAs\s+([A-Z][a-z]{2,})\s+grows\b"
+    r"|\bfor\s+([A-Z][a-z]{2,}),?\s+who\s+is\b"
 )
 # "Nicholas's nursery" or "Nicholas' nursery", after curly apostrophes are flattened.
 _CHILD_POSSESSIVE = re.compile(r"\b([A-Z][a-z]{2,})(?:'s|')\s+nursery\b")
@@ -282,7 +283,7 @@ def _child_first_name(
     blob = _plan_copy(lead, deliverable or {})
     turning = _CHILD_TURNING.search(blob)
     if turning:
-        return turning.group(1) or turning.group(2)
+        return next(group for group in turning.groups() if group)
     customer = _customer_first_name(lead).lower()
     for match in _CHILD_POSSESSIVE.finditer(blob):
         name = match.group(1)
@@ -435,6 +436,10 @@ def _styles():
         "guideTitle": ParagraphStyle(
             "guideTitle", parent=base["BodyText"], fontName=_font("FSSerif-Bold"),
             fontSize=20, leading=24, textColor=SLATE, spaceAfter=6,
+        ),
+        "guideStory": ParagraphStyle(
+            "guideStory", parent=base["BodyText"], fontName=_font("FSSerif"),
+            fontSize=14, leading=18, textColor=EMERALD_DEEP, spaceBefore=2, spaceAfter=8,
         ),
         "guideH": ParagraphStyle(
             "guideH", parent=base["BodyText"], fontName=_font("FSSans-Bold"),
@@ -1953,6 +1958,8 @@ def _render_companion(
     story: List[Any] = []
     story.append(Paragraph(_esc(title_text), s["guideTitle"]))
     story.append(Paragraph("COMPANION GUIDE", s["guideKicker"]))
+    if sections.get("story"):
+        story.append(Paragraph(_esc(sections["story"]), s["guideStory"]))
     story.append(
         Paragraph(
             f"Hi {_esc(_customer_first_name(lead) or 'there')}. Start with the portrait Blueprint and Room Flow map "
