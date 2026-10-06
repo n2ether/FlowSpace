@@ -81,6 +81,8 @@ Kids' room / nursery rules (only when space_type is a kids' room, nursery, or th
 - Do not recommend a portable heater, space heater, or wall-mounted heater. Use the heating already in the room, about 68–72°F.
 - "No loose blankets in the crib" is a safety rule, not a product to buy.
 - Write every customer-facing sentence in full. Do not leave a thought half-finished.
+- Keep the room's existing rug (shape, size, color) unless the customer asked to change it. Do not add a second rug to the shopping list.
+- Do not name the child's age or a birthday; write "As <child> grows" instead of "is turning one".
 """
 
 NURSERY_DO_NOT = (
@@ -238,6 +240,87 @@ def image_prompt_rails(
     if is_space_theme(lead, deliverable):
         parts.append(SPACE_THEME_IMAGE_RAILS)
     return " ".join(parts)
+
+
+RUG_PRESERVE_RAILS = (
+    "RUG LOCK: if the source photo shows a rug, keep that same rug — same shape, same size relative "
+    "to the furniture, same color, texture, and pattern, in the same spot — and show it identically "
+    "in every view of this room. A round rug stays round: do not turn it into a rectangle, oval, or "
+    "runner, do not resize it, recolor it, or add a second rug."
+)
+
+_RUG_CHANGE_REQUEST = re.compile(
+    r"\b(?:new|replace|replacing|change|changing|swap|different|bigger|larger|smaller|remove|get rid of)\b"
+    r"[^.!?\n]{0,40}\brugs?\b"
+    r"|\brugs?\b[^.!?\n]{0,40}\b(?:replace|replaced|change|changed|swap|swapped|remove|removed)\b",
+    re.I,
+)
+
+
+def customer_requested_rug_change(lead: Dict[str, Any] | None) -> bool:
+    """True only when the customer's own answers ask for a different rug."""
+    lead = lead or {}
+    blob = " ".join(
+        str(lead.get(key) or "")
+        for key in ("goals", "biggest_challenge", "daily_improvement", "bothers_other", "notes", "must_stay")
+    )
+    return bool(_RUG_CHANGE_REQUEST.search(blob))
+
+
+def rug_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Structured rug from the plan (``deliverable.rug``) over the room-flow record. Empty when none."""
+    deliverable = deliverable or {}
+    spec: Dict[str, Any] = {}
+    flow = deliverable.get("room_flow") if isinstance(deliverable.get("room_flow"), dict) else None
+    if not flow:
+        from room_flow import load_record
+
+        flow = load_record(str((lead or {}).get("id") or deliverable.get("lead_id") or "")) or {}
+    if isinstance(flow.get("rug"), dict):
+        spec.update({k: v for k, v in flow["rug"].items() if v not in (None, "")})
+    if isinstance(deliverable.get("rug"), dict):
+        spec.update({k: v for k, v in deliverable["rug"].items() if v not in (None, "")})
+    return spec
+
+
+def _rug_size(spec: Dict[str, Any]) -> str:
+    ft = spec.get("diameter_ft")
+    m = spec.get("diameter_m")
+    if ft and m:
+        return f"about {ft:g} ft ({m:g} m) across"
+    if ft:
+        return f"about {ft:g} ft across"
+    if m:
+        return f"about {m:g} m across"
+    return ""
+
+
+def rug_description(spec: Dict[str, Any]) -> str:
+    """One sentence naming the rug: shape, size, color, texture, pattern, placement."""
+    if not spec:
+        return ""
+    shape = str(spec.get("shape") or "").strip().lower()
+    head = f"a single {shape} rug" if shape else "a single rug"
+    bits = [b for b in (_rug_size(spec),) if b]
+    for key in ("color", "texture", "pattern"):
+        value = " ".join(str(spec.get(key) or "").split())
+        if value:
+            bits.append(value)
+    placement = " ".join(str(spec.get("placement") or "").split())
+    sentence = head + (", " + ", ".join(bits) if bits else "")
+    if placement:
+        sentence += f", {placement}"
+    return sentence
+
+
+def rug_prompt_rails(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> str:
+    """Rug lock for every after-generation prompt. Off when the customer asked for a different rug."""
+    if customer_requested_rug_change(lead):
+        return ""
+    described = rug_description(rug_spec(lead, deliverable))
+    if not described:
+        return RUG_PRESERVE_RAILS
+    return f"{RUG_PRESERVE_RAILS} THE RUG IN THIS ROOM IS {described}. Show exactly that rug."
 
 
 def supporting_view_plan(lead: Dict[str, Any] | None) -> Tuple[Tuple[str, str, str], ...]:

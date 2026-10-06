@@ -13,6 +13,13 @@
   ],
   "window": {"wall": 0, "from_m": 0.80, "to_m": 1.50},
   "door": {"wall": 3},
+  "rug": {
+    "shape": "round",
+    "diameter_ft": 5,
+    "diameter_m": 1.5,
+    "placement": "on the open floor in the play area between the dresser, the crib, and the rocker",
+    "keep_existing": true
+  },
   "zones": [
     {
       "id": "sleep",
@@ -51,7 +58,7 @@
     {"id": "dresser", "kind": "dresser", "label": "DRESSER", "zone": "change", "drawers": 6, "rect": [0.10, 0.32, 0.62, 1.38]},
     {"id": "crib", "kind": "crib", "label": "CRIB", "zone": "sleep", "rect": [1.50, 0.30, 2.14, 1.60]},
     {"id": "rocker", "kind": "rocker", "label": "ROCKER", "zone": "comfort", "rect": [1.52, 2.02, 2.10, 2.50]},
-    {"id": "rug", "kind": "rug", "label": "RUG + BASKET", "zone": "play", "ellipse": [1.00, 1.90, 0.54, 0.44], "label_at": [1.00, 1.90]},
+    {"id": "rug", "kind": "rug", "label": "RUG + BASKET", "zone": "play", "ellipse": [1.00, 1.90, 0.75, 0.75], "label_at": [1.00, 1.90]},
     {"id": "basket", "kind": "basket", "zone": "play", "rect": [1.06, 2.20, 1.30, 2.40]}
   ],
   "path": [[0.36, 2.34], [0.92, 1.96], [1.46, 1.46]],

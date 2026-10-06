@@ -28,10 +28,11 @@ from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
 from email_service import email_body_html, send_blueprint, send_contact_sheet, send_draft_package
-from source_photos import draft_send_block_reason, final_email_block_reason
+from source_photos import draft_send_block_reason, final_email_block_reason, mapping_is_own_source
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
-from ai_image_generator import generate_front_view
+from ai_image_generator import generate_front_view, refine_after_image
+from rug_refine import describe_rug, refine_one, resolve_refine_rug
 from automation import run_automation
 from image_orientation import UnreadableImage, normalize_photo_bytes, upright_bytes
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
@@ -1200,6 +1201,186 @@ async def send_review_contact_sheet(
     }
 
 
+
+
+class AfterRefineRequest(BaseModel):
+    # Explicit rug fields (shape, diameter_ft, diameter_m, color, texture, pattern, edge, placement).
+    rug: Optional[Dict[str, Any]] = None
+    # Limit to some views by label ("SOURCE_02") or after label ("AFTER_02"). Empty means every approved after.
+    labels: List[str] = []
+
+
+async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]], labels: List[str]) -> Dict[str, Any]:
+    """Rug-consistency edit of each approved after. No email; package_status is not touched."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0}) or {}
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+    entries = [dict(e) if isinstance(e, dict) else e for e in (d.get("source_afters") or [])]
+    wanted = {str(x).strip().upper() for x in labels if str(x).strip()}
+    approved = [
+        (i, e) for i, e in enumerate(entries)
+        if mapping_is_own_source(e)
+    ]
+    sources = [await _resolve_image_bytes(e.get("source_url"), None) for _i, e in approved]
+    afters = [await _resolve_image_bytes(e.get("after_url"), None) for _i, e in approved]
+    first_after = afters[0] if afters else None
+    rug = resolve_refine_rug(lead, d, rug_override)
+    rug = await asyncio.to_thread(describe_rug, [s for s in sources if s], first_after, rug)
+    reference: Optional[bytes] = None
+    report: List[Dict[str, Any]] = []
+    replaced_urls: Dict[str, str] = {}
+    for position, ((index, entry), source, after) in enumerate(zip(approved, sources, afters)):
+        label = str(entry.get("label") or f"SOURCE_{index + 1:02d}")
+        after_label = str(entry.get("after_label") or f"AFTER_{index + 1:02d}")
+        if wanted and label.upper() not in wanted and after_label.upper() not in wanted:
+            continue
+        if not after:
+            report.append({"label": label, "after_label": after_label, "replaced": False, "reasons": ["after image could not be read"]})
+            continue
+        outcome = await refine_one(
+            lead=lead,
+            deliverable=d,
+            rug=rug,
+            label=label,
+            after_label=after_label,
+            source=source,
+            after=after,
+            reference=None if position == 0 else (reference or first_after),
+            edit=refine_after_image,
+        )
+        row = outcome.report()
+        if outcome.replaced and outcome.after_bytes:
+            mime = "image/png" if outcome.after_bytes.startswith(b"\x89PNG") else "image/jpeg"
+            ext = "png" if mime == "image/png" else "jpg"
+            file_id = await fs_bucket.upload_from_stream(
+                f"ai_{after_label.lower()}_rug_{lead_id}.{ext}",
+                as_gridfs_source(outcome.after_bytes),
+                metadata={
+                    "content_type": mime,
+                    "uploaded_at": _iso(datetime.now(timezone.utc)),
+                    "source": "rug_refine",
+                    "lead_id": lead_id,
+                    "slot": after_label.lower(),
+                    "source_photo_id": entry.get("source_photo_id") or "",
+                    "refined_from": entry.get("after_url") or "",
+                },
+            )
+            new_url = f"/api/uploads/photo/{file_id}"
+            replaced_urls[str(entry.get("after_url") or "")] = new_url
+            history = list(entry.get("after_history") or [])
+            history.append(
+                {
+                    "after_url": entry.get("after_url"),
+                    "replaced_at": _iso(datetime.now(timezone.utc)),
+                    "reason": "rug_consistency",
+                }
+            )
+            entries[index] = {
+                **entry,
+                "after_url": new_url,
+                "after_history": history,
+                "refine": {"kind": "rug_consistency", "qa": outcome.qa, "rug_check": outcome.rug_check},
+            }
+            row["after_url"] = new_url
+            if position == 0:
+                reference = outcome.after_bytes
+        elif position == 0:
+            reference = after
+        report.append(row)
+
+    update: Dict[str, Any] = {
+        "rug": {k: v for k, v in rug.items() if k != "described_by"},
+        "after_refine": {
+            "status": "done",
+            "finished_at": _iso(datetime.now(timezone.utc)),
+            "report": report,
+        },
+        "updated_at": _iso(datetime.now(timezone.utc)),
+    }
+    if replaced_urls:
+        update["source_afters"] = entries
+        front = str(d.get("front_view_url") or "")
+        if front in replaced_urls:
+            update["front_view_url"] = replaced_urls[front]
+        pairs = [
+            {
+                "label": e.get("label"),
+                "after_label": e.get("after_label"),
+                "status": e.get("status"),
+                "before": await _resolve_image_bytes(e.get("source_url"), None),
+                "after": await _resolve_image_bytes(e.get("after_url"), None) if e.get("after_url") else None,
+            }
+            for e in entries
+            if isinstance(e, dict)
+        ]
+        sheet = build_contact_sheet(
+            pairs,
+            customer_name=lead.get("name") or "",
+            incomplete=str(d.get("package_status") or "") == "incomplete" or any(not p["after"] for p in pairs),
+        )
+        sheet_id = await fs_bucket.upload_from_stream(
+            f"contact_sheet_{lead_id}.png",
+            as_gridfs_source(sheet),
+            metadata={"content_type": "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "rug_refine", "lead_id": lead_id, "slot": "contact_sheet"},
+        )
+        update["contact_sheet_url"] = f"/api/uploads/photo/{sheet_id}"
+    await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
+    return {
+        "lead_id": lead_id,
+        "rug": update["rug"],
+        "replaced": sum(1 for row in report if row.get("replaced")),
+        "views": report,
+        "package_status": d.get("package_status"),
+        "emailed": False,
+    }
+
+
+async def _run_after_refine_logged(lead_id: str, rug_override: Optional[Dict[str, Any]], labels: List[str]) -> None:
+    try:
+        await _run_after_refine(lead_id, rug_override, labels)
+    except Exception as exc:
+        logging.exception("After refine failed for %s", lead_id)
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"after_refine": {"status": "error", "error": str(exc), "finished_at": _iso(datetime.now(timezone.utc))}}},
+        )
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/afters/refine")
+async def refine_deliverable_afters(
+    lead_id: str,
+    background_tasks: BackgroundTasks,
+    payload: Optional[AfterRefineRequest] = None,
+    wait: bool = False,
+    _: bool = Depends(require_admin),
+):
+    """Rug-consistency edit of every approved AFTER image, each replaced only when QA passes.
+
+    Keeps SOURCE_n → AFTER_n mappings and package_status. Sends no email.
+    Runs in the background by default (poll the GET route); ``?wait=true`` runs inline.
+    """
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or {}
+    if not any(mapping_is_own_source(e) for e in (d.get("source_afters") or [])):
+        raise HTTPException(status_code=409, detail="No approved per-source afters to refine.")
+    payload = payload or AfterRefineRequest()
+    if wait:
+        return await _run_after_refine(lead_id, payload.rug, payload.labels)
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {"after_refine": {"status": "running", "started_at": _iso(datetime.now(timezone.utc))}}},
+    )
+    background_tasks.add_task(_run_after_refine_logged, lead_id, payload.rug, payload.labels)
+    return {"lead_id": lead_id, "status": "running", "package_status": d.get("package_status"), "emailed": False}
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/afters/refine")
+async def refine_deliverable_afters_status(lead_id: str, _: bool = Depends(require_admin)):
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
+    return {"lead_id": lead_id, "rug": d.get("rug"), **(d.get("after_refine") or {"status": "never_run"})}
 
 
 def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
