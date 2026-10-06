@@ -1,0 +1,801 @@
+{
+  "lead": {
+    "id": "9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+    "name": "Camila Sales",
+    "email": "camila@example.com",
+    "space_type": "kids_room",
+    "package_id": "premium",
+    "biggest_challenge": "Redesign this small nursery for Nicholas, who is now 1 year old. Preserve the existing room architecture, gray wall color, space-themed wall art, crib, dresser/changing station, rocker, shelves, rug, curtains, ceiling fan, and other useful items whenever possible.\n\nPrioritize toddler safety, comfort, clear circulation, easy cleaning, and a calm modern-cozy look with warm neutrals, natural wood, and restrained earth-tone accents. Assess whether the layout can be improved without forcing oversized furniture into the room. Show one or two realistic layout options only if physically feasible, keeping the door, window, crib, and walking paths functional.\n\nBecause Nicholas is now mobile, identify and correct potential hazards: anchor the dresser and shelves, secure wall decor, remove reachable cords and unstable objects, keep the crib away from window coverings and climbable furniture, maintain a clear floor path, and keep the crib sleep surface free of loose pillows, blankets, and toys.\n\nKeep the space theme, but make the decoration feel more intentional and age-appropriate. The room becomes very cold in January because the insulation is poor. Include a separate climate-comfort section with practical, non-construction ideas such as reducing window drafts, improving curtains or window coverage, checking door gaps and HVAC airflow, and choosing safe temperature-monitoring and heating strategies for a nursery. Do not place a portable heater, cords, or loose textiles near the crib. Flag anything that should be inspected by an HVAC or building professional.\n\nDeliver a faithful photo-based redesign using the actual room proportions and camera angles. Do not create a generic nursery or invent unrealistic furniture. Include a prioritized action plan and shopping list.",
+    "goals": "Redesign this small nursery for Nicholas, who is now 1 year old. Preserve the existing room architecture, gray wall color, space-themed wall art, crib, dresser/changing station, rocker, shelves, rug, curtains, ceiling fan, and other useful items whenever possible.\n\nPrioritize toddler safety, comfort, clear circulation, easy cleaning, and a calm modern-cozy look with warm neutrals, natural wood, and restrained earth-tone accents. Assess whether the layout can be improved without forcing oversized furniture into the room. Show one or two realistic layout options only if physically feasible, keeping the door, window, crib, and walking paths functional.\n\nBecause Nicholas is now mobile, identify and correct potential hazards: anchor the dresser and shelves, secure wall decor, remove reachable cords and unstable objects, keep the crib away from window coverings and climbable furniture, maintain a clear floor path, and keep the crib sleep surface free of loose pillows, blankets, and toys.\n\nKeep the space theme, but make the decoration feel more intentional and age-appropriate. The room becomes very cold in January because the insulation is poor. Include a separate climate-comfort section with practical, non-construction ideas such as reducing window drafts, improving curtains or window coverage, checking door gaps and HVAC airflow, and choosing safe temperature-monitoring and heating strategies for a nursery. Do not place a portable heater, cords, or loose textiles near the crib. Flag anything that should be inspected by an HVAC or building professional.\n\nDeliver a faithful photo-based redesign using the actual room proportions and camera angles. Do not create a generic nursery or invent unrealistic furniture. Include a prioritized action plan and shopping list.",
+    "timeline": null,
+    "photos": [
+      "/api/uploads/photo/6abd185e1fa695cb9b245de0",
+      "/api/uploads/photo/6abd18631fa695cb9b245df2",
+      "/api/uploads/photo/6abd18681fa695cb9b245e06",
+      "/api/uploads/photo/6abd186d1fa695cb9b245e15"
+    ],
+    "bothers_about": [],
+    "bothers_other": null,
+    "desired_feeling": [],
+    "feeling_other": null,
+    "must_stay": null,
+    "storage_needs": [],
+    "style_prefs": [
+      "cozy_layered"
+    ],
+    "color_prefs": [
+      "earth"
+    ],
+    "budget": null,
+    "diy_level": null,
+    "daily_improvement": null,
+    "language": "en",
+    "status": "review",
+    "email_sent": false,
+    "email_error": null,
+    "automation_error": null,
+    "created_at": "2026-09-30T14:11:02.152651+00:00",
+    "updated_at": "2026-10-02T13:57:30.407732+00:00",
+    "automation_note": "Contact sheet ready for review. Customer board and PDF are not final until approved.",
+    "package_status": "review"
+  },
+  "deliverable": {
+    "lead_id": "9dbedfba-81fc-45e0-b99d-36e0a1de01bb",
+    "action_plan": [
+      "Week 1: Anchor the dresser and shelves to the wall with the anti-tip kit. Walk the room at toddler height and secure or remove any reachable cords, unstable objects, or climbable stepping-stones near the crib.",
+      "Week 1: Clear the crib interior completely — fitted sheet and wearable sleep sack only. Remove the teddy bear, loose blanket, and any cushions or pillows from the crib.",
+      "Week 2: Install the thermal blackout curtain panels over the existing rod to reduce window drafts. Apply the adhesive insulation film to the window glass and place the draft stopper along the bottom of the door.",
+      "Week 2: Mount the wall organizer caddy beside the dresser at arm's reach from the changing pad. Move diapering supplies into the caddy and into dresser drawers — keep the countertop clear.",
+      "Week 3: Curate the crib-wall space art: rehang the existing planets, moon, and rockets in one calm grouping. Add the two new felt planet accents in warm gray or terra cotta. Securely mount all 3D pieces outside Nicholas's reach and leave breathing room between elements.",
+      "Week 3: Place the woven storage basket on the rug with a small, rotating set of tactile toys. At bedtime each evening, reset the basket in 60 seconds — this becomes your daily calm anchor.",
+      "Week 4: Position the rechargeable night-light on a high shelf or wall mount (never on the floor or crib rail). Place the digital thermometer on the dresser or a high shelf to monitor temperature and humidity without cords near the crib.",
+      "Ongoing: During January cold snaps, check that the room stays between 68–72°F using your existing heating system. If the temperature drops persistently below 68°F or drafts remain despite the film and curtains, contact an HVAC professional to inspect insulation, ductwork, and airflow to this room."
+    ],
+    "attachment_note": "The attached photo shows a nursery with a window on the back wall flanked by light curtains, a white dresser and changing station on the left wall, and a crib with a natural wood frame on the right. The walls are painted a soft gray, the floor is wood-look, and a rug anchors the center. A ceiling fan with a light fixture is visible at the top of the frame. The room proportions, window placement, door path (off-camera to the left), and existing furniture layout have been preserved at approximately 95 percent accuracy. No new walls, windows, or construction are proposed. The wall switch remains in its original location. The space theme — planets, moon, and rockets — will be curated on the wall above the crib using existing and new lightweight felt accents, with all 3D pieces securely mounted outside crib reach.",
+    "benefits": [
+      "A safer nursery: anchored furniture, secured decor, and a hazard-free crib interior give you peace of mind as Nicholas explores his world on two feet.",
+      "A warmer room in winter: layered thermal curtains, window film, and a door draft stopper reduce cold drafts and create a cozy cocoon without unsafe heating devices.",
+      "Less daily stress: one basket for toys, one wall caddy for diapering, and a clear floor path mean fewer decisions, faster resets, and more time for connection.",
+      "A calm, intentional space theme: the curated crib-wall composition and warm earth-tone accents honor Nicholas's curiosity while keeping visual calm.",
+      "A nursery that grows with him: every element is flexible, non-construction, and ready to evolve as Nicholas moves from toddler to preschooler."
+    ],
+    "blueprint_layers": {
+      "schema_version": "1.0",
+      "observation": {
+        "space_seen": "A small nursery with one window on the back wall, light gray walls, a white dresser and changing station on the left, a crib with a natural wood frame on the right, a ceiling fan with light fixture above, wood-look flooring, and a soft rug in the center. Light curtains frame the window. A rocker is visible near the window. The door path is to the left (off-camera). The room has a space theme with wall decor above the crib.",
+        "current_state": [
+          "The crib currently holds a fitted sheet, a loose blanket, and a small teddy bear — not safe-sleep compliant for a mobile one-year-old.",
+          "The dresser and shelves are not visibly anchored, posing a tip-over risk as Nicholas becomes more adventurous.",
+          "The existing curtains are lightweight and decorative but do not block drafts or cold air in January.",
+          "The space-themed wall art above the crib includes planets, moon, and rockets but feels scattered rather than intentional.",
+          "The room has limited visible storage for rotating toys or daily essentials, and the countertop of the changing station holds multiple items that could be streamlined."
+        ],
+        "possessions": [
+          "White dresser and changing station with multiple drawers",
+          "Crib with natural wood frame",
+          "Rocker or glider chair near the window",
+          "Existing wall shelves",
+          "Soft area rug in warm neutral tones",
+          "Light curtains on a rod over the window"
+        ],
+        "evidence": [
+          "Customer states Nicholas is now 1 year old and mobile, requiring toddler safety measures.",
+          "Customer requests preserving the existing gray wall color, crib, dresser, rocker, shelves, rug, curtains, ceiling fan, and space theme.",
+          "Customer reports the room becomes very cold in January due to poor insulation and requests climate-comfort solutions without construction.",
+          "Customer prioritizes toddler safety, clear circulation, easy cleaning, and a calm modern-cozy aesthetic with warm neutrals and earth tones.",
+          "Customer did not request a second layout option or oversized furniture but asked for realistic, feasible improvements to the current arrangement.",
+          "Photo shows the window on the back wall, dresser on the left, crib on the right, and a clear center floor area with rug."
+        ]
+      },
+      "human_need": {
+        "routine": "Camila's daily rhythm in Nicholas's nursery includes morning wake-up and dressing at the dresser, diaper changes throughout the day on the changing station, feeding and rocking in the chair near the window, supervised floor play on the rug, and bedtime routines that end with placing Nicholas in the crib for safe sleep. In January the room becomes uncomfortably cold, requiring additional layers and worry about Nicholas's comfort overnight. Camila wants each task — diapering, dressing, toy rotation, bedtime reset — to feel calm and effortless, not a hunt for supplies or a battle with clutter.",
+        "desired_feeling": "Calm, cozy, safe, and intentional — a nursery that wraps Nicholas in warmth and security while reducing Camila's mental load and decision fatigue.",
+        "jobs_to_be_done": [
+          "Keep Nicholas safe as he explores: anchored furniture, secured decor, hazard-free crib.",
+          "Warm the room in winter without unsafe heating devices or crib-side cords.",
+          "Find diapering and dressing supplies in seconds without counter clutter.",
+          "Reset the play area in 60 seconds at bedtime.",
+          "Create an intentional, age-appropriate space theme that feels personal and grows with Nicholas."
+        ],
+        "pain": "Camila loves the space theme and existing furniture but worries about Nicholas's safety now that he is mobile, feels anxious about the cold January nights, and wants the nursery to feel calmer and more organized without starting from scratch or undertaking construction."
+      },
+      "spatial_constraint": {
+        "preserve_shell": true,
+        "windows_dims_fidelity": "~95%",
+        "known_from_photo": [
+          "One window on the back wall with light curtains on a rod",
+          "White dresser and changing station on the left wall",
+          "Crib with natural wood frame on the right wall, positioned away from the window",
+          "Ceiling fan with light fixture on the ceiling above the center of the room",
+          "Wood-look flooring and a soft area rug in the center",
+          "Door path to the left (off-camera), wall switch beside the door in its existing location"
+        ],
+        "unknowns": [
+          "Exact square footage of the nursery — not measured, estimated as a small room approximately 9×10 or 10×10 feet based on photo proportions.",
+          "Exact height of the ceiling fan above the floor.",
+          "Exact width and height of the window in inches.",
+          "Location and capacity of HVAC vents or radiators (not visible in photo).",
+          "Thickness of exterior wall insulation (customer reports poor insulation)."
+        ],
+        "no_invented_floor_plan": true,
+        "paint_optional": true
+      },
+      "recommendation": {
+        "system": "A zone-based safety and comfort system that anchors furniture, layers thermal window coverage, streamlines storage into drawers and one wall caddy, curates the space theme into one intentional crib-wall composition, and creates a 60-second evening reset routine.",
+        "zones": [
+          {
+            "title": "Safe Sleep Zone",
+            "why": "The crib stays in its current corner with a clear sleep surface (fitted sheet and wearable sleep sack only) and anchored if possible, keeping Nicholas safe from tip-overs, suffocation hazards, and window-covering entanglement."
+          },
+          {
+            "title": "Diaper & Dress Zone",
+            "why": "The existing dresser with all drawers stays in place and is anchored to the wall; a wall-mounted caddy brings diapering essentials to arm's reach, reducing counter clutter and making changes faster."
+          },
+          {
+            "title": "Calm Feeding & Rocking Zone",
+            "why": "The rocker near the window becomes Camila's anchor for nighttime wake-ups and morning cuddles, with a small side table or wall shelf for essentials within reach."
+          },
+          {
+            "title": "Intentional Play & Discovery Zone",
+            "why": "The rug defines a cushioned, safe floor area; one woven basket holds a rotating handful of toys that can be reset in 60 seconds each evening, reducing visual noise and decision fatigue."
+          },
+          {
+            "title": "Space-Explorer Feature Wall",
+            "why": "The wall above the crib becomes a personal, curated composition of existing and new planets, moon, rockets, and astronauts in warm earth tones, secured outside crib reach and surrounded by negative space for calm."
+          }
+        ],
+        "why_it_should_work": "This system works because it respects the real room shell and furniture Camila already owns, addresses the specific safety hazards that emerge when a baby becomes a mobile toddler, layers thermal insulation at the window without construction, and reduces daily effort by consolidating storage into the existing dresser drawers and one wall caddy. The curated space theme ties Nicholas's curiosity to a calm visual story, and the one-basket toy rotation creates a repeatable 60-second reset that prevents overwhelm. Every recommendation flows from Camila's stated routine, budget, and desire for a cozy, modern nursery that grows with Nicholas."
+      },
+      "validation": {
+        "fit": {
+          "status": "pass",
+          "note": "All furniture — dresser, crib, rocker, shelves — remains in its current location from the photo. The thermal curtains layer over the existing rod. The wall caddy mounts beside the dresser at arm's reach. The woven basket sits on the rug. No new furniture is forced into the space, and the door path, window, and circulation remain clear."
+        },
+        "flow": {
+          "status": "pass",
+          "note": "The daily path from door to crib to dresser to rocker stays open. The rug defines the play zone without blocking circulation. Anchoring the dresser and shelves removes tip-over hazards from Nicholas's exploration path. The crib is positioned away from the window and dresser, preventing climbing access."
+        },
+        "budget_band": {
+          "status": "pass",
+          "note": "Customer did not state a specific budget. The shopping list totals $240, a realistic one-time investment for toddler safety (anti-tip kits), climate comfort (thermal curtains, window film, draft stopper), and intentional organization (wall caddy, basket, felt accents, night-light, thermometer). This band reflects mid-range nursery safety and decor products from Target, IKEA, and Amazon.",
+          "band": "$240"
+        },
+        "possession_respect": {
+          "status": "pass",
+          "note": "Every named possession — gray walls, crib, dresser with all drawers, rocker, shelves, rug, curtains, ceiling fan, space-themed wall art — is preserved and remains functional. The existing space decor is curated, not replaced. The dresser drawers are not swapped for baskets."
+        },
+        "conflicts": [
+          "The customer requested climate-comfort solutions for poor insulation but also specified no construction. The plan layers thermal curtains, window film, and a door draft stopper — practical non-construction measures — but if the room temperature drops persistently below 68°F, an HVAC or insulation professional should inspect the exterior wall and ductwork.",
+          "The customer asked to preserve all useful items, but the loose blanket and teddy bear currently in the crib must be removed for safe sleep. This is a safety override, not a design preference."
+        ],
+        "assumptions": [
+          "The room is approximately 9×10 or 10×10 feet based on photo proportions — exact square footage was not measured.",
+          "The existing heating system (forced air, baseboard, or radiator) serves this room but is insufficient in January due to poor insulation — assumed, not confirmed.",
+          "The dresser has multiple drawers (at least four to six) based on the photo — exact count not stated.",
+          "The wall switch beside the door controls the ceiling fan or overhead light — location confirmed from photo, function assumed.",
+          "The customer has access to wall studs or drywall anchors suitable for mounting anti-tip kits and a wall caddy — standard assumption for nursery safety."
+        ]
+      },
+      "customer_instruction": {
+        "start_here": "This week, anchor the dresser and shelves to the wall with the anti-tip kit, then walk the room at Nicholas's height and remove or secure any reachable cords, unstable objects, or climbable furniture near the crib. Clear the crib interior to only a fitted sheet and wearable sleep sack.",
+        "do_this_week": [
+          "Install the anti-tip kit on the dresser and shelves.",
+          "Remove the loose blanket, teddy bear, and any pillows or cushions from the crib — store them outside the crib for safe sleep.",
+          "Mount the wall organizer caddy beside the dresser and move diapering essentials into the caddy and dresser drawers.",
+          "Hang the two thermal blackout curtain panels over the existing curtain rod to layer warmth and draft protection.",
+          "Apply the adhesive window insulation film to the window glass and place the draft stopper along the bottom of the door."
+        ],
+        "do_not": [
+          "Do not place a portable heater, electric blanket, or space heater in the nursery — these pose fire and cord hazards near a mobile toddler.",
+          "Do not add a new wall, cubby system, or construction project — the existing shell and furniture are preserved.",
+          "Do not replace the dresser drawers with open baskets or bins — all drawers stay intact.",
+          "Do not place any loose blankets, pillows, bumpers, or stuffed animals inside the crib — safe sleep requires a clear surface.",
+          "Do not mount shelves, decor, or cords over or in front of the window or door — openings stay clear and functional.",
+          "Do not move the ceiling fan, wall switch, or light fixture — these remain in their existing locations."
+        ],
+        "weekly_reset": "Each evening before Nicholas's bedtime, spend 60 seconds resetting the woven toy basket on the rug — return the day's toys to the basket, tuck it beside the rocker or under a shelf, and walk the floor path to confirm it is clear. This tiny ritual creates calm and signals the transition to bedtime for both of you."
+      }
+    },
+    "budget_note": "Total kit investment: $240. This one-time purchase addresses toddler safety, climate comfort, and intentional design without construction or furniture replacement. Every item serves a clear job: securing furniture, insulating the window, organizing daily routines, and creating a warmer, calmer nursery for Nicholas.",
+    "intro": "Welcome, Camila! Your thoughtful vision for Nicholas's nursery honors both his milestone at one year old and the calm, space-explorer spirit already woven into this room. This plan preserves every piece of architecture and useful furniture you named — the gray walls, crib, dresser and changing station, rocker, shelves, rug, curtains, ceiling fan, and beloved space theme — while weaving in toddler safety, improved circulation, and a warmer layer of comfort for those cold January nights. We will make the decoration feel intentional and age-appropriate, anchor wandering minds and mobile bodies to a cozy routine, and reduce daily decision fatigue. Every recommendation respects the real room proportions from your photo, and every shopping-list item brings you one step closer to a nursery that breathes calm into your family's everyday life.",
+    "needs": [
+      "A safer, toddler-proof environment: anchored dresser and shelves, secured wall decor, crib free of hazards and loose items.",
+      "A warmer nursery in January: draft reduction, improved window insulation, and safe temperature monitoring without portable heaters or crib-side cords.",
+      "Clear circulation and easy cleaning: open floor path, intentional furniture placement, and minimal tripping hazards.",
+      "A calm, modern-cozy aesthetic with warm neutrals and earth tones that support Nicholas's daily rhythm and your peace of mind.",
+      "An age-appropriate, personal space theme that grows with Nicholas and replaces clutter with purpose."
+    ],
+    "notes": "This plan preserves the room's existing architecture, gray wall color, ceiling fan location, wall switch beside the door, crib, dresser with all drawers, rocker, shelves, rug, curtains, and space theme at approximately 95 percent fidelity to the photo. Window dimensions, door path, and furniture placement remain true to the real room. Wall paint stays as photographed — no color change unless you decide later. The climate-comfort recommendations are practical, non-construction solutions; if drafts or low temperatures persist after these measures, an HVAC inspection is recommended. The crib interior follows safe-sleep guidelines: fitted sheet and wearable sleep sack only, no loose blankets, pillows, or toys. The shopping list totals $240 and reflects one cohesive kit with no second price band. Every sentence is complete, and every recommendation reduces overwhelm while honoring the beautiful foundation you have already built for Nicholas.",
+    "shopping_list": [
+      {
+        "name": "Furniture anti-tip kit (2-pack, dresser + shelves)",
+        "qty": 1.0,
+        "price": 18.0
+      },
+      {
+        "name": "Thermal blackout curtain panel (single, 52×84 in., warm taupe or oatmeal linen-look)",
+        "qty": 2.0,
+        "price": 30.0
+      },
+      {
+        "name": "Adhesive window insulation film kit (reduces drafts, clear)",
+        "qty": 1.0,
+        "price": 15.0
+      },
+      {
+        "name": "Draft stopper for door (fabric tube, earth tone)",
+        "qty": 1.0,
+        "price": 12.0
+      },
+      {
+        "name": "Wall-mounted nursery organizer caddy (steel or wood, for changing supplies)",
+        "qty": 1.0,
+        "price": 22.0
+      },
+      {
+        "name": "Cordless rechargeable LED night-light (dimmable, warm white)",
+        "qty": 1.0,
+        "price": 16.0
+      },
+      {
+        "name": "Digital room thermometer with humidity monitor (no cords near crib)",
+        "qty": 1.0,
+        "price": 14.0
+      },
+      {
+        "name": "Felt wall decor — moon or planet accent (warm gray or terra cotta, lightweight, 8–10 in.)",
+        "qty": 2.0,
+        "price": 10.0
+      },
+      {
+        "name": "Low-profile woven storage basket with handles (natural jute or seagrass, 12×12 in., for rotating toys)",
+        "qty": 1.0,
+        "price": 18.0
+      },
+      {
+        "name": "Soft cotton area rug or rug pad (non-slip, earth tone, 4×6 ft, optional layering under existing rug)",
+        "qty": 1.0,
+        "price": 45.0
+      }
+    ],
+    "strategy": [
+      "Preserve the existing room shell, furniture, and space theme — no new walls, windows, or construction.",
+      "Anchor every tall or heavy piece (dresser, shelves) to the wall with anti-tip kits, and secure or remove reachable cords and unstable decor.",
+      "Improve January warmth by layering thermal curtains over the existing panels, sealing the window with insulation film, and adding a door draft stopper — no portable heaters or crib-side heating devices.",
+      "Simplify the daily routine: one basket for rotating toys, one wall caddy for diapering essentials, and a clear floor path from door to crib to dresser.",
+      "Curate the space theme into one intentional crib-wall composition with existing and new lightweight felt planets in warm earth tones, leaving negative space for calm.",
+      "Use the drawers you already have so putting things away stays one step."
+    ],
+    "summary": "Camila, this refresh transforms Nicholas's nursery into a safer, warmer, calmer haven without changing a single wall or replacing a single piece of furniture. By anchoring the dresser and shelves, layering thermal window coverage, clearing the crib interior, and curating the space theme into one intentional composition, you create a room that supports his curiosity, your daily routine, and your family's peace of mind. The warm earth-tone accents and natural textures tie the modern-cozy aesthetic together, and the streamlined storage reduces decision fatigue at every diaper change and bedtime reset. This is a nursery that grows with Nicholas — flexible, safe, and deeply personal.",
+    "updated_at": "2026-10-06T14:36:51.705799+00:00",
+    "wall_color_code": "",
+    "wall_color_hex": "",
+    "wall_color_name": "Keep existing / no paint change",
+    "wall_color_note": "No paint change — keep the existing soft gray wall color from the photo. It already provides a calm, modern backdrop that pairs beautifully with warm wood tones and earth-tone textiles. The room will feel warmer through layered textiles, improved window coverage, and intentional lighting rather than a wall repaint.",
+    "zones": [
+      {
+        "title": "Safe Sleep Zone",
+        "desc": "The crib stays in its current corner, away from the window and dresser. Anchor it to the wall if it has anti-tip hardware. The sleep surface holds only a fitted sheet and a wearable sleep sack — no loose blankets, pillows, toys, or bumpers. The nearby wall switch stays exactly where it is, accessible and clear."
+      },
+      {
+        "title": "Diaper & Dress Zone",
+        "desc": "The existing white dresser and changing station remain in place with all drawers intact. Anchor the dresser to the wall with an anti-tip kit. Store diapers, wipes, and clothing in the drawers — no open baskets replacing drawers. Keep the countertop clear except for a wipeable changing pad and a wall-mounted organizer for immediate needs."
+      },
+      {
+        "title": "Calm Feeding & Rocking Zone",
+        "desc": "The rocker stays where it is, close to the window but not blocking circulation. Add a small side table or wall shelf within arm's reach for a water bottle, book, or baby monitor. This zone becomes your quiet anchor during nighttime wake-ups and morning cuddles."
+      },
+      {
+        "title": "Intentional Play & Discovery Zone",
+        "desc": "The existing rug defines a safe, cushioned floor area. Keep a low, open basket or bin with a rotating handful of age-appropriate toys — simple, tactile, and easy to reset each evening. The floor path from door to crib to dresser stays completely clear."
+      },
+      {
+        "title": "Space-Explorer Feature Wall",
+        "desc": "Above the crib, curate one personal space composition using the existing planets, moon, rockets, and astronauts. Securely mount any 3D pieces outside crib reach. Add one or two new lightweight felt or fabric planets in warm earth tones to tie the theme to your color palette. Keep negative space — less is more intentional."
+      }
+    ],
+    "render_qa": {
+      "ok": true,
+      "windows_covered": false,
+      "gravity_wrong": false,
+      "walls_repainted": false,
+      "reasons": [
+        "Window remains fully visible and unobstructed in both images",
+        "Gravity and room orientation are correct in both photos",
+        "Wall color is consistent between before and after (light gray/blue-gray)",
+        "All ceiling fixtures remain on ceiling",
+        "Organized render shows improved styling with added decor elements (plants, baskets, organized shelving) without structural changes"
+      ],
+      "suggested_rotate_degrees": 0,
+      "skipped": false,
+      "error": null,
+      "attempt": 1
+    },
+    "front_view_kind": "organized",
+    "front_view_url": "/api/uploads/photo/6ac5070d721ae053b214d950",
+    "budget_display": "$240",
+    "consistency_notes": [
+      "budget figures did not match the shopping list; the list total is now the only kit price",
+      "budget band was below the shopping-list total and was corrected"
+    ],
+    "stated_budget": "",
+    "view_1_url": null,
+    "view_2_url": null,
+    "contact_sheet_url": "/api/uploads/photo/6ac50788721ae053b214d958",
+    "non_room_uploads": [],
+    "package_status": "review",
+    "source_afters": [
+      {
+        "source_photo_id": "6abd185e1fa695cb9b245de0",
+        "source_url": "/api/uploads/photo/6abd185e1fa695cb9b245de0",
+        "label": "SOURCE_01",
+        "after_label": "AFTER_01",
+        "after_url": "/api/uploads/photo/6ac5070d721ae053b214d950",
+        "status": "approved",
+        "kind": "room",
+        "qa": {
+          "ok": true,
+          "windows_covered": false,
+          "gravity_wrong": false,
+          "walls_repainted": false,
+          "reasons": [
+            "Window remains fully visible and unobstructed in both images",
+            "Ceiling fixtures (light and fan) correctly positioned on ceiling in both before and after",
+            "Room orientation and gravity are correct in both images",
+            "Wall color is consistent between before and after - same muted gray-purple tone",
+            "After render adds tasteful wall decor (space-themed prints, wooden accents, plants) without blocking windows or violating spatial logic"
+          ],
+          "suggested_rotate_degrees": 0,
+          "skipped": false,
+          "error": null,
+          "attempt": 1
+        },
+        "edit_kind": "own_source",
+        "derived_from_photo_id": "6abd185e1fa695cb9b245de0",
+        "after_history": [
+          {
+            "after_url": "/api/uploads/photo/6abfb7b120610742e46ed362",
+            "replaced_at": "2026-10-06T14:34:53.931787+00:00",
+            "reason": "rug_consistency"
+          }
+        ],
+        "refine": {
+          "kind": "rug_consistency",
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Window remains fully visible and unobstructed in both images",
+              "Ceiling fixtures (light and fan) remain on ceiling in both images",
+              "Room orientation and gravity are correct in both images",
+              "Wall color appears consistent between before and after (same gray-blue tone)",
+              "Render shows thoughtful organization with wall art, plants, and storage baskets added without blocking windows or obstruction",
+              "Layout maintains the same spatial arrangement with crib, changing station, and window placement"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with taupe undertones",
+              "Rug is approximately 5 ft across",
+              "Rug is positioned in the open floor play area between dresser, crib, and rocker",
+              "Rug appears to be low pile, solid wool or wool-blend with no pattern",
+              "No other furniture, decor, or room elements have changed between PREVIOUS and REFINED",
+              "Camera angle, crop, and orientation remain identical"
+            ],
+            "skipped": false,
+            "error": null
+          }
+        }
+      },
+      {
+        "source_photo_id": "6abd18631fa695cb9b245df2",
+        "source_url": "/api/uploads/photo/6abd18631fa695cb9b245df2",
+        "label": "SOURCE_02",
+        "after_label": "AFTER_02",
+        "after_url": "/api/uploads/photo/6ac50735721ae053b214d952",
+        "status": "approved",
+        "kind": "room",
+        "qa": {
+          "ok": true,
+          "windows_covered": false,
+          "gravity_wrong": false,
+          "walls_repainted": false,
+          "reasons": [
+            "Room orientation and gravity are correct in both images",
+            "Ceiling fan and light fixtures remain on ceiling in AFTER",
+            "No windows or doors are blocked by added furniture/storage",
+            "Wall color appears consistent between BEFORE and AFTER (same gray-blue tone)",
+            "Lighting differences are due to added lamp and natural variation, not repainting",
+            "AFTER adds tasteful decor: framed astronaut art, lamp, throw pillows, plant, and books without obscuring any architectural features"
+          ],
+          "suggested_rotate_degrees": 0,
+          "skipped": false,
+          "error": null,
+          "attempt": 1
+        },
+        "edit_kind": "own_source",
+        "derived_from_photo_id": "6abd18631fa695cb9b245df2",
+        "after_history": [
+          {
+            "after_url": "/api/uploads/photo/6abfb7e220610742e46ed364",
+            "replaced_at": "2026-10-06T14:35:33.568340+00:00",
+            "reason": "rug_consistency"
+          }
+        ],
+        "refine": {
+          "kind": "rug_consistency",
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Gravity and ceiling fixtures are correct in both images",
+              "No windows are blocked or covered by new storage",
+              "Wall color remains consistent light gray/lavender in both BEFORE and AFTER",
+              "Lighting differences are due to added lamp and natural lighting variations, not repainting",
+              "All major elements (crib, chair, shelving) are in same positions",
+              "Render adds decorative elements (artwork, plants, pillows, lamp) without structural changes"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with soft taupe undertones",
+              "Rug is positioned in the play area between the crib, dresser, and rocker",
+              "Rug appears to be approximately 5 ft across with low pile, solid weave",
+              "No furniture, wall decor, or other room elements have been added, removed, or repositioned",
+              "Only the rug addition differentiates REFINED from PREVIOUS"
+            ],
+            "skipped": false,
+            "error": null
+          }
+        }
+      },
+      {
+        "source_photo_id": "6abd18681fa695cb9b245e06",
+        "source_url": "/api/uploads/photo/6abd18681fa695cb9b245e06",
+        "label": "SOURCE_03",
+        "after_label": "AFTER_03",
+        "after_url": "/api/uploads/photo/6ac5075c721ae053b214d954",
+        "status": "approved",
+        "kind": "room",
+        "qa": {
+          "ok": true,
+          "windows_covered": false,
+          "gravity_wrong": false,
+          "walls_repainted": false,
+          "reasons": [
+            "Door and all fixtures remain visible and unobstructed",
+            "Ceiling fixtures (vent, light) remain on ceiling in both images",
+            "Wall color is consistent between before and after (light gray-blue)",
+            "Gravity/orientation is correct in both images",
+            "Render shows reasonable styling additions (plants, artwork, throw pillows, basket storage) without structural changes"
+          ],
+          "suggested_rotate_degrees": 0,
+          "skipped": false,
+          "error": null,
+          "attempt": 1
+        },
+        "edit_kind": "own_source",
+        "derived_from_photo_id": "6abd18681fa695cb9b245e06",
+        "after_history": [
+          {
+            "after_url": "/api/uploads/photo/6abfb81020610742e46ed366",
+            "replaced_at": "2026-10-06T14:36:12.445598+00:00",
+            "reason": "rug_consistency"
+          }
+        ],
+        "refine": {
+          "kind": "rug_consistency",
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Door remains fully visible and unobstructed",
+              "All ceiling fixtures (vent, light) remain on ceiling in AFTER",
+              "Wall color is consistent between BEFORE and AFTER (light blue-gray)",
+              "Gravity and room orientation are correct in both images",
+              "Shelves are positioned on walls without blocking any windows or doors",
+              "Added décor (plants, artwork, pillows, basket) is appropriate staging, not structural changes"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in the play area floor space",
+              "Rug appears to be approximately 5 ft across",
+              "Color is warm beige/cream with soft taupe undertones",
+              "Rug has solid, no-pattern design",
+              "Low pile appearance consistent with wool or wool-blend",
+              "Rug is positioned between dresser, crib, and rocker as specified",
+              "No other furniture, wall decor, or room elements have changed",
+              "Camera angle and composition remain identical"
+            ],
+            "skipped": false,
+            "error": null
+          }
+        }
+      },
+      {
+        "source_photo_id": "6abd186d1fa695cb9b245e15",
+        "source_url": "/api/uploads/photo/6abd186d1fa695cb9b245e15",
+        "label": "SOURCE_04",
+        "after_label": "AFTER_04",
+        "after_url": "/api/uploads/photo/6ac50783721ae053b214d956",
+        "status": "approved",
+        "kind": "room",
+        "qa": {
+          "ok": true,
+          "windows_covered": false,
+          "gravity_wrong": false,
+          "walls_repainted": false,
+          "reasons": [
+            "Window remains fully visible and unobstructed in both images",
+            "Gravity and room orientation are correct in both photos",
+            "Wall color is consistent between before and after (light gray/blue-gray)",
+            "All ceiling fixtures remain on ceiling",
+            "Organized render shows improved styling with added decor elements (plants, baskets, organized shelving) without structural changes"
+          ],
+          "suggested_rotate_degrees": 0,
+          "skipped": false,
+          "error": null,
+          "attempt": 1
+        },
+        "edit_kind": "own_source",
+        "derived_from_photo_id": "6abd186d1fa695cb9b245e15",
+        "after_history": [
+          {
+            "after_url": "/api/uploads/photo/6abfb84120610742e46ed368",
+            "replaced_at": "2026-10-06T14:36:51.705752+00:00",
+            "reason": "rug_consistency"
+          }
+        ],
+        "refine": {
+          "kind": "rug_consistency",
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Window remains fully visible and unobstructed in both images",
+              "Gravity/orientation is correct in both photos",
+              "Wall color appears consistent between before and after (light blue-gray)",
+              "Lighting differences are due to render enhancement, not actual repainting",
+              "All ceiling fixtures remain on ceiling"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with taupe undertones",
+              "Rug is approximately 5 ft across",
+              "Rug appears to be low pile, solid wool or wool-blend",
+              "Rug is positioned in the open floor play area between dresser, crib, and window",
+              "No pattern visible on rug",
+              "All furniture, wall decor, windows, door, and room layout remain identical to PREVIOUS",
+              "Only change is the addition of the rug as specified"
+            ],
+            "skipped": false,
+            "error": null
+          }
+        }
+      }
+    ],
+    "view_3_url": null,
+    "floor_plan_url": null,
+    "include_customer_photos": true,
+    "shopping_links": [],
+    "after_refine": {
+      "status": "done",
+      "finished_at": "2026-10-06T14:36:51.705796+00:00",
+      "report": [
+        {
+          "label": "SOURCE_01",
+          "after_label": "AFTER_01",
+          "replaced": true,
+          "attempts": 1,
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Window remains fully visible and unobstructed in both images",
+              "Ceiling fixtures (light and fan) remain on ceiling in both images",
+              "Room orientation and gravity are correct in both images",
+              "Wall color appears consistent between before and after (same gray-blue tone)",
+              "Render shows thoughtful organization with wall art, plants, and storage baskets added without blocking windows or obstruction",
+              "Layout maintains the same spatial arrangement with crib, changing station, and window placement"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with taupe undertones",
+              "Rug is approximately 5 ft across",
+              "Rug is positioned in the open floor play area between dresser, crib, and rocker",
+              "Rug appears to be low pile, solid wool or wool-blend with no pattern",
+              "No other furniture, decor, or room elements have changed between PREVIOUS and REFINED",
+              "Camera angle, crop, and orientation remain identical"
+            ],
+            "skipped": false,
+            "error": null
+          },
+          "reasons": [],
+          "after_url": "/api/uploads/photo/6ac5070d721ae053b214d950"
+        },
+        {
+          "label": "SOURCE_02",
+          "after_label": "AFTER_02",
+          "replaced": true,
+          "attempts": 1,
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Gravity and ceiling fixtures are correct in both images",
+              "No windows are blocked or covered by new storage",
+              "Wall color remains consistent light gray/lavender in both BEFORE and AFTER",
+              "Lighting differences are due to added lamp and natural lighting variations, not repainting",
+              "All major elements (crib, chair, shelving) are in same positions",
+              "Render adds decorative elements (artwork, plants, pillows, lamp) without structural changes"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with soft taupe undertones",
+              "Rug is positioned in the play area between the crib, dresser, and rocker",
+              "Rug appears to be approximately 5 ft across with low pile, solid weave",
+              "No furniture, wall decor, or other room elements have been added, removed, or repositioned",
+              "Only the rug addition differentiates REFINED from PREVIOUS"
+            ],
+            "skipped": false,
+            "error": null
+          },
+          "reasons": [],
+          "after_url": "/api/uploads/photo/6ac50735721ae053b214d952"
+        },
+        {
+          "label": "SOURCE_03",
+          "after_label": "AFTER_03",
+          "replaced": true,
+          "attempts": 1,
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Door remains fully visible and unobstructed",
+              "All ceiling fixtures (vent, light) remain on ceiling in AFTER",
+              "Wall color is consistent between BEFORE and AFTER (light blue-gray)",
+              "Gravity and room orientation are correct in both images",
+              "Shelves are positioned on walls without blocking any windows or doors",
+              "Added décor (plants, artwork, pillows, basket) is appropriate staging, not structural changes"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in the play area floor space",
+              "Rug appears to be approximately 5 ft across",
+              "Color is warm beige/cream with soft taupe undertones",
+              "Rug has solid, no-pattern design",
+              "Low pile appearance consistent with wool or wool-blend",
+              "Rug is positioned between dresser, crib, and rocker as specified",
+              "No other furniture, wall decor, or room elements have changed",
+              "Camera angle and composition remain identical"
+            ],
+            "skipped": false,
+            "error": null
+          },
+          "reasons": [],
+          "after_url": "/api/uploads/photo/6ac5075c721ae053b214d954"
+        },
+        {
+          "label": "SOURCE_04",
+          "after_label": "AFTER_04",
+          "replaced": true,
+          "attempts": 1,
+          "qa": {
+            "ok": true,
+            "windows_covered": false,
+            "gravity_wrong": false,
+            "walls_repainted": false,
+            "reasons": [
+              "Window remains fully visible and unobstructed in both images",
+              "Gravity/orientation is correct in both photos",
+              "Wall color appears consistent between before and after (light blue-gray)",
+              "Lighting differences are due to render enhancement, not actual repainting",
+              "All ceiling fixtures remain on ceiling"
+            ],
+            "suggested_rotate_degrees": 0,
+            "skipped": false,
+            "error": null,
+            "attempt": 1
+          },
+          "rug_check": {
+            "ok": true,
+            "rug_matches": true,
+            "other_changes": false,
+            "reasons": [
+              "REFINED shows a single round rug in warm beige/cream with taupe undertones",
+              "Rug is approximately 5 ft across",
+              "Rug appears to be low pile, solid wool or wool-blend",
+              "Rug is positioned in the open floor play area between dresser, crib, and window",
+              "No pattern visible on rug",
+              "All furniture, wall decor, windows, door, and room layout remain identical to PREVIOUS",
+              "Only change is the addition of the rug as specified"
+            ],
+            "skipped": false,
+            "error": null
+          },
+          "reasons": [],
+          "after_url": "/api/uploads/photo/6ac50783721ae053b214d956"
+        }
+      ]
+    },
+    "rug": {
+      "shape": "round",
+      "diameter_ft": 5,
+      "diameter_m": 1.5,
+      "placement": "on the open floor in the play area between the dresser, the crib, and the rocker",
+      "color": "warm beige or cream with soft taupe undertones",
+      "texture": "low pile, soft wool or wool-blend weave",
+      "pattern": "solid, no pattern",
+      "edge": "bound edge, no fringe"
+    }
+  }
+}
