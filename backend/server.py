@@ -22,7 +22,7 @@ import httpx
 
 from image_board import build_image_board
 from room_flow import build_zone_map, outline_caption
-from blueprint_consistency import internal_record
+from blueprint_consistency import internal_record, project_story_line
 from blueprint_presentation import build_presentation
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
@@ -1083,6 +1083,7 @@ def _email_inputs(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str
         "space_type": lead.get("space_type") or "space",
         "project_title": _customer_title(lead, deliverable),
         "outline_note": outline_caption(lead, deliverable),
+        "story": project_story_line(lead, deliverable),
     }
 
 
