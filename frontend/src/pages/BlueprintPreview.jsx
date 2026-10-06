@@ -86,7 +86,7 @@ function Gallery({ items, onOpen }) {
     return (
         <section className="mt-4" data-testid="blueprint-gallery">
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[#1F3D2C]">Room views</h2>
-            <p className="mt-1 text-base text-[#6e655c]">One complete after for each photo. Swipe, or use the buttons.</p>
+            <p className="mt-1 text-base text-[#6e655c]">One complete after view for each photo. Swipe or use the buttons.</p>
             <div
                 className="mt-3 overflow-hidden rounded-2xl bg-[#e7e1d6]"
                 style={{ touchAction: "pan-y" }}
@@ -275,7 +275,12 @@ export default function BlueprintPreview() {
                             ) : (
                                 <p>The shopping list is in the companion guide.</p>
                             )}
-                            <p className="font-semibold text-[#1F3D2C]">List total {doc.shopping_total}</p>
+                            <p className="font-semibold text-[#1F3D2C]">
+                                {doc.shopping_total_line || `Illustrative reference total: ${doc.shopping_total}.`}
+                            </p>
+                            <p className="text-[#6e655c]">
+                                {doc.shopping_note || "Representative examples for reference; prices and availability may vary."}
+                            </p>
                         </Section>
 
                         <Section title="Roadmap" testId="blueprint-roadmap">
@@ -294,7 +299,11 @@ export default function BlueprintPreview() {
                         </Section>
 
                         <Section title={doc.reset_title || "Weekly reset"} testId="blueprint-reset">
-                            <p>{doc.reset}</p>
+                            {(doc.reset_paragraphs && doc.reset_paragraphs.length ? doc.reset_paragraphs : [doc.reset]).map(
+                                (paragraph, index) => (
+                                    <p key={index}>{paragraph}</p>
+                                )
+                            )}
                         </Section>
                     </>
                 ) : null}

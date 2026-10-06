@@ -29,7 +29,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from blueprint_consistency import nightly_instruction, prepare_deliverable, safety_guidance
+from blueprint_consistency import (
+    SHOPPING_DISCLAIMER,
+    nightly_instruction,
+    prepare_deliverable,
+    reference_total_line,
+    safety_guidance,
+)
 from copy_shape import complete_clip, heading
 from pdf_generator import customer_project_title, plan_title, space_label
 from photo_contain import contain_pixels, frame_size
@@ -309,8 +315,8 @@ def _subtitle(deliverable: Dict[str, Any], draw: ImageDraw.ImageDraw) -> str:
 NURSERY_MOVE_COPY = {
     "keep": (
         "KEEP THIS ROOM",
-        "Keep the room and all six dresser drawers, so putting things away stays one step.",
-        "Keep the room and the dresser drawers you have, so putting things away stays one step.",
+        "Keep the room and all six dresser drawers you already have, so putting things away stays simple.",
+        "Keep the room and the dresser you already have, so putting things away stays simple.",
     ),
     "anchor": (
         "ANCHOR FURNITURE",
@@ -318,7 +324,7 @@ NURSERY_MOVE_COPY = {
         "Anchor the dresser to the wall with an anti-tip kit.",
     ),
     "climate": (
-        "WARM THE WINDOW",
+        "REDUCE DRAFTS",
         "Layer thermal curtains, seal the glass with film, and close the gap under the door.",
         "Layer a thermal curtain and close the gap under the door.",
     ),
@@ -373,7 +379,7 @@ def _roadmap(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
     layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
     instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
     steps = [_clean(str(x)) for x in (instruction.get("do_this_week") or deliverable.get("action_plan") or []) if _clean(str(x))]
-    titles = ("START HERE", "SET THE ROOM", "KEEP IT")
+    titles = ("START HERE", "SET THE ROOM", "MAKE DAILY CARE EASY")
     while len(steps) < 3:
         steps.append(
             (
@@ -480,7 +486,7 @@ def topdown_layout(
         ]
     caption = phrases["board_caption"]
     if space_theme:
-        caption = f"{caption} Space theme stays: planets, moon, rockets, and astronauts."
+        caption = f"{caption} The space theme remains: planets, moon, rockets, and astronauts."
     return {
         "window": "WINDOW",
         "door": "DOOR",
@@ -1234,12 +1240,16 @@ def _draw_shopping(
         return
     _rounded(draw, box, 16, CARD)
     draw.text((x0 + 14, y0 + 12), "SHOPPING", font=_font("sans-bold", 16), fill=GREEN)
-    if total and total not in {"—", "-"}:
-        font = _font("serif-bold", 22)
-        tw = draw.textlength(total, font=font)
-        draw.text((x1 - 14 - tw, y0 + 8), total, font=font, fill=GREEN)
+    total_line = reference_total_line(total)
+    if total_line:
+        font = _font("sans-bold", 15)
+        tw = draw.textlength(total_line, font=font)
+        draw.text((x1 - 14 - tw, y0 + 13), total_line, font=font, fill=GREEN)
     top = y0 + 44
     row_h = 26
+    note_font = _font("sans", 13)
+    draw.text((x0 + 14, y1 - 24), SHOPPING_DISCLAIMER, font=note_font, fill=MUTED)
+    y1 = y1 - 22
     room = max(1, (y1 - top - 8) // row_h)
     if len(rows) <= room:
         show_n = len(rows)
@@ -1400,7 +1410,8 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
     products = spec.get("products") or []
     if products:
         parts.append("Shopping")
-        parts.append(spec.get("budget_display") or "")
+        parts.append(reference_total_line(spec.get("budget_display") or ""))
+        parts.append(SHOPPING_DISCLAIMER)
         for row in products:
             parts.append(str(row.get("name") or ""))
             parts.append(str(row.get("price") or ""))

@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from blueprint_consistency import companion_sections
+from blueprint_consistency import (
+    COMPANION_ESSENTIALS_NOTE,
+    SHOPPING_DISCLAIMER,
+    companion_sections,
+    reference_total_line,
+)
 from image_board import _clean, board_spec, customer_view_caption
 
 
@@ -120,15 +125,18 @@ def build_presentation(
         "palette": spec.get("palette") or [],
         "shopping": _shopping(doc),
         "shopping_total": sections.get("list_total") or "—",
+        "shopping_total_line": reference_total_line(sections.get("list_total") or ""),
+        "shopping_note": SHOPPING_DISCLAIMER,
         "stated_budget": sections.get("stated_budget") or "",
         "roadmap": spec.get("roadmap") or [],
         "steps": sections.get("steps") or [],
         "safety": sections.get("safety_essentials") or [],
         "climate": sections.get("climate_essentials") or [],
         "why_it_helps": sections.get("why") or "",
-        "warning_note": "Safety and climate are written once in the companion guide.",
+        "warning_note": COMPANION_ESSENTIALS_NOTE,
         "reset_title": sections.get("reset_title") or "Weekly reset",
         "reset": sections.get("maintenance") or "",
+        "reset_paragraphs": [p.strip() for p in str(sections.get("maintenance") or "").split("\n\n") if p.strip()],
         "benefits": benefits,
         "preview_path": f"/admin/leads/{lead_id}/blueprint" if lead_id else "",
         "review": {

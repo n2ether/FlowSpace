@@ -54,7 +54,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from blueprint_consistency import companion_sections
+from blueprint_consistency import SHOPPING_DISCLAIMER, companion_sections, reference_total_line
 from blueprint_layers import BUDGET_LABELS, STORAGE
 from photo_contain import contain_rect
 from room_flow import ZONE_APPROACH_HEADING, guide_outline_caption
@@ -1755,7 +1755,7 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
             Paragraph("", s["td"]),
         ])
     rows.append([
-        Paragraph("LIST TOTAL", s["tdBold"]),
+        Paragraph("Illustrative reference total", s["tdBold"]),
         "",
         "",
         Paragraph(_money(total) if total else "—", s["tdBoldRight"]),
@@ -1984,9 +1984,11 @@ def _render_companion(
     story.append(Paragraph(_esc(sections["why"]), s["guideBody"]))
 
     items = _shopping_blocks(deliverable.get("shopping_list") or [], sections["links"])
-    tail: List[Any] = [Paragraph(f"LIST TOTAL  {_esc(str(sections['list_total']))}", s["shopTotal"])]
+    total_line = reference_total_line(str(sections["list_total"]))
+    tail: List[Any] = [Paragraph(_esc(total_line), s["shopTotal"])] if total_line else []
     if sections["stated_budget"]:
         tail.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["shopNote"]))
+    tail.append(Paragraph(_esc(SHOPPING_DISCLAIMER), s["shopNote"]))
     if sections["links"]:
         if sections["links_are_search"]:
             tail.append(

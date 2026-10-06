@@ -81,10 +81,30 @@ _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
 
 STORY_TEMPLATE = "As {child} grows, we kept the space familiar and gave every part a clear job."
 
+# Customer-approved copy that keeps a duration on purpose. Printed exactly; the lint skips it.
+BEDTIME_RITUAL_TITLE = "ONE-MINUTE BEDTIME RITUAL"
+BEDTIME_RITUAL_BODY = (
+    "Bring your baby into the ritual from the beginning. Calmly narrate the same sequence you move "
+    "through together: resetting the rocker, keeping the crib clear, closing the curtains, and dimming "
+    "the lights. Repeat the same goodnight phrase. Then turn on the sound machine at a gentle volume—or "
+    "sing a familiar song—as you settle your baby.\n\n"
+    "These cues help make bedtime easier to read, even when your baby resists sleep. By the time you sit "
+    "in the rocker, the room is ready for feeding, connection, and rest."
+)
+EVERGREEN_EXCEPTIONS = (BEDTIME_RITUAL_TITLE, *BEDTIME_RITUAL_BODY.split("\n\n"))
+
+
+def _without_exceptions(text: str) -> str:
+    """Drop approved blocks, matching across any line wrapping a renderer added."""
+    flat = " ".join(text.split())
+    for block in EVERGREEN_EXCEPTIONS:
+        flat = flat.replace(" ".join(block.split()), " ")
+    return flat
+
 
 def find_time_sensitive(text: Any) -> List[str]:
     """Every age, date, week label, or countdown phrase in ``text``."""
-    blob = str(text or "")
+    blob = _without_exceptions(str(text or ""))
     hits: List[str] = []
     for pattern in TIME_SENSITIVE_PATTERNS:
         for match in pattern.finditer(blob):

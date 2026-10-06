@@ -142,7 +142,7 @@ def test_lint_flags_time_sensitive_phrases(phrase):
         "Keep the room about 68–72°F with the heating you already have.",
         "Thermal blackout curtain panel (single, 52×84 in., warm taupe or oatmeal linen-look)",
         "Qty 2 · $30 each · $60",
-        "LIST TOTAL $195",
+        "Illustrative reference total: $195.",
         "Your stated budget: $100 – $300.",
         "Felt wall decor — moon or planet accent (warm gray or terra cotta, lightweight, 8–10 in.)",
         "You may move the rocker once a week.",
