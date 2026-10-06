@@ -457,7 +457,7 @@ def _styles():
         # Ten curated rows, the total, and the link note share one phone page.
         "shopItem": ParagraphStyle(
             "shopItem", parent=base["BodyText"], fontName=_font("FSSans"),
-            fontSize=10.6, leading=12.8, textColor=INK, spaceBefore=0, spaceAfter=4.5,
+            fontSize=10.6, leading=12.8, textColor=INK, spaceBefore=0, spaceAfter=6,
         ),
         "shopTotal": ParagraphStyle(
             "shopTotal", parent=base["BodyText"], fontName=_font("FSSans-Semi"),
@@ -1528,11 +1528,157 @@ def _guide_frame_height() -> float:
     return PHONE_H - INT_HEADER_H - FOOTER_H - 0.12 * inch - 6
 
 
-def _compare_photo_height(frame_h: float) -> float:
-    """Two contained photos plus their headings must stay on one page."""
-    reserved = 210
-    fitted = (frame_h - reserved) / 2.0
-    return max(120.0, min(fitted, 2.55 * inch))
+# Two banners, the gap between the panels, and a little slack so the pair never spills.
+_COMPARE_CHROME = 2 * 15 + 16 + 10
+
+
+def _flowables_height(flowables: Sequence[Any], width: float) -> float:
+    total = 0.0
+    for flowable in flowables:
+        _w, h = flowable.wrap(width, 10_000)
+        total += h + flowable.getSpaceBefore() + flowable.getSpaceAfter()
+    return total
+
+
+def _compare_photo_height(frame_h: float, text_h: float = 0.0) -> float:
+    """Photo height that lets the heading, copy, and both photos fill one page."""
+    fitted = (frame_h - text_h - _COMPARE_CHROME) / 2.0
+    return max(120.0, fitted)
+
+
+# A page is "complete" at or above this share of its frame; layout avoids leaving less.
+MIN_PAGE_FILL = 0.40
+# Smallest photo height (pt) a before/after pair may shrink to so it can share a page.
+MIN_SHARED_PHOTO_H = 150.0
+
+
+class _ListBlock(KeepTogether):
+    """Keeps a list whole on the next page, unless that would leave this page mostly empty.
+
+    The rows flow from here instead when at least ``min_room`` of the frame is
+    free and either more content follows (it can fill the page the tail lands
+    on) or the spilled tail alone fills ``MIN_PAGE_FILL`` of a page. Inner
+    ``KeepTogether`` groups (heading + first rows, last rows + total) still
+    travel together.
+    """
+
+    def __init__(self, flowables: List[Any], frame_h: float, *, followed: bool, min_room: float = 0.35) -> None:
+        super().__init__(flowables)
+        self._frame_h = frame_h
+        self._followed = followed
+        self._min_room_pt = frame_h * min_room
+
+    def wrap(self, aW: float, aH: float) -> Tuple[float, float]:
+        width, forced = super().wrap(aW, aH)
+        # Nested KeepTogether groups report a forced-split height; measure their rows instead.
+        groups = [
+            list(flowable._content) if isinstance(flowable, KeepTogether) else [flowable]
+            for flowable in self._content
+        ]
+        self._H = sum(_flowables_height(group, aW) for group in groups)
+        self._H0 = _flowables_height(groups[0], aW) if groups else 0
+        return width, forced
+
+    def split(self, aW: float, aH: float) -> List[Any]:
+        if getattr(self, "_wrapInfo", None) != (aW, aH):
+            self.wrap(aW, aH)
+        spill_fills = (self._H - aH) >= MIN_PAGE_FILL * self._frame_h
+        if self._H > aH and aH >= self._min_room_pt and (self._followed or spill_fills):
+            pieces = list(self._content)
+        else:
+            pieces = super().split(aW, aH)
+        # The frame adds the first piece without splitting it, and a KeepTogether
+        # always asks to split, so a leading group is unpacked.
+        if pieces and isinstance(pieces[0], KeepTogether):
+            pieces = [*pieces[0]._content, *pieces[1:]]
+        return pieces
+
+
+class _ComparePage(Flowable):
+    """Heading, copy, and a before/after pair sized to the room left in the frame.
+
+    Photos grow to fill a fresh page. After a short page tail they shrink to
+    share that page, down to ``MIN_SHARED_PHOTO_H``; below that the block
+    moves to the next page.
+    """
+
+    def __init__(
+        self,
+        text: List[Any],
+        before: Optional[bytes],
+        after: Optional[bytes],
+        width: float,
+        frame_h: float,
+        **panel: Any,
+    ) -> None:
+        super().__init__()
+        self._text = text
+        self._before = before
+        self._after = after
+        self._width = width
+        self._frame_h = frame_h
+        self._panel = panel
+        self._table: Optional[Table] = None
+
+    def _build(self, avail: float) -> Optional[Table]:
+        shared = avail < self._frame_h - 12
+        text = [*([Spacer(1, 14)] if shared else []), *self._text, Spacer(1, 8)]
+        text_h = _flowables_height(text, self._width)
+        full = _compare_photo_height(self._frame_h, text_h)
+        photo_h = min(full, (avail - text_h - _COMPARE_CHROME) / 2.0)
+        if photo_h < min(full, MIN_SHARED_PHOTO_H):
+            return None
+        pair = _before_after_section(
+            self._before, self._after, self._width, compact=False, photo_h=photo_h, **self._panel
+        )
+        table = Table([[text], [pair]], colWidths=[self._width])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        return table
+
+    def wrap(self, aW: float, aH: float) -> Tuple[float, float]:
+        self._table = self._build(aH)
+        if self._table is None:
+            return aW, aH + 1
+        return self._table.wrap(aW, aH)
+
+    def split(self, aW: float, aH: float) -> List[Any]:
+        return []
+
+    def draw(self) -> None:
+        if self._table is not None:
+            self._table.drawOn(self.canv, 0, 0)
+
+
+class _GuideDoc(BaseDocTemplate):
+    """Records how far down each page the content reaches, for the page-fill check."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.page_fill: Dict[int, float] = {}
+
+    def afterFlowable(self, flowable: Any) -> None:
+        frame = getattr(self, "frame", None)
+        if frame is None:
+            return
+        top = frame._y1 + frame._height - frame._topPadding
+        usable = frame._height - frame._topPadding - frame._bottomPadding
+        if usable <= 0:
+            return
+        used = max(0.0, min(1.0, (top - frame._y) / usable))
+        self.page_fill[self.page] = max(self.page_fill.get(self.page, 0.0), used)
+
+    def fills(self) -> List[float]:
+        return [self.page_fill.get(i, 0.0) for i in range(1, self.page + 1)]
 
 
 def _before_after_section(
@@ -1760,6 +1906,15 @@ def build_pdf(
     `images` — see ``pdf_images``. The before | after page uses real bytes only.
     The visual board is a separate portrait PNG from ``build_image_board``.
     """
+    return _render_companion(lead=lead, deliverable=deliverable, images=images)[0]
+
+
+def _render_companion(
+    *,
+    lead: Dict[str, Any],
+    deliverable: Dict[str, Any],
+    images: Dict[str, Optional[bytes]],
+) -> Tuple[bytes, List[float]]:
     _register_fonts()
     images = normalize_pdf_images(images)
     sections, deliverable = companion_sections(lead, deliverable)
@@ -1784,7 +1939,7 @@ def build_pdf(
         bottomPadding=2,
         showBoundary=0,
     )
-    doc = BaseDocTemplate(
+    doc = _GuideDoc(
         buf,
         pagesize=(page_w, page_h),
         pageTemplates=[
@@ -1840,22 +1995,29 @@ def build_pdf(
                     s["shopNote"],
                 )
             )
-    # The total and link note never sit alone on a page: the last rows travel with them.
-    shopping: List[Any] = [Paragraph("SHOPPING LIST", s["guideH"]), *items[:-2], KeepTogether([*items[-2:], *tail])]
-    # One consolidated list: it moves to the next page whole rather than splitting.
-    story.append(KeepTogether(shopping))
-
     frame_h = _guide_frame_height()
-    photo_h = _compare_photo_height(frame_h)
-
-    def _compare_page(flowables: List[Any]) -> None:
-        story.append(NextPageTemplate("compare"))
-        # Break only when this page cannot hold the pair. Breaking at the top
-        # of an empty page would insert a blank sheet.
-        story.append(CondPageBreak(max(160, frame_h - 28)))
-        story.append(KeepTogether(flowables))
-
+    # The heading never sits alone at a page foot, and the total and link note never
+    # sit alone at a page top: the first and last rows travel with them.
+    head_rows = min(2, max(0, len(items) - 2))
+    shopping: List[Any] = [
+        KeepTogether([Paragraph("SHOPPING LIST", s["guideH"]), *items[:head_rows]]),
+        *items[head_rows:-2],
+        KeepTogether([*items[-2:], *tail]),
+    ]
     source_pairs = images.get("source_pairs") or []
+    has_compare = bool(
+        (isinstance(source_pairs, list) and len(source_pairs) >= 2)
+        or coerce_image_bytes(images.get("after"))
+        or coerce_image_bytes(images.get("before"))
+    )
+    # One consolidated list that moves to the next page whole, unless that would
+    # leave this page mostly empty.
+    story.append(_ListBlock(shopping, frame_h, followed=has_compare))
+
+    def _compare_page(text: List[Any], before: Optional[bytes], after: Optional[bytes], **panel: Any) -> None:
+        story.append(NextPageTemplate("compare"))
+        story.append(_ComparePage(text, before, after, content_w, frame_h, **panel))
+
     if isinstance(source_pairs, list) and len(source_pairs) >= 2:
         # One before|after page per required room photo. A missing after stays
         # empty — it is not replaced by another source or a hero crop.
@@ -1887,21 +2049,15 @@ def build_pdf(
                         s["guideBody"],
                     )
                 )
-            block.append(Spacer(1, 8))
-            block.append(
-                _before_after_section(
-                    coerce_image_bytes(pair.get("before")),
-                    coerce_image_bytes(pair.get("after")),
-                    content_w,
-                    compact=False,
-                    before_banner="Your photo",
-                    after_banner="Organized view",
-                    photo_h=photo_h,
-                )
+            _compare_page(
+                block,
+                coerce_image_bytes(pair.get("before")),
+                coerce_image_bytes(pair.get("after")),
+                before_banner="Your photo",
+                after_banner="Organized view",
             )
-            _compare_page(block)
         doc.build(story)
-        return buf.getvalue()
+        return buf.getvalue(), doc.fills()
 
     before_bytes = coerce_image_bytes(images.get("before"))
     after_bytes = coerce_image_bytes(images.get("after"))
@@ -1922,11 +2078,9 @@ def build_pdf(
             [
                 Paragraph("ORGANIZED VIEW", s["guideH"]),
                 Paragraph(reference, s["guideBody"]),
-                Spacer(1, 8),
-                _before_after_section(
-                    before_bytes, after_bytes, content_w, compact=False, photo_h=photo_h
-                ),
-            ]
+            ],
+            before_bytes,
+            after_bytes,
         )
     elif before_bytes:
         _compare_page(
@@ -1938,10 +2092,20 @@ def build_pdf(
                     "Do not invent an after.",
                     s["guideBody"],
                 ),
-                Spacer(1, 8),
-                _before_after_section(before_bytes, None, content_w, compact=False, photo_h=photo_h),
-            ]
+            ],
+            before_bytes,
+            None,
         )
 
     doc.build(story)
-    return buf.getvalue()
+    return buf.getvalue(), doc.fills()
+
+
+def companion_page_fill(
+    *,
+    lead: Dict[str, Any],
+    deliverable: Dict[str, Any],
+    images: Dict[str, Optional[bytes]],
+) -> List[float]:
+    """Fraction of each companion page's frame the content reaches (0–1), in page order."""
+    return _render_companion(lead=lead, deliverable=deliverable, images=images)[1]
