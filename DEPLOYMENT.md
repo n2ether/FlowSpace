@@ -173,6 +173,27 @@ From the admin panel you can:
 - Click **Retry PDF email** on any lead to re-run Claude → OpenAI image → board + PDF → Resend (`POST /api/admin/leads/{id}/retry-automation`)
 - Lead status: `new` → `processing` → `delivered` (email sent) or `pdf_ready` (PDF built, Resend failed) or `error`
 
+### Rug-consistency refine for approved afters
+
+When the organized afters show the room's rug differently from view to view, run a rug-only edit on
+each approved AFTER (same OpenAI image-edit model; `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` must be set):
+
+```bash
+curl -X POST "$API/api/admin/leads/$LEAD_ID/deliverable/afters/refine" \
+  -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"rug": {"color": "warm cream with a soft gray border", "pattern": "solid, thin ring near the edge"}}'
+# poll until status is "done"; the report lists each view, replaced or kept, with QA reasons
+curl "$API/api/admin/leads/$LEAD_ID/deliverable/afters/refine" -H "X-Admin-Token: $ADMIN_PASSWORD"
+```
+
+- The body is optional. Shape and size come from the plan's `rug` spec (`room_flows/<lead id>.json`, e.g. round, about
+  5 ft / 1.5 m). Color, texture, and pattern you leave out are described from the source photos and AFTER_01 by vision.
+- `"labels": ["AFTER_02"]` limits the run to some views. `?wait=true` runs inline instead of in the background.
+- AFTER_01 is refined first; its rug is the reference for the other views. Each refined image must pass the
+  generation vision QA and a rug check (one rug matching the spec, nothing else changed). Otherwise the existing after stays.
+- SOURCE_n → AFTER_n mappings, `package_status`, and the lead status do not change, and no email is sent. The board,
+  zone map, PDF, email, and contact sheet pick up the replaced afters on the next render. Old URLs are kept in `after_history`.
+
 ---
 
 ## Environment quick-reference
