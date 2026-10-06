@@ -31,7 +31,7 @@ AGE_PATTERNS = (
     re.compile(r"\b(?:first|1st|second|2nd|third|3rd)\s+birthday\b", re.I),
     re.compile(r"\bbirthday\b", re.I),
     re.compile(r"\bnewly\s+(?:mobile|walking|crawling)\b", re.I),
-    re.compile(r"\b(?:toddler|newborn|infant)s?\b", re.I),
+    re.compile(r"\b(?:toddler|newborn|infant|preschooler)s?\b", re.I),
 )
 DATE_PATTERNS = (
     # "May" alone is a modal verb; month names need a day, a year, or a season word.
@@ -57,6 +57,8 @@ TIME_SENSITIVE_PATTERNS = AGE_PATTERNS + DATE_PATTERNS + WEEK_PATTERNS + DURATIO
 _REWRITES = (
     (re.compile(r"\bone[-\s]minute\s+bedtime\s+ritual\b", re.I), "Bedtime ritual"),
     (re.compile(rf"\b{_NUM}[-\s]minute\s+(?:weekly\s+)?reset\b", re.I), "Quick reset"),
+    (re.compile(r"\b(first\s+move)\s+(?:this|next)\s+week\b", re.I), r"\1"),
+    (re.compile(r"\bmoves?\s+from\s+(?:toddler|baby|infant|newborn|child)\s+to\s+(?:preschooler|big[-\s]kid|toddler|school\s+age)\b", re.I), "grows"),
     (re.compile(r"\bthis\s+week\s*[—–-]\s*", re.I), ""),
     (re.compile(rf"\bweek\s+{_NUM}\s*[:—–-]\s*", re.I), ""),
     (re.compile(r"\b(?:this|next)\s+week\b", re.I), "first"),
@@ -69,6 +71,10 @@ _REWRITES = (
     (re.compile(r"\b(?:toddler|newborn|infant)\b", re.I), "child"),
     (re.compile(r"\bJanuary\s+window\b", re.I), "window"),
     (re.compile(r"\b(?:the\s+)?(?:winter|january|february|december)\s+(?:cold|chill)\b", re.I), "the cold"),
+    (re.compile(r"\b(?:December|January|February)\b(?!\s+\d)"), "winter"),
+    (re.compile(r"\b(?:June|July|August)\b(?!\s+\d)"), "summer"),
+    (re.compile(r"\b(?:September|October|November)\b(?!\s+\d)"), "fall"),
+    (re.compile(r"\b(?:March|April)\b(?!\s+\d)"), "spring"),
 )
 
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")

@@ -196,7 +196,7 @@ _ROCKER_WRONG_LOCATION = re.compile(
 )
 
 NURSERY_SAFETY = (
-    "Anchor the dresser to the wall and keep every drawer.",
+    "Anchor the dresser to the wall, and keep all of its drawers in use.",
     "The crib stays clear except a fitted sheet and a wearable sleep sack — no teddy bears, loose cushions, pillows, loose blankets, or bumpers.",
     "Do not add a portable heater, wall heater, or electric blanket near the sleep area.",
     "Keep window cords out of reach.",
@@ -628,6 +628,11 @@ def prepare_deliverable(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     return out
 
 
+def project_story_line(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> str:
+    """The evergreen Project Story every customer surface opens with. Empty when no child is named."""
+    return str(prepare_deliverable(lead or {}, deliverable or {}).get("project_story") or "")
+
+
 def _story_child(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
     """Child named by a nursery plan, read before the copy is made evergreen."""
     if not is_nursery_space(lead):
@@ -809,7 +814,7 @@ def safety_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] |
         if mentions_six_drawer(_source_blob(lead, deliverable)):
             anchor = "Anchor the six-drawer dresser to the wall. All six drawers stay."
         else:
-            anchor = "Anchor the dresser to the wall and keep every drawer."
+            anchor = "Anchor the dresser to the wall, and keep all of its drawers in use."
         return [anchor, *NURSERY_SAFETY_ESSENTIALS]
     lines: List[str] = []
     for line in safety_guidance(lead, deliverable):
@@ -924,5 +929,6 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "safety_essentials": safety_essentials(lead, doc),
         "climate_essentials": climate_essentials(lead, doc),
         "why": why_it_helps(lead, doc),
+        "story": str(doc.get("project_story") or ""),
     }
     return sections, doc
