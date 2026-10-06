@@ -640,7 +640,7 @@ def layer_card_copy(layers: Dict[str, Any]) -> List[Tuple[str, str, str]]:
 
     inst_body = inst["start_here"]
     if inst["do_this_week"]:
-        inst_body += " This week: " + "; ".join(inst["do_this_week"][:3]) + "."
+        inst_body += " Next steps: " + "; ".join(inst["do_this_week"][:3]) + "."
 
     return [
         ("01", "Observation", obs_body or "What the photo and answers actually show."),
@@ -681,7 +681,7 @@ DRAFTER_SCHEMA_SNIPPET = """
     "human_need": {
       "routine": "how they use this space daily/weekly — answer 'what is the routine?'",
       "desired_feeling": "calm / functional / …",
-      "jobs_to_be_done": ["park the car", "find the bag in 30 seconds"],
+      "jobs_to_be_done": ["park the car", "find the bag without searching"],
       "pain": "the human problem in one sentence"
     },
     "spatial_constraint": {
@@ -706,10 +706,10 @@ DRAFTER_SCHEMA_SNIPPET = """
       "assumptions": ["what we assumed because it was not measured"]
     },
     "customer_instruction": {
-      "start_here": "first move this week",
+      "start_here": "the first move",
       "do_this_week": ["concrete steps, no construction, no required paint"],
       "do_not": ["do not invent dimensions", "do not add walls"],
-      "weekly_reset": "10-minute reset"
+      "weekly_reset": "a short reset routine"
     }
   }
 """

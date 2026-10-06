@@ -68,11 +68,16 @@ def _with_space_rails(
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Append kids-room rails. Keep this call if the image provider changes."""
-    from space_rails import image_prompt_rails
+    from space_rails import image_prompt_rails, rug_prompt_rails
 
     must_stay = str((lead or {}).get("must_stay") or "").strip()
     must_line = f"MUST KEEP from the photo: {must_stay}." if must_stay else ""
-    parts = [image_prompt_rails(lead, deliverable), must_line, (extra_constraint or "").strip()]
+    parts = [
+        image_prompt_rails(lead, deliverable),
+        rug_prompt_rails(lead, deliverable),
+        must_line,
+        (extra_constraint or "").strip(),
+    ]
     return " ".join(part for part in parts if part)
 
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
@@ -307,12 +312,35 @@ def _bytes_from_response(result: Any) -> Tuple[bytes, str]:
     return raw, _mime_from_bytes(raw)
 
 
-async def _edit_image(client: AsyncOpenAI, prompt: str, photo: bytes) -> Tuple[bytes, str]:
+async def _edit_image(
+    client: AsyncOpenAI,
+    prompt: str,
+    photo: bytes,
+    reference: Optional[bytes] = None,
+) -> Tuple[bytes, str]:
+    """``photo`` is the image being edited. ``reference`` is a second image the prompt may cite."""
+    images = [_image_upload(photo)]
+    if reference:
+        name, data, mime = _image_upload(reference)
+        images.append((f"reference_{name}", data, mime))
     result = await client.images.edit(
-        image=[_image_upload(photo)],
+        image=images,
         **edit_api_params(prompt),
     )
     return _bytes_from_response(result)
+
+
+async def refine_after_image(prompt: str, after: bytes, reference: Optional[bytes] = None) -> bytes:
+    """Targeted edit of an existing organized after (same Images edit model and settings)."""
+    client = _openai_client(_require_openai_key())
+    try:
+        data, _mime = await _edit_image(client, prompt, upright_bytes(after) or after, reference)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.warning("OpenAI refine edit failed: %s", exc)
+        raise RuntimeError(f"OpenAI refine edit failed: {exc}") from exc
+    return data
 
 
 async def generate_front_view(

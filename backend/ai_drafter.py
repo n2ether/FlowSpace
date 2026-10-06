@@ -16,6 +16,7 @@ import anthropic
 
 from blueprint_consistency import prepare_deliverable
 from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
+from evergreen_copy import DRAFTER_EVERGREEN_RULE
 from image_orientation import jpeg_for_vision, upright_bytes
 from space_rails import NURSERY_DRAFT_RULES, nursery_draft_addon
 
@@ -101,7 +102,7 @@ Brain-layer rules:
 - Validation: REAL checks — fit, flow, budget_band (vs stated budget), possession_respect, plus conflicts and assumptions. status is pass, watch, or fail. Do not invent scores or room measurements.
 - Customer instruction: start_here + do_this_week the customer can do without construction.
 - One kit total only. The budget figure you write must equal the sum of qty × price. Do not state a lower range than that sum.
-""" + NURSERY_DRAFT_RULES
+""" + DRAFTER_EVERGREEN_RULE + NURSERY_DRAFT_RULES
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",

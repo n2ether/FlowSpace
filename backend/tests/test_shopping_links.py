@@ -26,7 +26,7 @@ def test_search_label():
 
 def test_camila_curated_links_prefer_products():
     links = curated_links(LEAD)
-    assert len(links) == 10
+    assert len(links) == 9
     products = [link for link in links if link["link_type"] == "product"]
     searches = [link for link in links if link["link_type"] == "search"]
     assert len(products) >= 8
@@ -54,7 +54,6 @@ VERIFIED = {
     "Digital room thermometer": ("https://www.target.com/p/thermopro-tp49w-mini-hygrometer-thermometer-with-large-digital-view-indoor-thermometer-humidity-gauge-monitor-for-greenhouse-cellar-in-white/-/A-80783749", "product", 14, 1),
     "Felt wall decor": ("https://www.target.com/s?searchTerm=felt%20moon%20planet%20wall%20decor", "search", 10, 2),
     "Low-profile woven storage basket": ("https://www.target.com/p/household-essentials-natural-seagrass-basket-with-handles-natural-woven-wicker-storage-basket-great-for-decoration-or-organization/-/A-1011210373", "product", 18, 1),
-    "Soft cotton area rug": ("https://www.target.com/p/nuloom-deepika-contemporary-abstract-cotton-area-rug-4-x-6-beige/-/A-93015688", "product", 45, 1),
 }
 
 
@@ -69,7 +68,42 @@ def test_camila_record_matches_the_verified_link_table():
         assert (item["url"], item["link_type"], item["price"], item["qty"]) == (url, link_type, price, qty)
         if link_type == "search":
             assert item["label"] == "Search at Target"
-    assert sum(item["price"] * item["qty"] for item in items) == 240
+    assert sum(item["price"] * item["qty"] for item in items) == 195
+    assert not any("rug" in item["name"].lower() for item in items)
+    assert not any("nuloom-deepika" in item["url"] for item in items)
+
+
+def test_retired_rug_row_leaves_every_surface_total():
+    """A stored list that still carries the old 4×6 rug drops it, and the total is $195."""
+    from blueprint_consistency import prepare_deliverable
+    from shopping_links import load_record
+
+    items = load_record(LEAD)["items"]
+    stored = [{"name": it["name"], "qty": it["qty"], "price": it["price"]} for it in items]
+    stored.append({
+        "name": "Soft cotton area rug or rug pad (non-slip, earth tone, 4×6 ft, optional layering under existing rug)",
+        "qty": 1,
+        "price": 45,
+    })
+    lead = {"id": LEAD, "space_type": "kids_room", "budget": "100_300"}
+    prepared = prepare_deliverable(lead, {"shopping_list": stored, "budget_note": "Total $240 for the kit."})
+    assert prepared["budget_display"] == "$195"
+    assert "$240" not in prepared["budget_note"]
+    assert not any("rug" in row["name"].lower() for row in prepared["shopping_list"])
+    assert len(prepared["shopping_list"]) == 9
+
+
+def test_curated_row_takes_the_curated_price_and_unknown_rows_stay():
+    from blueprint_consistency import prepare_deliverable
+
+    stored = [
+        {"name": "Draft stopper for door (fabric tube, earth tone)", "qty": 3, "price": 99},
+        {"name": "Something the admin added", "qty": 1, "price": 5},
+    ]
+    prepared = prepare_deliverable({"id": LEAD, "space_type": "kids_room"}, {"shopping_list": stored})
+    assert prepared["shopping_list"][0]["qty"] == 1 and prepared["shopping_list"][0]["price"] == 12
+    assert prepared["shopping_list"][1] == stored[1]
+    assert prepared["budget_display"] == "$17"
 
 
 def test_fallback_is_a_labeled_short_search():

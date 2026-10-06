@@ -398,7 +398,7 @@ def _nursery_moves(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Di
         _as_move(
             _first_theme_line(
                 groups["climate"],
-                "Warm the January window with a thermal curtain over the panels you have, a clear insulation film, and a door draft stopper.",
+                "Warm the window with a thermal curtain over the panels you have, a clear insulation film, and a door draft stopper.",
             )
         ),
         _as_move(

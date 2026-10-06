@@ -19,6 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from blueprint_layers import BUDGET_LABELS
+from evergreen_copy import apply_evergreen, evergreen_text
 from space_rails import NURSERY_DO_NOT, is_nursery_space, mentions_six_drawer
 
 _RANGE = re.compile(
@@ -227,9 +228,9 @@ _GENERIC_SAFETY_ESSENTIALS = (
     "Anchor tall or heavy furniture to the wall before you load it.",
     "Keep a clear floor path to the door.",
 )
-NURSERY_BEDTIME_TITLE = "One-minute bedtime ritual"
+NURSERY_BEDTIME_TITLE = "Bedtime ritual"
 NURSERY_BEDTIME = (
-    "One-minute bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
+    "Bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
     "leave the crib otherwise clear, and make sure the path from the door stays open."
 )
 
@@ -618,10 +619,66 @@ def prepare_deliverable(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     """Return a copy safe to render. Idempotent."""
     lead = lead or {}
     out = copy.deepcopy(deliverable or {})
-    issues = apply_nursery_rules(lead, out)
+    child = _story_child(lead, out)
+    issues = apply_curated_shopping(lead, out)
+    issues.extend(apply_nursery_rules(lead, out))
     issues.extend(align_budget(lead, out))
+    issues.extend(apply_evergreen(out, child=child))
     _record(out, issues)
     return out
+
+
+def _story_child(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
+    """Child named by a nursery plan, read before the copy is made evergreen."""
+    if not is_nursery_space(lead):
+        return ""
+    from pdf_generator import _child_first_name
+
+    return _child_first_name(lead, deliverable)
+
+
+def apply_curated_shopping(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[str]:
+    """Bring stored shopping rows in line with the per-lead curated record.
+
+    A row named like a curated item takes that item's qty and price. A row a
+    curated item ``replaces`` (by name prefix) becomes that item, or is dropped
+    when the record ``retires`` it. Rows the record does not know stay put.
+    """
+    from shopping_links import curated_replacements
+
+    lead_id = str((lead or {}).get("id") or deliverable.get("lead_id") or "")
+    by_name, replaces, retired = curated_replacements(lead_id)
+    if not (by_name or replaces or retired):
+        return []
+    rows: List[Dict[str, Any]] = []
+    present = set()
+    changed = False
+    for item in deliverable.get("shopping_list") or []:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split())
+        key = name.lower()
+        if any(key.startswith(prefix) for prefix in retired):
+            changed = True
+            continue
+        target = by_name.get(key)
+        if target is None:
+            target = next((row for prefix, row in replaces if key.startswith(prefix)), None)
+        if target is None:
+            rows.append(item)
+            continue
+        if target["name"].lower() in present:
+            changed = True
+            continue
+        present.add(target["name"].lower())
+        new = {**item, "name": target["name"], "qty": target["qty"], "price": target["price"]}
+        if new != item:
+            changed = True
+        rows.append(new)
+    if not changed:
+        return []
+    deliverable["shopping_list"] = rows
+    return ["shopping rows now match the curated product list"]
 
 
 
@@ -693,14 +750,14 @@ def _climate_lines(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[st
 def nightly_instruction(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Tuple[str, str]:
     """Section title plus the nightly instruction. The title matches the instruction.
 
-    A nursery keeps the one-minute bedtime ritual. The title is that ritual's name,
+    A nursery keeps the bedtime ritual. The title is that ritual's name,
     not a weekly-reset label that describes a different job.
     """
     lead = lead or {}
     deliverable = deliverable or {}
     layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
     instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
-    reset = " ".join(str(instruction.get("weekly_reset") or "").split())
+    reset = evergreen_text(" ".join(str(instruction.get("weekly_reset") or "").split()))
     if is_nursery_space(lead):
         if reset and re.search(r"bedtime|one[- ]minute", reset, re.I):
             body = reset
@@ -713,7 +770,7 @@ def nightly_instruction(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
         return "Weekly reset", reset
     return (
         "Weekly reset",
-        "Once a week, take ten minutes to return each item to its home, clear the floor path, and wipe one surface. "
+        "Once a week, return each item to its home, clear the floor path, and wipe one surface. "
         "The reset keeps the system. It is not a remodel.",
     )
 

@@ -227,7 +227,7 @@ def test_companion_is_the_short_customer_guide_with_one_total():
     assert "notes:" not in low
     assert "Diaper & Dress Zone" not in text
     assert "step by step" not in low
-    assert "one-minute bedtime ritual" not in low
+    assert "bedtime ritual" not in low
     assert "towel" not in low
     assert "rabbit" not in low
     assert "measurements are approximate" not in low
