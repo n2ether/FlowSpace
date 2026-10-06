@@ -19,7 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from blueprint_layers import BUDGET_LABELS
-from evergreen_copy import apply_evergreen, evergreen_text
+from evergreen_copy import BEDTIME_RITUAL_BODY, BEDTIME_RITUAL_TITLE, apply_evergreen, evergreen_text
 from space_rails import NURSERY_DO_NOT, is_nursery_space, mentions_six_drawer
 
 _RANGE = re.compile(
@@ -228,11 +228,17 @@ _GENERIC_SAFETY_ESSENTIALS = (
     "Anchor tall or heavy furniture to the wall before you load it.",
     "Keep a clear floor path to the door.",
 )
-NURSERY_BEDTIME_TITLE = "Bedtime ritual"
-NURSERY_BEDTIME = (
-    "Bedtime ritual: smooth the fitted sheet, put the wearable sleep sack on, "
-    "leave the crib otherwise clear, and make sure the path from the door stays open."
-)
+NURSERY_BEDTIME_TITLE = BEDTIME_RITUAL_TITLE
+NURSERY_BEDTIME = BEDTIME_RITUAL_BODY
+
+SHOPPING_DISCLAIMER = "Representative examples for reference; prices and availability may vary."
+COMPANION_ESSENTIALS_NOTE = "The Companion Guide includes the room's safety and climate essentials."
+
+
+def reference_total_line(display: str) -> str:
+    """Shopping total as the customer reads it: ``Illustrative reference total: $195.``"""
+    display = str(display or "").strip()
+    return f"Illustrative reference total: {display}." if display and display not in {"—", "-"} else ""
 
 _WARNING_MARKERS = (
     "heater",
@@ -753,24 +759,19 @@ def _climate_lines(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[st
 
 
 def nightly_instruction(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> Tuple[str, str]:
-    """Section title plus the nightly instruction. The title matches the instruction.
+    """Section title plus the nightly instruction.
 
-    A nursery keeps the bedtime ritual. The title is that ritual's name,
-    not a weekly-reset label that describes a different job.
+    A nursery prints the approved one-minute bedtime ritual exactly (title and two
+    paragraphs separated by a blank line); stored drafts do not override it and
+    the evergreen rewrite does not touch it.
     """
     lead = lead or {}
     deliverable = deliverable or {}
+    if is_nursery_space(lead):
+        return NURSERY_BEDTIME_TITLE, NURSERY_BEDTIME
     layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
     instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
     reset = evergreen_text(" ".join(str(instruction.get("weekly_reset") or "").split()))
-    if is_nursery_space(lead):
-        if reset and re.search(r"bedtime|one[- ]minute", reset, re.I):
-            body = reset
-        else:
-            body = NURSERY_BEDTIME
-        if not body.lower().startswith(NURSERY_BEDTIME_TITLE.lower()):
-            body = f"{NURSERY_BEDTIME_TITLE}: {body}"
-        return NURSERY_BEDTIME_TITLE, body
     if reset:
         return "Weekly reset", reset
     return (
