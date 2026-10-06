@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader
 
 from blueprint_presentation import build_presentation
+from copy_shape import ends_dangling
 from image_board import (
     board_layout,
     board_spec,
@@ -66,7 +67,8 @@ def test_nursery_board_copy_matches_the_cleaned_plan():
     bodies = [move["body"].lower() for move in spec["moves"]]
     assert len(bodies) == len(set(bodies))
     for move in spec["moves"]:
-        assert move["body"].lower().startswith(move["title"].lower())
+        assert not ends_dangling(move["title"]) and not move["title"].endswith(".")
+        assert move["body"].endswith(".") and not ends_dangling(move["body"])
 
 
 def test_possessive_nursery_in_the_outcome_names_the_title():
@@ -437,7 +439,8 @@ def test_nursery_changes_merge_preserve_drawers_and_routine():
     assert len(moves) == 4
     assert len({move["title"].lower() for move in moves}) == 4
     for move in moves:
-        assert move["body"].lower().startswith(move["title"].lower())
+        assert not ends_dangling(move["title"]) and not move["title"].endswith(".")
+        assert move["body"].endswith(".") and not ends_dangling(move["body"])
     routine_moves = [
         move for move in moves if "routine" in move["body"].lower() or "one step" in move["body"].lower()
     ]

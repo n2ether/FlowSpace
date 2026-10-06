@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from blueprint_consistency import nightly_instruction, prepare_deliverable, safety_guidance
+from copy_shape import complete_clip, heading
 from pdf_generator import customer_project_title, plan_title, space_label
 from photo_contain import contain_pixels, frame_size
 from room_flow import draw_floor_plan, outline_phrases, resolve_room_flow, wall_labels
@@ -171,13 +172,24 @@ def _fit(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, width:
         else:
             break
     if best != text:
-        punct = max(best.rfind("."), best.rfind("!"), best.rfind("?"))
-        if punct >= int(len(best) * 0.45):
-            best = best[: punct + 1]
-        elif not best.endswith((".", "!", "?")):
-            best = best.rstrip(".,;:—- ") + "."
+        count = len(best.split())
+        best = complete_clip(text, count)
+        while len(_wrap(draw, best, font, width)) > max_lines and count > 1:
+            count -= 1
+            best = complete_clip(text, count)
         lines = _wrap(draw, best, font, width)[:max_lines]
     return lines
+
+
+def _fit_heading(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, width: int) -> str:
+    """One-line heading. Drops whole words to fit, never a trailing function word, never a period."""
+    words = _clean(text).split()
+    while words:
+        candidate = heading(" ".join(words), max_words=len(words))
+        if candidate and draw.textlength(candidate, font=font) <= width:
+            return candidate
+        words = words[:-1]
+    return ""
 
 
 def _open_image(data: Optional[bytes]) -> Optional[Image.Image]:
@@ -280,6 +292,9 @@ def _palette(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str
 
 
 def _subtitle(deliverable: Dict[str, Any], draw: ImageDraw.ImageDraw) -> str:
+    story = _clean(str(deliverable.get("project_story") or ""))
+    if story:
+        return story
     summary = _clean(str(deliverable.get("summary") or deliverable.get("intro") or ""))
     sentence = re.split(r"(?<=[.!?])\s+", summary)[0] if summary else ""
     if not sentence:
@@ -289,126 +304,54 @@ def _subtitle(deliverable: Dict[str, Any], draw: ImageDraw.ImageDraw) -> str:
     return lines[0] if lines else "A calmer refresh of the room you already have."
 
 
-_ANCHOR_MOVE = re.compile(r"\b(anchor|anti-tip|anti tip|tip-over|tip over)\b", re.I)
-_CLIMATE_MOVE = re.compile(r"\b(thermal|draft|january|curtain|insulation|warmth|winter|warm the)\b", re.I)
-_PATH_MOVE = re.compile(r"\b(floor path|clear path|walking path|circulation)\b", re.I)
-_KEEP_MOVE = re.compile(
-    r"\b(preserve|existing wall|no new wall|space theme|drawer|one step|routine|simplify)\b",
-    re.I,
-)
-_WARNING_MOVE = re.compile(r"\b(do not|don't|never|no loose|no portable|teddy|heater)\b", re.I)
-
-
-def _change_theme(line: str) -> str:
-    """Group what's-new lines so preserve, drawers, and routine collapse together."""
-    if _WARNING_MOVE.search(line) and not _ANCHOR_MOVE.search(line):
-        return "skip"
-    if _ANCHOR_MOVE.search(line):
-        return "anchor"
-    if _CLIMATE_MOVE.search(line):
-        return "climate"
-    if _PATH_MOVE.search(line) and not _KEEP_MOVE.search(line):
-        return "path"
-    if _KEEP_MOVE.search(line) or _PATH_MOVE.search(line):
-        return "keep"
-    return "other"
-
-
-def _as_move(body: str) -> Dict[str, str]:
-    body = _clean(body)
-    return {"title": _move_title(body, 0), "body": body}
-
-
-def _anchor_move(lines: Sequence[str]) -> str:
-    line = _clean(lines[0]) if lines else ""
-    if not line:
-        return "Anchor the dresser and the shelves to the wall before anything else."
-    if re.search(r"shel(f|ves)", line, re.I):
-        return line
-    if line.lower().startswith("anchor the six-drawer dresser"):
-        return line.replace("Anchor the six-drawer dresser", "Anchor the six-drawer dresser and the shelves", 1)
-    if line.lower().startswith("anchor the dresser"):
-        return line.replace("Anchor the dresser", "Anchor the dresser and the shelves", 1)
-    return line.rstrip(".") + ", including the shelves."
-
-
-def _keep_move(lead: Dict[str, Any], deliverable: Dict[str, Any], lines: Sequence[str]) -> str:
-    from space_rails import mentions_six_drawer
-
-    blob = " ".join(
-        [
-            str(lead.get("must_stay") or ""),
-            str(lead.get("goals") or ""),
-            " ".join(lines),
-        ]
-    )
-    if mentions_six_drawer(blob):
-        base = "Keep this room and its six drawers, and use those drawers so the daily routine stays one step."
-    else:
-        base = "Keep this room and the dresser drawers, and use those drawers so the daily routine stays one step."
-    extras: List[str] = []
-    for line in lines:
-        low = line.lower()
-        if any(
-            phrase in low
-            for phrase in (
-                "one step",
-                "six-drawer",
-                "six drawer",
-                "all of its drawers",
-                "keep this room",
-                "existing dresser",
-            )
-        ):
-            continue
-        if line not in extras:
-            extras.append(line)
-    if extras:
-        return base + " " + " ".join(extras)
-    return base
-
-
-def _first_theme_line(lines: Sequence[str], fallback: str) -> str:
-    cleaned = [_clean(line) for line in lines if _clean(line)]
-    return cleaned[0] if cleaned else fallback
+# Curated nursery tiles: a short heading plus one complete sentence that fits the card.
+# The plan's own long lines stay in the companion guide; the board never clips them mid-phrase.
+NURSERY_MOVE_COPY = {
+    "keep": (
+        "KEEP THIS ROOM",
+        "Keep the room and all six dresser drawers, so putting things away stays one step.",
+        "Keep the room and the dresser drawers you have, so putting things away stays one step.",
+    ),
+    "anchor": (
+        "ANCHOR FURNITURE",
+        "Anchor the dresser and the shelves to the wall with anti-tip kits.",
+        "Anchor the dresser to the wall with an anti-tip kit.",
+    ),
+    "climate": (
+        "WARM THE WINDOW",
+        "Layer thermal curtains, seal the glass with film, and close the gap under the door.",
+        "Layer a thermal curtain and close the gap under the door.",
+    ),
+    "path": (
+        "CLEAR THE PATH",
+        "Keep a clear path from the door to the crib and the dresser.",
+        "Keep a clear path from the door to the crib and the dresser.",
+    ),
+}
 
 
 def _nursery_moves(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Four distinct moves. Preserve, drawers, and the daily routine are one move."""
-    groups: Dict[str, List[str]] = {"anchor": [], "climate": [], "keep": [], "path": [], "other": []}
-    strategy = [_clean(str(x)) for x in (deliverable.get("strategy") or []) if _clean(str(x))]
-    for line in strategy:
-        theme = _change_theme(line)
-        if theme == "skip":
-            continue
-        groups[theme].append(line)
-    for source in (deliverable.get("action_plan") or []), (deliverable.get("needs") or []):
-        for raw in source:
-            line = _clean(str(raw))
-            if not line:
-                continue
-            theme = _change_theme(line)
-            if theme in {"anchor", "climate", "path"} and not groups[theme]:
-                groups[theme].append(line)
-            elif theme == "other" and re.search(r"space theme|planets|astronaut", line, re.I):
-                groups["keep"].append(line)
-    moves = [
-        _as_move(_keep_move(lead, deliverable, groups["keep"])),
-        _as_move(_anchor_move(groups["anchor"])),
-        _as_move(
-            _first_theme_line(
-                groups["climate"],
-                "Warm the window with a thermal curtain over the panels you have, a clear insulation film, and a door draft stopper.",
-            )
-        ),
-        _as_move(
-            _first_theme_line(
-                groups["path"],
-                "Keep a clear path from the door through the center of the room, between the dresser and the crib.",
-            )
-        ),
+    """Four distinct moves, each a whole heading and a whole sentence."""
+    from space_rails import mentions_six_drawer
+
+    lines = [
+        _clean(str(x))
+        for key in ("strategy", "action_plan", "needs")
+        for x in (deliverable.get(key) or [])
+        if _clean(str(x))
     ]
-    return moves[:4]
+    blob = " ".join([str(lead.get("must_stay") or ""), str(lead.get("goals") or ""), *lines])
+    flags = {
+        "keep": mentions_six_drawer(blob),
+        "anchor": bool(re.search(r"\bshel(f|ves)\b", blob, re.I)),
+        "climate": bool(re.search(r"\b(film|insulat)", blob, re.I)),
+        "path": True,
+    }
+    moves = []
+    for key in ("keep", "anchor", "climate", "path"):
+        title, full, short = NURSERY_MOVE_COPY[key]
+        moves.append({"title": title, "body": full if flags[key] else short})
+    return moves
 
 
 def _moves(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
@@ -422,11 +365,7 @@ def _moves(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -
 
 def _move_title(text: str, index: int) -> str:
     """Short label taken from the sentence itself, so the title matches the body."""
-    words = [word.strip(".,;:") for word in text.split() if word.strip(".,;:")]
-    picked = words[:3]
-    while picked and picked[-1].lower() in {"with", "and", "or", "to", "of", "for", "so"}:
-        picked.pop()
-    title = " ".join(picked).upper()
+    title = heading(text, max_words=3).upper()
     return title or f"MOVE {index + 1}"
 
 
@@ -500,19 +439,8 @@ def customer_view_caption(index: int, lead: Optional[Dict[str, Any]], *, missing
 
 
 def _board_phrase(title: str, body: str, words: int = 8) -> str:
-    """One short clause for the board. The full sentence stays in the guide."""
-    body = _clean(body)
-    title = _clean(title)
-    rest = body
-    if title and rest.lower().startswith(title.lower()):
-        rest = rest[len(title) :].lstrip(" .,;:—-")
-    picked = rest.split()[:words]
-    if not picked:
-        return ""
-    phrase = " ".join(picked)
-    if len(rest.split()) > words and not phrase.endswith((".", "!", "?")):
-        phrase = phrase.rstrip(".,;:") + "."
-    return phrase
+    """One complete sentence or clause for the board. The full sentence stays in the guide."""
+    return complete_clip(body, words)
 
 
 def topdown_layout(
@@ -1216,6 +1144,13 @@ def _draw_outcome(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], tex
     _section_kicker(draw, x0 + 12, y0 + 10, "2", "THE OUTCOME")
     size = 24 if (y1 - y0) >= 108 else 20
     lines = _fit(draw, text, _font("serif-italic", size), x1 - x0 - 28, 2)
+    # Step the type down until the whole outcome fits, so it is never cut mid-sentence.
+    for candidate in range(size, 15, -2):
+        room = max(1, (y1 - y0 - 42 - 6) // (candidate + 4))
+        wrapped = _wrap(draw, _clean(text), _font("serif-italic", candidate), x1 - x0 - 28)
+        if len(wrapped) <= room:
+            size, lines = candidate, wrapped
+            break
     y = y0 + 42
     for line in lines:
         if y > y1 - size:
@@ -1252,8 +1187,8 @@ def _draw_changes(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int], mov
         draw.rounded_rectangle((cx, cy, cx + cell_w, cy + cell_h), radius=12, fill=inner, outline=RULE, width=2)
         draw.ellipse((cx + 8, cy + 8, cx + 32, cy + 32), outline=CLAY, width=2)
         draw.text((cx + 15, cy + 11), str(index + 1), font=_font("sans-bold", 13), fill=CLAY)
-        title = _fit(draw, move.get("title") or "", _font("sans-bold", title_size), cell_w - 44, 1)
-        draw.text((cx + 38, cy + 8), title[0] if title else "", font=_font("sans-bold", title_size), fill=INK)
+        title = _fit_heading(draw, move.get("title") or "", _font("sans-bold", title_size), cell_w - 44)
+        draw.text((cx + 38, cy + 8), title, font=_font("sans-bold", title_size), fill=INK)
         phrase = _board_phrase(move.get("title") or "", move.get("body") or "", words=words)
         body = _fit(draw, phrase, _font("sans", body_size), cell_w - 20, body_lines)
         ty = cy + 14 + title_size
@@ -1375,8 +1310,8 @@ def _draw_roadmap_row(draw: ImageDraw.ImageDraw, box: Tuple[int, int, int, int],
             break
         draw.ellipse((x0 + 12, y, x0 + 30, y + 18), fill=GREEN)
         draw.text((x0 + 17, y + 1), str(index + 1), font=_font("sans-bold", 11), fill=WHITE)
-        title = _fit(draw, step.get("title") or "", _font("sans-bold", 14), x1 - x0 - 52, 1)
-        draw.text((x0 + 36, y), title[0] if title else "", font=_font("sans-bold", 14), fill=INK)
+        title = _fit_heading(draw, step.get("title") or "", _font("sans-bold", 14), x1 - x0 - 52)
+        draw.text((x0 + 36, y), title, font=_font("sans-bold", 14), fill=INK)
         if step_h >= 34:
             phrase = _board_phrase(step.get("title") or "", step.get("body") or "", words=18)
             lines = 2 if step_h >= 52 else 1
