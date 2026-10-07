@@ -37,6 +37,7 @@ from rug_refine import describe_rug, refine_one, resolve_refine_rug
 from automation import run_automation
 from image_orientation import UnreadableImage, normalize_photo_bytes, upright_bytes
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
+from intake import IntakeError, build_fact_sheet, chargeable_block_reason, validate_intake
 from auth import (
     COOKIE_NAME,
     cookie_kwargs,
@@ -130,6 +131,8 @@ class Lead(BaseModel):
     diy_level: Optional[str] = None
     daily_improvement: Optional[str] = None
     language: str = "en"
+    intake: Optional[Dict[str, Any]] = None
+    fact_sheet: Optional[Dict[str, Any]] = None
     status: str = "new"
     member_id: Optional[str] = None
     stripe_session_id: Optional[str] = None
@@ -161,6 +164,7 @@ class LeadCreate(BaseModel):
     diy_level: Optional[str] = None
     daily_improvement: Optional[str] = None
     language: str = "en"
+    intake: Optional[Dict[str, Any]] = None
     password: Optional[str] = None
 
 
@@ -664,6 +668,32 @@ async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
     }
 
 
+def check_lead_intake(data: Dict[str, Any]) -> None:
+    """Reject over-cap photos and, for the beta intake, any answer the browser should have caught."""
+    pkg = PACKAGES.get(data.get("package_id") or "free") or PACKAGES["free"]
+    photos = data.get("photos") or []
+    if len(photos) > pkg["max_photos"]:
+        raise HTTPException(
+            status_code=422,
+            detail=IntakeError(
+                "INTAKE_INVALID",
+                f"The {pkg['name']} plan includes up to {pkg['max_photos']} photos.",
+                [{"field": "photos", "message": f"The {pkg['name']} plan includes up to {pkg['max_photos']} photos."}],
+            ).as_detail(),
+        )
+    intake = data.get("intake")
+    if not intake:
+        return
+    errors = validate_intake(intake, package=pkg, photos=photos)
+    if errors:
+        only_photos = all(e["field"] == "photos" for e in errors)
+        code = "PHOTO_REQUIRED" if only_photos else "INTAKE_INVALID"
+        raise HTTPException(
+            status_code=422,
+            detail=IntakeError(code, errors[0]["message"], errors).as_detail(),
+        )
+
+
 @api_router.post("/leads", response_model=Lead)
 async def create_lead(payload: LeadCreate, request: Request, response: Response, background_tasks: BackgroundTasks):
     """
@@ -674,6 +704,7 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     """
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
+    check_lead_intake(payload.model_dump(exclude={"password"}))
 
     member = await _resolve_member_for_lead(payload, request, response)
     usage = await _usage_for(member["id"])
@@ -686,6 +717,8 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     if member.get("name") and not (data.get("name") or "").strip():
         data["name"] = member["name"]
     data["member_id"] = member["id"]
+    if data.get("intake"):
+        data["fact_sheet"] = build_fact_sheet(data)
     lead = Lead(**data)
     await db.leads.insert_one(_doc(lead))
 
@@ -1499,6 +1532,17 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     pkg = PACKAGES[req.package_id]
     if pkg["price"] == 0.0:
         raise HTTPException(status_code=400, detail="Free tier does not require checkout")
+    lead_id = str((req.metadata or {}).get("lead_id") or "").strip()
+    if lead_id:
+        lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+        if not lead:
+            raise HTTPException(status_code=404, detail="Project not found")
+        reason = chargeable_block_reason(lead, pkg)
+        if reason:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
+            )
     if not STRIPE_API_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
 
@@ -1531,7 +1575,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
             line_items=[{
                 "price_data": {
                     "currency": pkg["currency"],
-                    "product_data": {"name": f"FlowSpace {pkg['name']} Blueprint"},
+                    "product_data": {"name": f"FlowSpace Design Plan — {pkg['name']}"},
                     "unit_amount": int(pkg["price"] * 100),
                 },
                 "quantity": 1,

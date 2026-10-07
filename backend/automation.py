@@ -450,6 +450,8 @@ async def run_automation(
         logger.info("[automation] Step 1: AI drafting plan...")
         plan = await draft_deliverable(lead, reference_photo_bytes=draft_bytes)
         plan["lead_id"] = lead_id
+        if lead.get("fact_sheet"):
+            plan["fact_sheet"] = lead["fact_sheet"]
         plan["updated_at"] = _iso(datetime.now(timezone.utc))
         await db.deliverables.update_one(
             {"lead_id": lead_id},
@@ -769,6 +771,31 @@ async def run_automation(
             )
             logger.info("[automation] Lead %s package_status=%s (no final email)", lead_id, package_status)
             return package_status == "review"
+
+        if lead.get("intake"):
+            # Beta intake: a conceptual (no-photo) plan is held for review like
+            # every other package. send-final releases it after approval.
+            note = "DRAFT. Review version. Not yet approved. Customer release held. Conceptual plan (no photos)."
+            await db.deliverables.update_one(
+                {"lead_id": lead_id},
+                {"$set": {"package_status": "review", "updated_at": _iso(datetime.now(timezone.utc))}},
+            )
+            await db.leads.update_one(
+                {"id": lead_id},
+                {
+                    "$set": {
+                        "status": "review",
+                        "package_status": "review",
+                        "email_sent": False,
+                        "email_error": None,
+                        "automation_error": None,
+                        "automation_note": note,
+                        "updated_at": _iso(datetime.now(timezone.utc)),
+                    }
+                },
+            )
+            logger.info("[automation] Lead %s conceptual plan held for review (no email)", lead_id)
+            return True
 
         logger.info("[automation] Step 4: Sending email to %s...", customer_email)
         zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable_doc, images=images, final=True)

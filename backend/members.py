@@ -77,7 +77,7 @@ def free_limit_error(used: int) -> Dict[str, Any]:
     return {
         "code": "FREE_TIER_LIMIT",
         "message": (
-            "You've used your free Blueprint. Upgrade to Plus or Premium "
+            "You've used your free Design Plan. Upgrade to Plus or Premium "
             "to organize another space."
         ),
         "used": int(used),
