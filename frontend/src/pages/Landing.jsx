@@ -171,11 +171,11 @@ const FAQS = [
   },
   {
     q: "Do I need an account to get started?",
-    a: "Yes — a free member account keeps every space you create. You can sign up from Members in the nav, or set a password on the intake form. After your first free Blueprint, Plus or Premium unlocks another space.",
+    a: "Yes — a free member account keeps every space you create. You can sign up from Members in the nav, or set a password on the intake form. The Free plan includes one Design Plan per account; Plus or Premium unlocks another space.",
   },
   {
     q: "How is the PDF plan different from the AI image?",
-    a: "The AI image shows the organized version of your actual space (paint is not forced into that visual). The emailed PDF Blueprint adds zones, a shopping list, a step-by-step action plan, and an optional paint note to consider only if it helps your goal — usually within a few minutes (free after submit; Plus and Premium after payment).",
+    a: "The AI image shows the organized version of your actual space (paint is not forced into that visual). Your FlowSpace Design Plan adds a Room Flow map of the zones and a Companion Guide with practical steps and shopping notes. During the beta, our team reviews every plan before we email it to you.",
   },
   {
     q: "Will you change my windows or paint the walls?",
@@ -333,12 +333,12 @@ export default function Landing() {
               {
                 n: 1,
                 title: "Create your free account",
-                body: "Save every space you organize. The first Blueprint is free; Plus and Premium add more photos and another space.",
+                body: "Save every space you organize. The Free plan includes one Design Plan; Plus and Premium add more photos and another space.",
               },
               {
                 n: 2,
                 title: "Upload your photos",
-                body: "Snap photos of your messy space, drop them in, and we get to work instantly.",
+                body: "Snap photos of your messy space, drop them in, and tell us what the plan should work around.",
               },
               {
                 n: 3,
@@ -389,7 +389,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-8 text-center text-xs text-slate-500">
-            Free includes one Blueprint per account. Create a member login to keep your plans.
+            Free includes one Design Plan per account. Create a member login to keep your plans.
           </p>
         </div>
       </section>
@@ -547,7 +547,7 @@ export default function Landing() {
                 </h2>
                 <p className="mt-4 max-w-xl text-lg text-emerald-50">
                   Upload your room photos and get a visual plan for a cleaner,
-                  more functional home. Pick a plan and start in under a minute.
+                  more functional home. Pick a plan to get started.
                 </p>
               </div>
               <div className="flex md:justify-end">

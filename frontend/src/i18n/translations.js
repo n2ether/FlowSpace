@@ -74,9 +74,9 @@ export const translations = {
             eyebrow: "FAQ",
             title: "Answers, fast",
             items: [
-                { q: "Do I need exact measurements?", a: "No. Your photos are enough. Windows and room proportions follow your photos, and we never invent footage." },
+                { q: "Do I need exact measurements?", a: "Not usually. Photos are enough to organize a space. If your plan changes the layout or something must fit an exact spot, we ask for the few measurements that matter." },
                 { q: "What if I don't know what to buy?", a: "We tell you. Our Standard and Premium plans include a full shopping list with links." },
-                { q: "How long does it take?", a: "Blueprints are emailed as a PDF, usually within a few minutes after submit (free) or payment (Plus/Premium)." },
+                { q: "How long does it take?", a: "During the beta, every FlowSpace Design Plan is reviewed by our team before we email it to you." },
                 { q: "Do I need to install anything complicated?", a: "No. We design around real-life setups with simple, achievable steps — no heavy construction." },
             ],
         },

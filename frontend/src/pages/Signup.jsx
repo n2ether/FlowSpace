@@ -29,7 +29,7 @@ export default function Signup() {
                 email: form.email.trim(),
                 password: form.password,
             });
-            toast.success("Account created. Your first Blueprint is free.");
+            toast.success("Account created. The Free plan includes one Design Plan.");
             navigate(next.startsWith("/") ? next : "/account");
         } catch (err) {
             if (apiErrorCode(err) === "EMAIL_IN_USE") {
@@ -65,7 +65,7 @@ export default function Signup() {
                         Create your free account
                     </h1>
                     <p className="mt-2 text-sm text-slate-600">
-                        Keep every space you organize. First Blueprint is free — upgrade when you
+                        Keep every space you organize. The Free plan includes one Design Plan — upgrade when you
                         want another.
                     </p>
                     <label className="mt-8 mb-2 block text-sm font-medium text-slate-800">Name</label>

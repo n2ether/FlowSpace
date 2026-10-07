@@ -89,7 +89,7 @@ export default function Account() {
                             Welcome back, {member.name?.split(" ")[0] || "there"}
                         </h1>
                         <p className="mt-2 text-slate-600">
-                            Every space you create stays here. We email the PDF Blueprint when it&apos;s ready.
+                            Every space you create stays here. We email your Design Plan when it&apos;s ready.
                         </p>
                     </div>
                     {canFree ? (
@@ -111,8 +111,8 @@ export default function Account() {
                 >
                     <p className={`text-sm font-medium ${canFree ? "text-emerald-900" : "text-amber-950"}`}>
                         {canFree
-                            ? `Free plan: ${used} of 1 Blueprint used. Your first space is included.`
-                            : "You've used your free Blueprint. Plus ($10) and Premium ($20) unlock another space."}
+                            ? `Free plan: ${used} of 1 Design Plan used. Your first space is included.`
+                            : "You've used your free Design Plan. Plus ($10) and Premium ($20) unlock another space."}
                     </p>
                     {!canFree && (
                         <p className="mt-1 text-sm text-amber-800">
@@ -136,7 +136,7 @@ export default function Account() {
                                 Upload a closet, garage, laundry room, pantry, or mudroom to get your first plan.
                             </p>
                             <Link to="/intake?plan=free" className="btn-primary mt-6" data-testid="account-empty-cta">
-                                Start my free Blueprint
+                                Start my free Design Plan
                             </Link>
                         </div>
                     ) : (
@@ -190,7 +190,7 @@ export default function Account() {
                                             </p>
                                             <p className="mt-3 text-sm text-slate-500">
                                                 {space.email_sent
-                                                    ? "Blueprint emailed to you."
+                                                    ? "Design Plan emailed to you."
                                                     : "We'll email the PDF when it's ready."}
                                             </p>
                                         </div>
