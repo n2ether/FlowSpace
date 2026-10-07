@@ -65,7 +65,7 @@ export default function Footer() {
               <li>
                 <a
                   href="mailto:contact@flowspace.solutions"
-                  className="hover:text-emerald-600"
+                  className="break-all hover:text-emerald-600"
                   data-testid="footer-link-contact"
                 >
                   contact@flowspace.solutions

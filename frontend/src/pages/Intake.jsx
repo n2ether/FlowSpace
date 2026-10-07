@@ -260,13 +260,13 @@ export default function Intake() {
     const isReview = step === STEPS.length - 1;
 
     return (
-        <div className="min-h-screen overflow-x-hidden bg-slate-50">
+        <div className="min-h-screen bg-slate-50">
             <Header />
             <main className="container-app py-10 md:py-16">
                 <div className="mx-auto max-w-2xl">
                     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                         <div
-                            className="inline-flex items-center gap-3 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm"
+                            className="inline-flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm"
                             data-testid="intake-plan-badge"
                         >
                             <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
