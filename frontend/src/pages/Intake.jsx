@@ -36,6 +36,10 @@ function readDraft() {
     }
 }
 
+function isPaymentsDisabledError(err) {
+    return apiErrorCode(err) === "PAYMENTS_DISABLED";
+}
+
 function draftHasAnswers(draft) {
     if (!draft) return false;
     return Boolean(draft.form.space_type || draft.form.priority || draft.photos.length || draft.step > 0);
@@ -58,6 +62,7 @@ export default function Intake() {
     const [submitting, setSubmitting] = useState(false);
     const [blocked, setBlocked] = useState(false);
     const [photoStatus, setPhotoStatus] = useState("");
+    const [paymentsDisabled, setPaymentsDisabled] = useState(false);
     const headingRef = useRef(null);
     const summaryRef = useRef(null);
     const replaceIndexRef = useRef(null);
@@ -77,6 +82,23 @@ export default function Intake() {
     useEffect(() => {
         refresh();
     }, [refresh]);
+
+    // Ask the backend up front whether checkout is on, so Review never dead-ends on a pay click.
+    useEffect(() => {
+        if (plan.price === 0) return undefined;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await api.get("/checkout/config");
+                if (!cancelled && res?.data?.enabled === false) setPaymentsDisabled(true);
+            } catch {
+                /* config probe is best-effort; checkout itself still reports a disabled state */
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [plan.price]);
 
     useEffect(() => {
         if (!member) return;
@@ -222,13 +244,16 @@ export default function Intake() {
 
             const payload = buildLeadPayload(form, checked, plan, member);
             const { data: lead } = await api.post("/leads", payload);
-            try {
-                localStorage.removeItem(DRAFT_KEY);
-            } catch {
-                /* ignore */
-            }
+            const clearDraft = () => {
+                try {
+                    localStorage.removeItem(DRAFT_KEY);
+                } catch {
+                    /* ignore */
+                }
+            };
 
             if (plan.price === 0) {
+                clearDraft();
                 navigate(`/success?plan=free&lead=${lead.id}`);
                 return;
             }
@@ -238,8 +263,15 @@ export default function Intake() {
                 email: (member?.email || form.email).trim(),
                 metadata: { lead_id: lead.id },
             });
+            clearDraft();
             window.location.href = checkout.url;
         } catch (err) {
+            if (isPaymentsDisabledError(err)) {
+                // Neutral, not an error: the Review step shows the notice and the pay button stays off.
+                setPaymentsDisabled(true);
+                setSubmitting(false);
+                return;
+            }
             const code = apiErrorCode(err);
             if (code === "FREE_TIER_LIMIT") setBlocked(true);
             const detail = err?.response?.data?.detail;
@@ -423,6 +455,7 @@ export default function Intake() {
                                         errors={errors}
                                         member={member}
                                         planId={plan.id}
+                                        paymentsDisabled={paymentsDisabled}
                                         onEdit={editFromReview}
                                     />
                                 )}
@@ -437,7 +470,11 @@ export default function Intake() {
                                     )}
                                     <button
                                         type="submit"
-                                        disabled={submitting || (step === 1 && (uploading || Boolean(pending)))}
+                                        disabled={
+                                            submitting ||
+                                            (isReview && paymentsDisabled && plan.price > 0) ||
+                                            (step === 1 && (uploading || Boolean(pending)))
+                                        }
                                         className={`btn-primary justify-center ${submitting ? "cursor-wait opacity-60" : ""}`}
                                         data-testid={isReview ? "intake-submit" : "intake-next"}
                                     >

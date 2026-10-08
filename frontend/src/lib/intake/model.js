@@ -4,6 +4,10 @@
 export const PRODUCT_NAME = "FlowSpace Design Plan";
 export const INTAKE_VERSION = "beta-4screen-v1";
 
+// Shown on Review when checkout is switched off. Keep it neutral: no processor names, no error tone.
+export const PAYMENTS_DISABLED_NOTICE =
+    "Paid plans aren't available right now. Your answers are saved on this device, so you can come back and finish later.";
+
 export const PLANS = {
     free: { id: "free", name: "Free", price: 0, maxPhotos: 2 },
     plus: { id: "plus", name: "Plus", price: 10, maxPhotos: 3 },

@@ -8,6 +8,7 @@ import {
     KIDS_STAGES,
     MEASURE_UNITS,
     PALETTES,
+    PAYMENTS_DISABLED_NOTICE,
     PLAN_SCOPE,
     PRIORITIES,
     PRODUCT_NAME,
@@ -74,7 +75,7 @@ function spaceDetail(form) {
     return a.text.trim();
 }
 
-export default function StepReview({ form, update, plan, photos, errors, member, onEdit, planId }) {
+export default function StepReview({ form, update, plan, photos, errors, member, onEdit, planId, paymentsDisabled = false }) {
     const accepted = acceptedPhotos(photos);
     const conceptual = isConceptual(form, plan);
     const flow = roomFlowMode(form, plan);
@@ -246,10 +247,21 @@ export default function StepReview({ form, update, plan, photos, errors, member,
                 <p className="mt-2 text-base font-medium text-slate-900" data-testid="review-plan-line">
                     {planLine(plan)}
                 </p>
+                {paymentsDisabled && plan.price > 0 && (
+                    <p
+                        className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                        role="status"
+                        data-testid="review-payments-off"
+                    >
+                        {PAYMENTS_DISABLED_NOTICE}
+                    </p>
+                )}
                 <p className="mt-1 text-sm text-slate-600">
                     {plan.price === 0
                         ? "No payment needed."
-                        : "Secure checkout with Stripe on the next page. You'll only be charged once."}
+                        : paymentsDisabled
+                          ? "Nothing will be charged."
+                          : "Secure checkout with Stripe on the next page. You'll only be charged once."}
                 </p>
             </section>
         </div>

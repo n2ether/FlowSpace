@@ -1525,6 +1525,29 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
 
 
 # ──────────────────────────── Stripe ─────────────────────────────
+PAYMENTS_DISABLED_MESSAGE = (
+    "Paid plans aren't available right now. Your answers are saved on this device, "
+    "so you can come back and finish later."
+)
+
+
+def _stripe_mode() -> Optional[str]:
+    """Report 'live' or 'test' from the key prefix, or None when payments are off. Never returns the key."""
+    key = (STRIPE_API_KEY or "").strip()
+    if not key:
+        return None
+    return "live" if key.startswith(("sk_live_", "rk_live_")) else "test"
+
+
+@api_router.get("/checkout/config")
+async def checkout_config():
+    """Tell the client up front whether checkout is available, so it can avoid a dead-end click."""
+    mode = _stripe_mode()
+    if mode is None:
+        return {"enabled": False, "mode": None, "message": PAYMENTS_DISABLED_MESSAGE}
+    return {"enabled": True, "mode": mode, "message": None}
+
+
 @api_router.post("/checkout/session")
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
@@ -1544,7 +1567,10 @@ async def create_checkout(req: CheckoutRequest, request: Request):
                 detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
             )
     if not STRIPE_API_KEY:
-        raise HTTPException(status_code=503, detail="Stripe not configured")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "PAYMENTS_DISABLED", "message": PAYMENTS_DISABLED_MESSAGE},
+        )
 
     stripe_sdk.api_key = STRIPE_API_KEY
     origin = req.origin_url.rstrip("/")

@@ -322,6 +322,47 @@ class TestLeadApi:
         assert r.status_code == 409
         assert r.json()["detail"]["code"] == "PHOTO_REQUIRED"
 
+    def test_checkout_config_disabled_without_key(self, api_client, monkeypatch):
+        c, _fake, _headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "")
+        r = c.get("/api/checkout/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["enabled"] is False
+        assert body["mode"] is None
+        assert body["message"] == server.PAYMENTS_DISABLED_MESSAGE
+
+    def test_checkout_config_test_mode_does_not_leak_key(self, api_client, monkeypatch):
+        c, _fake, _headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_secret_value")
+        r = c.get("/api/checkout/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["enabled"] is True
+        assert body["mode"] == "test"
+        assert body["message"] is None
+        assert "sk_test_secret_value" not in r.text
+
+    def test_checkout_without_key_is_neutral_payments_disabled(self, api_client, monkeypatch):
+        c, _fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "")
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000"},
+            headers=headers,
+        )
+        assert r.status_code == 503
+        detail = r.json()["detail"]
+        assert detail["code"] == "PAYMENTS_DISABLED"
+        assert detail["message"] == server.PAYMENTS_DISABLED_MESSAGE
+        assert "stripe" not in detail["message"].lower()
+
     def test_checkout_unknown_lead_404(self, api_client):
         c, _fake, headers = api_client
         r = c.post(

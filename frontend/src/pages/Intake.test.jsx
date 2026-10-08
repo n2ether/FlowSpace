@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Intake from "./Intake";
 import { api } from "../lib/api";
-import { DRAFT_KEY } from "../lib/intake/model";
+import { DRAFT_KEY, PAYMENTS_DISABLED_NOTICE, emptyForm, serializeDraft } from "../lib/intake/model";
 import { measurePhoto } from "../lib/intake/photoChecks";
 import { bakeRotation, inspectPhotoFile } from "../lib/photoOrientation";
 
@@ -15,7 +15,7 @@ const mockAuth = { member: null, signup: jest.fn(), login: jest.fn(), refresh: j
 jest.mock("../context/AuthContext", () => ({ useAuth: () => mockAuth }));
 
 jest.mock("../lib/api", () => ({
-    api: { post: jest.fn() },
+    api: { get: jest.fn(), post: jest.fn() },
     apiErrorCode: (err) => err?.response?.data?.detail?.code || null,
     apiErrorMessage: (err) => err?.response?.data?.detail?.message || "error",
 }));
@@ -27,6 +27,9 @@ jest.mock("../lib/intake/photoChecks", () => {
     const actual = jest.requireActual("../lib/intake/photoChecks");
     return { ...actual, measurePhoto: jest.fn() };
 });
+
+const PAYMENTS_ON = { data: { enabled: true, mode: "test", message: null } };
+const PAYMENTS_OFF = { data: { enabled: false, mode: null, message: PAYMENTS_DISABLED_NOTICE } };
 
 function renderIntake(plan = "plus") {
     return render(
@@ -48,6 +51,7 @@ beforeEach(() => {
     inspectPhotoFile.mockImplementation(async (file) => ({ needsNudge: false, previewUrl: "blob:x", file }));
     bakeRotation.mockImplementation(async (file) => file);
     mockAuth.refresh = jest.fn();
+    api.get.mockResolvedValue(PAYMENTS_ON);
     window.scrollTo = jest.fn();
     URL.revokeObjectURL = jest.fn();
     global.fetch = jest.fn(async () => {
@@ -68,6 +72,40 @@ async function addPhoto(user, index = 0) {
     const file = new File(["img"], "room.jpg", { type: "image/jpeg" });
     await user.upload(screen.getByLabelText(/Add (a photo|another angle)/), file);
     await screen.findByTestId(`photo-card-${index}`);
+}
+
+// Saves a complete, valid draft parked on the Review step so a test can start there.
+function seedReviewDraft() {
+    const form = {
+        ...emptyForm(),
+        space_type: "bedroom",
+        priority: "storage",
+        coverage: "whole",
+        keep: "open",
+        limits: ["none"],
+        budget: "not_sure",
+        name: "Camila",
+        email: "camila@example.com",
+    };
+    const photos = [
+        {
+            id: "a".repeat(24),
+            url: `/api/uploads/photo/${"a".repeat(24)}`,
+            label: "",
+            shot: "wide",
+            metrics: mockMetrics,
+            acknowledged: false,
+        },
+    ];
+    localStorage.setItem(DRAFT_KEY, serializeDraft({ form, photos, step: 3 }));
+}
+
+async function expectNeutralPaymentsOff() {
+    const notice = await screen.findByTestId("review-payments-off");
+    expect(notice).toHaveTextContent(PAYMENTS_DISABLED_NOTICE);
+    expect(notice).not.toHaveTextContent(/stripe|error|failed/i);
+    expect(screen.getByTestId("intake-submit")).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 }
 
 test("shows real progress and linked, labelled errors on screen 1", async () => {
@@ -216,6 +254,42 @@ test("full paid journey: conditional questions, contradiction, review, payment",
     });
     expect(payload.intake.photos[0]).toMatchObject({ ref: "P1", label: "Photo 1" });
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+});
+
+test("review shows a neutral notice upfront and disables the pay button when payments are off", async () => {
+    api.get.mockResolvedValue(PAYMENTS_OFF);
+    seedReviewDraft();
+    renderIntake("plus");
+    await screen.findByText("Step 4 of 4");
+    await expectNeutralPaymentsOff();
+    expect(api.get).toHaveBeenCalledWith("/checkout/config");
+    expect(api.post).not.toHaveBeenCalled();
+});
+
+test("review falls back to a neutral notice when checkout answers payments disabled", async () => {
+    const user = userEvent.setup();
+    api.post.mockImplementation(async (url) => {
+        if (url === "/leads") return { data: { id: "lead-123" } };
+        if (url === "/checkout/session") {
+            const err = new Error("Request failed with status code 503");
+            err.response = { data: { detail: { code: "PAYMENTS_DISABLED", message: PAYMENTS_DISABLED_NOTICE } } };
+            throw err;
+        }
+        throw new Error(url);
+    });
+    mockAuth.signup.mockResolvedValue({ usage: { can_generate_free: true } });
+    seedReviewDraft();
+    renderIntake("plus");
+    await screen.findByText("Step 4 of 4");
+    expect(screen.queryByTestId("review-payments-off")).not.toBeInTheDocument();
+    expect(screen.getByTestId("intake-submit")).toBeEnabled();
+
+    await user.type(screen.getByLabelText("Create a password to keep this plan"), "password12");
+    await user.click(screen.getByRole("button", { name: "Continue to payment — $10" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/checkout/session", expect.anything()));
+    await expectNeutralPaymentsOff();
+    expect(localStorage.getItem(DRAFT_KEY)).not.toBeNull();
 });
 
 test("preserves the draft across a reload or login round-trip", async () => {

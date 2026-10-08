@@ -8,7 +8,7 @@ function jpegFromMultipart(buf) {
     return buf.subarray(start, end + 2);
 }
 
-async function mockApi(page, { member = null } = {}) {
+async function mockApi(page, { member = null, paymentsEnabled = true } = {}) {
     const state = { uploads: new Map(), leads: [], checkouts: [], signups: [] };
     let n = 0;
 
@@ -45,6 +45,18 @@ async function mockApi(page, { member = null } = {}) {
             const body = req.postDataJSON();
             state.leads.push(body);
             return json(200, { ...body, id: `lead-${state.leads.length}` });
+        }
+        if (path === "/api/checkout/config" && method === "GET") {
+            return json(
+                200,
+                paymentsEnabled
+                    ? { enabled: true, mode: "test", message: null }
+                    : {
+                          enabled: false,
+                          mode: null,
+                          message: "Paid plans aren't available right now. Your answers are saved on this device, so you can come back and finish later.",
+                      },
+            );
         }
         if (path === "/api/checkout/session" && method === "POST") {
             state.checkouts.push(req.postDataJSON());
