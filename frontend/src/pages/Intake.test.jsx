@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Intake from "./Intake";
 import { api } from "../lib/api";
-import { DRAFT_KEY } from "../lib/intake/model";
+import { DRAFT_KEY, emptyForm, serializeDraft } from "../lib/intake/model";
 import { measurePhoto } from "../lib/intake/photoChecks";
 import { bakeRotation, inspectPhotoFile } from "../lib/photoOrientation";
 
@@ -15,7 +15,7 @@ const mockAuth = { member: null, signup: jest.fn(), login: jest.fn(), refresh: j
 jest.mock("../context/AuthContext", () => ({ useAuth: () => mockAuth }));
 
 jest.mock("../lib/api", () => ({
-    api: { post: jest.fn() },
+    api: { post: jest.fn(), get: jest.fn() },
     apiErrorCode: (err) => err?.response?.data?.detail?.code || null,
     apiErrorMessage: (err) => err?.response?.data?.detail?.message || "error",
 }));
@@ -48,6 +48,7 @@ beforeEach(() => {
     inspectPhotoFile.mockImplementation(async (file) => ({ needsNudge: false, previewUrl: "blob:x", file }));
     bakeRotation.mockImplementation(async (file) => file);
     mockAuth.refresh = jest.fn();
+    api.get.mockResolvedValue({ data: { enabled: true, mode: "test", message: null } });
     window.scrollTo = jest.fn();
     URL.revokeObjectURL = jest.fn();
     global.fetch = jest.fn(async () => {
@@ -229,4 +230,67 @@ test("preserves the draft across a reload or login round-trip", async () => {
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByLabelText("Which space are we planning?")).toHaveValue("bedroom");
     expect(screen.getByRole("radio", { name: "More useful storage" })).toBeChecked();
+});
+
+const PAYMENTS_OFF = "Payments are disabled in this preview. No charge will be made.";
+
+function seedReviewDraft() {
+    const form = {
+        ...emptyForm(),
+        space_type: "bedroom",
+        priority: "storage",
+        coverage: "whole",
+        keep: "keep_all",
+        limits: ["none"],
+        budget: "100_300",
+        name: "Camila",
+        email: "camila@example.com",
+        shop_country: "US",
+    };
+    const photos = [{ id: "p1", url: "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa", label: "", shot: "wide", metrics: mockMetrics }];
+    localStorage.setItem(DRAFT_KEY, serializeDraft({ form, photos, step: 3 }));
+}
+
+function expectNeutralPaymentsOff(button) {
+    const notice = screen.getByTestId("payments-disabled-notice");
+    expect(notice).toHaveTextContent(PAYMENTS_OFF);
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice.className).not.toMatch(/red|rose/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/stripe not configured/i)).not.toBeInTheDocument();
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-describedby", "payments-disabled-notice");
+}
+
+test("review shows a neutral payments-off notice up front when checkout is not configured", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue({ data: { enabled: false, mode: null, message: PAYMENTS_OFF } });
+    seedReviewDraft();
+    renderIntake("plus");
+    expect(await screen.findByTestId("payments-disabled-notice")).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith("/checkout/config");
+    const pay = screen.getByRole("button", { name: "Continue to payment — $10" });
+    expectNeutralPaymentsOff(pay);
+    await user.click(pay);
+    expect(api.post).not.toHaveBeenCalled();
+});
+
+test("review falls back to the neutral notice when checkout answers payments disabled", async () => {
+    const user = userEvent.setup();
+    api.get.mockRejectedValue(new Error("config probe unavailable"));
+    api.post.mockImplementation(async (url) => {
+        if (url === "/leads") return { data: { id: "lead-9" } };
+        const err = new Error("503");
+        err.response = { status: 503, data: { detail: "Stripe not configured" } };
+        throw err;
+    });
+    mockAuth.signup.mockResolvedValue({ usage: { can_generate_free: true } });
+    seedReviewDraft();
+    renderIntake("premium");
+    await screen.findByText("Step 4 of 4");
+    expect(screen.queryByTestId("payments-disabled-notice")).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Create a password to keep this plan"), "password12");
+    await user.click(screen.getByRole("button", { name: "Continue to payment — $20" }));
+    await screen.findByTestId("payments-disabled-notice");
+    expectNeutralPaymentsOff(screen.getByRole("button", { name: "Continue to payment — $20" }));
 });

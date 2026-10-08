@@ -3,6 +3,7 @@
 
 export const PRODUCT_NAME = "FlowSpace Design Plan";
 export const INTAKE_VERSION = "beta-4screen-v1";
+export const PAYMENTS_DISABLED_NOTICE = "Payments are disabled in this preview. No charge will be made.";
 
 export const PLANS = {
     free: { id: "free", name: "Free", price: 0, maxPhotos: 2 },

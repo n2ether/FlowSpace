@@ -1525,6 +1525,31 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
 
 
 # ──────────────────────────── Stripe ─────────────────────────────
+PAYMENTS_DISABLED_MESSAGE = "Payments are disabled in this preview. No charge will be made."
+
+
+def _stripe_mode(key: str) -> Optional[str]:
+    if key.startswith(("sk_test_", "rk_test_")):
+        return "test"
+    if key.startswith(("sk_live_", "rk_live_")):
+        return "live"
+    return None
+
+
+@api_router.get("/checkout/config")
+async def checkout_config():
+    """Tell the intake up front whether paid checkout can start on this server.
+
+    Never returns the key itself — only whether one is set and its mode.
+    """
+    enabled = bool(STRIPE_API_KEY)
+    return {
+        "enabled": enabled,
+        "mode": _stripe_mode(STRIPE_API_KEY) if enabled else None,
+        "message": None if enabled else PAYMENTS_DISABLED_MESSAGE,
+    }
+
+
 @api_router.post("/checkout/session")
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
@@ -1544,7 +1569,10 @@ async def create_checkout(req: CheckoutRequest, request: Request):
                 detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
             )
     if not STRIPE_API_KEY:
-        raise HTTPException(status_code=503, detail="Stripe not configured")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "PAYMENTS_DISABLED", "message": PAYMENTS_DISABLED_MESSAGE},
+        )
 
     stripe_sdk.api_key = STRIPE_API_KEY
     origin = req.origin_url.rstrip("/")
