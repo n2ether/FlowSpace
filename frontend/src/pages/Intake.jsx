@@ -36,6 +36,13 @@ function readDraft() {
     }
 }
 
+// Older backends answer 503 "Stripe not configured"; newer ones send PAYMENTS_DISABLED.
+function isPaymentsDisabledError(err, code) {
+    if (code === "PAYMENTS_DISABLED") return true;
+    const detail = err?.response?.data?.detail;
+    return err?.response?.status === 503 && typeof detail === "string" && /stripe not configured/i.test(detail);
+}
+
 function draftHasAnswers(draft) {
     if (!draft) return false;
     return Boolean(draft.form.space_type || draft.form.priority || draft.photos.length || draft.step > 0);
@@ -57,6 +64,7 @@ export default function Intake() {
     const [returnToReview, setReturnToReview] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [blocked, setBlocked] = useState(false);
+    const [paymentsDisabled, setPaymentsDisabled] = useState(false);
     const [photoStatus, setPhotoStatus] = useState("");
     const headingRef = useRef(null);
     const summaryRef = useRef(null);
@@ -83,6 +91,23 @@ export default function Intake() {
         setForm((f) => ({ ...f, name: f.name || member.name || "", email: member.email || f.email }));
         setBlocked(plan.price === 0 && member.usage?.can_generate_free === false);
     }, [member, plan.price]);
+
+    useEffect(() => {
+        // Ask the backend up front whether paid checkout can start, so the Review
+        // screen can show a neutral notice instead of failing after a click. If the
+        // check itself fails we leave payments on and rely on the checkout response.
+        if (plan.price === 0) return undefined;
+        let active = true;
+        Promise.resolve()
+            .then(() => api.get("/checkout/config"))
+            .then((res) => {
+                if (active && res?.data?.enabled === false) setPaymentsDisabled(true);
+            })
+            .catch(() => {});
+        return () => {
+            active = false;
+        };
+    }, [plan.price]);
 
     useEffect(() => {
         if (!stepChanged.current) return;
@@ -188,7 +213,10 @@ export default function Intake() {
         goTo(0);
     };
 
+    const payDisabled = plan.price > 0 && paymentsDisabled;
+
     const submit = async () => {
+        if (payDisabled) return;
         const invalid = firstInvalidStep(ctx);
         if (invalid >= 0) {
             setReturnToReview(true);
@@ -241,6 +269,12 @@ export default function Intake() {
             window.location.href = checkout.url;
         } catch (err) {
             const code = apiErrorCode(err);
+            if (isPaymentsDisabledError(err, code)) {
+                setPaymentsDisabled(true);
+                setErrors({});
+                setSubmitting(false);
+                return;
+            }
             if (code === "FREE_TIER_LIMIT") setBlocked(true);
             const detail = err?.response?.data?.detail;
             if (code === "PHOTO_REQUIRED" || code === "INTAKE_INVALID") {
@@ -424,6 +458,7 @@ export default function Intake() {
                                         member={member}
                                         planId={plan.id}
                                         onEdit={editFromReview}
+                                        paymentsDisabled={payDisabled}
                                     />
                                 )}
 
@@ -437,8 +472,15 @@ export default function Intake() {
                                     )}
                                     <button
                                         type="submit"
-                                        disabled={submitting || (step === 1 && (uploading || Boolean(pending)))}
-                                        className={`btn-primary justify-center ${submitting ? "cursor-wait opacity-60" : ""}`}
+                                        disabled={
+                                            submitting ||
+                                            (isReview && payDisabled) ||
+                                            (step === 1 && (uploading || Boolean(pending)))
+                                        }
+                                        aria-describedby={isReview && payDisabled ? "payments-disabled-notice" : undefined}
+                                        className={`btn-primary justify-center ${submitting ? "cursor-wait opacity-60" : ""} ${
+                                            isReview && payDisabled ? "cursor-not-allowed opacity-50 saturate-0" : ""
+                                        }`}
                                         data-testid={isReview ? "intake-submit" : "intake-next"}
                                     >
                                         {submitting

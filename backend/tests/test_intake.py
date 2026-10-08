@@ -331,6 +331,42 @@ class TestLeadApi:
         )
         assert r.status_code == 404
 
+    def test_checkout_config_reports_disabled_without_key(self, api_client, monkeypatch):
+        c, _fake, _headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "")
+        r = c.get("/api/checkout/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["enabled"] is False
+        assert body["message"] == "Payments are disabled in this preview. No charge will be made."
+
+    def test_checkout_config_reports_test_mode_without_leaking_key(self, api_client, monkeypatch):
+        c, _fake, _headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+        r = c.get("/api/checkout/config")
+        assert r.json() == {"enabled": True, "mode": "test", "message": None}
+        assert "sk_test_dummy" not in r.text
+
+    def test_checkout_without_key_is_neutral_payments_disabled(self, api_client, monkeypatch):
+        c, _fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "")
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000"},
+            headers=headers,
+        )
+        assert r.status_code == 503
+        detail = r.json()["detail"]
+        assert detail["code"] == "PAYMENTS_DISABLED"
+        assert detail["message"] == "Payments are disabled in this preview. No charge will be made."
+        assert "Stripe not configured" not in r.text
+
 
 def test_conceptual_intake_lead_is_held_for_review(monkeypatch):
     from tests.test_automation import _run, _lead
