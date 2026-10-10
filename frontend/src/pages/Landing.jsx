@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
@@ -195,6 +196,17 @@ export default function Landing() {
   const [filter, setFilter] = useState("all");
   const filtered =
     filter === "all" ? GALLERY : GALLERY.filter((g) => g.id === filter);
+  const [params] = useSearchParams();
+  const checkoutCanceled = params.get("canceled") === "1";
+
+  // The browser's own #packages jump fires before React has rendered the section.
+  useEffect(() => {
+    if (!checkoutCanceled) return undefined;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById("packages")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [checkoutCanceled]);
 
   return (
     <div className="min-h-screen bg-white">
@@ -378,6 +390,15 @@ export default function Landing() {
               priority delivery.
             </p>
           </div>
+          {checkoutCanceled && (
+            <p
+              role="status"
+              className="mx-auto mt-8 max-w-xl rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm text-slate-700"
+              data-testid="checkout-canceled-notice"
+            >
+              Checkout canceled. No charge was made.
+            </p>
+          )}
           <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">
             {PLANS.map((p) => (
               <PricingCard
