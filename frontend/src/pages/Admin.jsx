@@ -100,6 +100,7 @@ const Admin = () => {
         if (s === "processing" || s === "paid") return "bg-sky-50 text-sky-700";
         if (s === "pdf_ready") return "bg-amber-50 text-amber-800";
         if (s === "error") return "bg-red-50 text-red-700";
+        if (s === "review" || s === "incomplete") return "bg-violet-50 text-violet-700";
         return "bg-slate-50 text-slate-600";
     };
 
@@ -318,6 +319,9 @@ const Admin = () => {
                                     )}
                                     {(l.email_error || l.automation_error) && (
                                         <p className="mt-2 text-xs text-red-600" data-testid={`lead-error-${l.id}`}>
+                                            {l.automation_failed && l.automation_failed_at
+                                                ? `Generation failed ${new Date(l.automation_failed_at).toLocaleString()}: `
+                                                : ""}
                                             {l.email_error || l.automation_error}
                                         </p>
                                     )}

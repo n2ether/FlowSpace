@@ -44,8 +44,9 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
     );
 
     const handleFiles = useCallback(
-        async (fileList) => {
-            const max = typeof remainingSlots === "number" ? remainingSlots : 99;
+        async (fileList, { limit } = {}) => {
+            const max =
+                typeof limit === "number" ? limit : typeof remainingSlots === "number" ? remainingSlots : 99;
             const files = Array.from(fileList || []).slice(0, Math.max(0, max));
             if (!files.length) return;
             setUploading(true);

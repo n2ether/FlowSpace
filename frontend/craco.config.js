@@ -4,7 +4,7 @@ require("dotenv").config();
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build
-const isDevServer = process.env.NODE_ENV !== "production";
+const isDevServer = process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test";
 
 // Environment variable overrides
 const config = {
@@ -57,6 +57,20 @@ let webpackConfig = {
       }
       return webpackConfig;
     },
+  },
+};
+
+// CRA's Jest 27 ignores package "exports"; react-router v7 relies on them.
+webpackConfig.jest = {
+  configure: (jestConfig) => {
+    jestConfig.moduleNameMapper = {
+      ...jestConfig.moduleNameMapper,
+      "^@/(.*)$": "<rootDir>/src/$1",
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js",
+      "^react-router$": "<rootDir>/node_modules/react-router/dist/development/index.js",
+    };
+    jestConfig.testPathIgnorePatterns = [...(jestConfig.testPathIgnorePatterns || []), "<rootDir>/e2e/"];
+    return jestConfig;
   },
 };
 

@@ -751,3 +751,33 @@ def test_multi_photo_review_keeps_every_after_and_skips_hero_angles(monkeypatch)
     assert spec["claims_organized_photo"] is True
     assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02"]
     assert "after_crop" not in spec["detail_sources"]
+
+
+def test_pipeline_exception_holds_lead_for_review_not_error(monkeypatch, caplog):
+    from automation import run_automation
+
+    async def draft_crash(lead_doc, **kwargs):
+        raise RuntimeError("anthropic 529 overloaded")
+
+    async def never_send(**kwargs):
+        raise AssertionError("a failed run must not email the customer")
+
+    monkeypatch.setattr("automation.draft_deliverable", draft_crash)
+    monkeypatch.setattr("automation.send_blueprint", never_send)
+    db = _FakeDB()
+    lead = _lead()
+    db.leads.docs[lead["id"]] = dict(lead)
+
+    with caplog.at_level("ERROR", logger="automation"):
+        sent = asyncio.run(run_automation(lead=lead, db=db, fs_bucket=_FakeFS()))
+
+    assert sent is False
+    doc = db.leads.docs["lead-img-1"]
+    assert doc["status"] == "review"
+    assert doc["package_status"] == "review"
+    assert doc["status"] != "error"
+    assert doc["email_sent"] is False
+    assert doc["automation_failed"] is True
+    assert doc["automation_error"] == "anthropic 529 overloaded"
+    assert doc["automation_failed_at"]
+    assert any("Pipeline failed" in r.getMessage() for r in caplog.records)
