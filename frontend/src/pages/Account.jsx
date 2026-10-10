@@ -16,17 +16,43 @@ const SPACE_LABELS = {
     home_office: "Home office",
     living_room: "Living room",
     bedroom: "Bedroom",
-    other: "Other",
+    other: "Other space",
+};
+
+const IN_PROGRESS = { key: "in_progress", label: "In progress", note: "We're preparing your Design Plan." };
+const IN_REVIEW = { key: "in_review", label: "In review", note: "Our beta team reviews every plan before it's sent." };
+const DELIVERED = { key: "delivered", label: "Delivered", note: "Design Plan emailed to you." };
+
+// Raw lead statuses (and legacy "error") never reach the customer.
+const CUSTOMER_STATUS = {
+    new: IN_PROGRESS,
+    paid: IN_PROGRESS,
+    processing: IN_PROGRESS,
+    in_progress: IN_PROGRESS,
+    review: IN_REVIEW,
+    incomplete: IN_REVIEW,
+    pdf_ready: IN_REVIEW,
+    error: IN_REVIEW,
+    in_review: IN_REVIEW,
+    delivered: DELIVERED,
 };
 
 const STATUS_STYLES = {
-    new: "bg-slate-100 text-slate-700",
-    processing: "bg-amber-50 text-amber-800",
-    paid: "bg-sky-50 text-sky-800",
-    pdf_ready: "bg-emerald-50 text-emerald-800",
+    in_progress: "bg-sky-50 text-sky-800",
+    in_review: "bg-slate-100 text-slate-700",
     delivered: "bg-emerald-50 text-emerald-800",
-    error: "bg-rose-50 text-rose-800",
 };
+
+export function spaceTitle(space) {
+    const title = (space.title || "").trim();
+    if (title) return title;
+    if (space.space_type === "other") return SPACE_LABELS.other;
+    return SPACE_LABELS[space.space_type] || "Your space";
+}
+
+export function customerStatus(space) {
+    return CUSTOMER_STATUS[(space.status || "new").toLowerCase()] || IN_REVIEW;
+}
 
 function photoSrc(url) {
     if (!url) return null;
@@ -149,7 +175,7 @@ export default function Account() {
                                             ? space.photos[0]
                                             : space.photos?.[0]?.url
                                     );
-                                const status = space.status || "new";
+                                const status = customerStatus(space);
                                 return (
                                     <article
                                         key={space.id}
@@ -171,15 +197,19 @@ export default function Account() {
                                         </div>
                                         <div className="p-5">
                                             <div className="flex items-start justify-between gap-3">
-                                                <h3 className="font-display text-xl font-medium text-slate-900">
-                                                    {SPACE_LABELS[space.space_type] || space.space_type}
+                                                <h3
+                                                    className="font-display text-xl font-medium text-slate-900"
+                                                    data-testid={`space-title-${space.id}`}
+                                                >
+                                                    {spaceTitle(space)}
                                                 </h3>
                                                 <span
-                                                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                                                        STATUS_STYLES[status] || STATUS_STYLES.new
+                                                    className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                                                        STATUS_STYLES[status.key]
                                                     }`}
+                                                    data-testid={`space-status-${space.id}`}
                                                 >
-                                                    {status.replace("_", " ")}
+                                                    {status.label}
                                                 </span>
                                             </div>
                                             <p className="mt-2 text-sm text-slate-600">
@@ -189,9 +219,7 @@ export default function Account() {
                                                     : ""}
                                             </p>
                                             <p className="mt-3 text-sm text-slate-500">
-                                                {space.email_sent
-                                                    ? "Design Plan emailed to you."
-                                                    : "We'll email the PDF when it's ready."}
+                                                {space.email_sent ? DELIVERED.note : status.note}
                                             </p>
                                         </div>
                                     </article>

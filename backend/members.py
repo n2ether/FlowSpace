@@ -50,8 +50,64 @@ def public_member(doc: Dict[str, Any], usage: Optional[Dict[str, Any]] = None) -
     return out
 
 
+SPACE_TITLES = {
+    "closet": "Closet",
+    "garage": "Garage",
+    "laundry_room": "Laundry room",
+    "laundry": "Laundry room",
+    "pantry": "Pantry",
+    "mudroom": "Mudroom",
+    "storage": "Storage area",
+    "kids_room": "Kids' room",
+    "nursery": "Nursery",
+    "home_office": "Home office",
+    "living_room": "Living room",
+    "bedroom": "Bedroom",
+}
+
+# Customer-facing status. Raw lead statuses (including legacy "error") and
+# automation errors are admin-only.
+IN_PROGRESS = ("in_progress", "In progress", "We're preparing your Design Plan.")
+IN_REVIEW = (
+    "in_review",
+    "In review",
+    "Our beta team reviews every plan before it's sent.",
+)
+DELIVERED = ("delivered", "Delivered", "Design Plan emailed to you.")
+CUSTOMER_STATUS = {
+    "new": IN_PROGRESS,
+    "paid": IN_PROGRESS,
+    "processing": IN_PROGRESS,
+    "review": IN_REVIEW,
+    "incomplete": IN_REVIEW,
+    "pdf_ready": IN_REVIEW,
+    "error": IN_REVIEW,
+    "delivered": DELIVERED,
+}
+
+
+def space_title(lead: Dict[str, Any]) -> str:
+    """The space's name as the customer chose it: room type label or their 'Other' name."""
+    intake = lead.get("intake") if isinstance(lead.get("intake"), dict) else {}
+    space_type = str(intake.get("space_type") or lead.get("space_type") or "").strip().lower()
+    if space_type == "other":
+        fact_space = (lead.get("fact_sheet") or {}).get("space") if isinstance(lead.get("fact_sheet"), dict) else None
+        custom = str(intake.get("other_label") or (fact_space or {}).get("label") or "").strip()
+        return custom or "Other space"
+    if space_type in SPACE_TITLES:
+        return SPACE_TITLES[space_type]
+    return space_type.replace("_", " ").capitalize() or "Your space"
+
+
+def customer_status(status: Optional[str]) -> Dict[str, str]:
+    code, label, note = CUSTOMER_STATUS.get(str(status or "new").strip().lower(), IN_REVIEW)
+    return {"status": code, "status_label": label, "status_note": note}
+
+
 def public_space(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     out = {k: lead.get(k) for k in SPACE_PUBLIC_FIELDS}
+    out["title"] = space_title(lead)
+    out.update(customer_status(lead.get("status")))
     if deliverable:
         out["deliverable"] = {
             "has_plan": True,
