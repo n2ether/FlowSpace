@@ -94,7 +94,7 @@ const Success = () => {
                                 </div>
                             </div>
                             <p className="mt-6 text-xs text-slate-500">
-                                Don't see it? Check your spam folder, or reply to any of our emails to reach us.
+                                Questions? Reply to any of our emails to reach us.
                             </p>
                             <Link to="/account" className="btn-primary mt-8 w-full justify-center" data-testid="success-account">
                                 View my spaces
