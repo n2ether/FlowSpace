@@ -139,6 +139,9 @@ class Lead(BaseModel):
     email_sent: Optional[bool] = None
     email_error: Optional[str] = None
     automation_error: Optional[str] = None
+    automation_failed: Optional[bool] = None
+    automation_failed_at: Optional[str] = None
+    package_status: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

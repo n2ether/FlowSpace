@@ -428,7 +428,7 @@ async def run_automation(
 
     await db.leads.update_one(
         {"id": lead_id},
-        {"$set": {"status": "processing", "updated_at": _iso(datetime.now(timezone.utc))}},
+        {"$set": {"status": "processing", "automation_failed": False, "updated_at": _iso(datetime.now(timezone.utc))}},
     )
 
     try:
@@ -826,8 +826,22 @@ async def run_automation(
 
     except Exception as e:
         logger.exception("[automation] Pipeline failed for lead %s: %s", lead_id, e)
+        # Held for admin review/retry. automation_error and automation_failed_at
+        # are admin-only; customers only ever see "In review".
+        now = _iso(datetime.now(timezone.utc))
         await db.leads.update_one(
             {"id": lead_id},
-            {"$set": {"status": "error", "automation_error": str(e), "updated_at": _iso(datetime.now(timezone.utc))}},
+            {
+                "$set": {
+                    "status": "review",
+                    "package_status": "review",
+                    "email_sent": False,
+                    "automation_failed": True,
+                    "automation_error": str(e) or e.__class__.__name__,
+                    "automation_failed_at": now,
+                    "automation_note": "Generation failed. Held for review. Retry automation from the admin.",
+                    "updated_at": now,
+                }
+            },
         )
         return False
