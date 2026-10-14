@@ -71,6 +71,8 @@ def _from_record_item(item: Dict[str, Any]) -> Dict[str, str]:
         "retailer": retailer,
         "link_type": link_type,
         "label": label,
+        # A product page someone opened and matched to the item; search rows are never tested.
+        "verified": bool(item.get("verified")) and link_type == "product",
     }
 
 
@@ -149,6 +151,7 @@ def deliverable_links(deliverable: Dict[str, Any]) -> List[Dict[str, str]]:
                 "retailer": retailer,
                 "link_type": link_type,
                 "label": label,
+                "verified": bool(link.get("verified")) and link_type == "product",
             }
         )
     return provided

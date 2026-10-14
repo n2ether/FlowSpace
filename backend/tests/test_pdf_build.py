@@ -113,7 +113,7 @@ def test_pdf_matches_template_sections_without_fake_dimensions():
     assert "shopping list" in low
     assert "illustrative reference total" in low
     assert "$150" in text
-    assert "The FlowSpace Design Team" in text
+    assert "FlowSpace Design System" in text
 
     # The long sections moved to the internal record.
     assert "step by step" not in low

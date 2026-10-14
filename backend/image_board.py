@@ -34,7 +34,7 @@ from blueprint_consistency import (
     reference_total_line,
     safety_guidance,
 )
-from copy_shape import complete_clip, heading
+from copy_shape import complete_clip, heading, whole_title
 from design_plan_standards import (
     BOARD_WORDS,
     BRAND_NAME,
@@ -620,8 +620,8 @@ def _nursery_moves(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> List[Di
 
 
 def _move_title(text: str, index: int) -> str:
-    """Short label taken from the sentence itself, so the title matches the body."""
-    title = heading(text, max_words=3).upper()
+    """A whole title taken from the sentence, never cut off mid-phrase."""
+    title = whole_title(text, max_words=6).upper()
     return title or f"CHANGE {index + 1}"
 
 
@@ -646,15 +646,9 @@ def _roadmap(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None)
         if not _CLIMATE_CUES.search(blob):
             steps[1] = NURSERY_ROADMAP_NO_CLIMATE
         return [{"title": title, "body": body} for title, body in steps]
-    layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
-    instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
-    steps = [_clean(str(x)) for x in (instruction.get("do_this_week") or deliverable.get("action_plan") or []) if _clean(str(x))]
-    while len(steps) < 3:
-        steps.append(DEFAULT_ROADMAP[len(steps)])
-    return [
-        {"title": _sentence_case(heading(steps[i], max_words=3)) or f"Step {i + 1}", "body": complete_clip(steps[i], BOARD_WORDS["roadmap"])}
-        for i in range(3)
-    ]
+    from design_plan_standards import GENERAL_ROADMAP
+
+    return [{"title": title, "body": body} for title, body, _detail in GENERAL_ROADMAP]
 
 
 _GREETING = re.compile(r"^(?:welcome|hi|hello|hey|dear)\b", re.I)
@@ -774,13 +768,9 @@ def _kept_items(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any],
         if themed:
             kept.append("Space-themed art")
         return kept[:4]
-    for part in re.split(r",|;|\band\b|\n", str(lead.get("must_stay") or "")):
-        item = _clean(part).strip(".")
-        if item and len(item.split()) <= 4:
-            kept.append(item[:1].upper() + item[1:])
-        if len(kept) >= 4:
-            break
-    return kept[:4]
+    from package_facts import what_stays_chips
+
+    return what_stays_chips(doc)
 
 
 def _short_item_name(item: Dict[str, Any]) -> str:
@@ -993,8 +983,20 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
     hero = slots[0] if slots else None
     thumbs = slots[1:4]
     title = customer_project_title(lead, doc) or f"{_possessive(_first_name(lead))} {space_label(lead.get('space_type'))}"
-    products = _products(doc)
-    total = doc.get("budget_display") or "—"
+    from package_facts import package_facts
+
+    facts = package_facts(lead, deliverable, prepared=doc)
+    products = [
+        {
+            "name": row["name"],
+            "short": row["short"],
+            "price": row["price"],
+            "subtotal": row["subtotal"],
+            "icon": _item_kind(row["name"]),
+        }
+        for row in [*facts["functional"], *facts["decorative"]]
+    ]
+    total = facts["total_display"] or doc.get("budget_display") or "—"
     released = is_released(deliverable)
     return {
         "deliverable": doc,
@@ -1014,6 +1016,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "palette": _palette(lead, doc),
         "palette_blurb": PALETTE_BLURB_THEMED if themed else PALETTE_BLURB,
         "kept": _kept_items(lead, doc, flow, themed),
+        "what_stays": facts["what_stays"],
         "products": products,
         "snapshot": _snapshot(products, total),
         "roadmap": _roadmap(doc, lead),
@@ -1036,7 +1039,9 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "theme_line": "PLANETS · MOON · ROCKETS · ASTRONAUTS" if themed else "",
         "hero_before_overlay": False,
         "review_pill": "" if released else REVIEW_PILL,
-        "review_note": () if released else REVIEW_NOTE,
+        "review_note": () if released else (*REVIEW_NOTE, facts["version_label"]),
+        "version_label": "" if released else facts["version_label"],
+        "total_note": facts["total_note"],
         "footer_left": TAGLINE.upper(),
         "footer_right": (DESIGN_PLAN_FOOTER if released else DESIGN_PLAN_FOOTER_REVIEW).upper(),
         "draws_room_flow": False,
@@ -1096,7 +1101,8 @@ def _shop_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
     note = pen.fit(SHOPPING_DISCLAIMER, "regular", 16, width - 48, 2)
     items = spec["snapshot"]["items"]
     more = pen.fit(spec["snapshot"]["more_line"], "regular", 15, width - 48 - 36 - 140, 2)
-    total_h = 14 + 16 + 3 + len(more) * 19 + 14
+    extra = pen.fit(spec.get("total_note") or "", "regular", 15, width - 48 - 36 - 140, 2)
+    total_h = 14 + 16 + 3 + (len(more) + len(extra)) * 19 + 14
     return 20 + _label_h() + 8 + len(note) * 23 + 10 + len(items) * 51 + 12 + max(total_h, 66) + 20
 
 
@@ -1118,6 +1124,9 @@ def _palette_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
     blurb = pen.fit(spec["palette_blurb"], "regular", 17, inner, 3)
     chip_names = max([len(_swatch_name_lines(pen, s["name"], inner / 5)) for s in spec["palette"]] or [1])
     h = 20 + _label_h() + 18 + 68 + 10 + chip_names * 19 + 3 + 16 + 14 + len(blurb) * 25.5
+    stays = pen.fit(spec.get("what_stays") or "", "regular", 16, inner, 3)
+    if stays:
+        h += 8 + len(stays) * 22
     kept = _kept_rows(pen, spec["kept"], inner)
     if kept:
         h += 16 + 14 + 16 + 10 + len(kept) * 33 + 8 * (len(kept) - 1)
@@ -1437,6 +1446,9 @@ def _draw_shop(pen: _Pen, spec: Dict[str, Any], box) -> None:
     for line in pen.fit(spec["snapshot"]["more_line"], "regular", 15, tbox[2] - tbox[0] - 36 - 140, 2):
         pen.text(tbox[0] + 18, ty, line, "regular", 15, MUTED)
         ty += 19
+    for line in pen.fit(spec.get("total_note") or "", "regular", 15, tbox[2] - tbox[0] - 36 - 140, 2):
+        pen.text(tbox[0] + 18, ty, line, "regular", 15, MUTED)
+        ty += 19
     total = spec["snapshot"]["total"]
     if total and total not in {"—", "-"}:
         pen.text(tbox[2] - 18, (tbox[1] + tbox[3]) / 2 - 20, total, "semibold", 30, GREEN, align="right")
@@ -1468,6 +1480,12 @@ def _draw_palette(pen: _Pen, spec: Dict[str, Any], box) -> None:
     for line in pen.fit(spec["palette_blurb"], "regular", 17, inner, 3):
         pen.text(x0 + 24, y, line, "regular", 17, BODY)
         y += 25.5
+    stays = pen.fit(spec.get("what_stays") or "", "regular", 16, inner, 3)
+    if stays:
+        y += 8
+        for line in stays:
+            pen.text(x0 + 24, y, line, "regular", 16, BODY)
+            y += 22
     rows = _kept_rows(pen, spec["kept"], inner)
     if not rows:
         return
@@ -1552,6 +1570,7 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
         ZONES_NOTE,
         ROADMAP_NOTE,
         spec.get("palette_blurb") or "",
+        spec.get("what_stays") or "",
         KEPT_LABEL.upper(),
         *[str(item) for item in spec.get("kept") or []],
         (spec.get("why") or {}).get("headline") or "",
@@ -1564,7 +1583,7 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
     for card in spec.get("zone_cards") or []:
         parts += [card["number"], card["title"], card.get("object", "").upper(), card["job"]]
     if snapshot.get("items"):
-        parts += [SHOPPING_DISCLAIMER, SNAPSHOT_TOTAL_LABEL.upper(), snapshot.get("more_line") or "", str(snapshot.get("total") or "")]
+        parts += [SHOPPING_DISCLAIMER, SNAPSHOT_TOTAL_LABEL.upper(), snapshot.get("more_line") or "", spec.get("total_note") or "", str(snapshot.get("total") or "")]
         for row in snapshot["items"]:
             parts += [str(row.get("short") or ""), str(row.get("price") or "")]
     for swatch in spec.get("palette") or []:

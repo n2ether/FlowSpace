@@ -22,9 +22,9 @@ import httpx
 
 from image_board import build_image_board
 from room_flow import build_zone_map, outline_caption
-from blueprint_consistency import internal_record, project_story_line
+from blueprint_consistency import internal_record, prepare_deliverable, project_story_line
 from blueprint_presentation import build_presentation
-from design_plan_standards import is_released
+from design_plan_standards import is_released, package_version, version_tag
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
@@ -229,6 +229,8 @@ class ShoppingItem(BaseModel):
     name: str
     qty: float = 1
     price: float = 0
+    # "functional" or "decorative" (optional styling). Empty means classify by name.
+    priority: Optional[str] = None
 
 
 class Zone(BaseModel):
@@ -270,6 +272,8 @@ class Deliverable(BaseModel):
     source_afters: List[Dict[str, Any]] = []
     non_room_uploads: List[Dict[str, Any]] = []
     package_status: Optional[str] = None
+    # Missing means V1. Regeneration writes the next version; automation does not bump it.
+    package_version: Optional[int] = None
     # Reviewer sign-off on the Design Plan. Until set, every surface reads DRAFT / REVIEW.
     design_plan_approved: bool = False
     contact_sheet_url: Optional[str] = None
@@ -1037,9 +1041,10 @@ def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, A
     while "__" in stem:
         stem = stem.replace("__", "_")
     stem = stem.strip("_") or "Design_Plan"
-    board = f"FlowSpace_{stem}_Design_Plan_{safe_name}.png"
-    pdf = f"FlowSpace_{stem}_Companion_Guide_{safe_name}.pdf"
-    package = f"FlowSpace_{stem}_Design_Plan_{safe_name}.zip"
+    tag = version_tag(package_version(deliverable))
+    board = f"FlowSpace_{stem}_Design_Plan_{safe_name}_{tag}.png"
+    pdf = f"FlowSpace_{stem}_Companion_Guide_{safe_name}_{tag}.pdf"
+    package = f"FlowSpace_{stem}_Design_Plan_{safe_name}_{tag}.zip"
     return board, pdf, package
 
 
@@ -1570,6 +1575,74 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
         },
     )
     return {"sent": True, "final": True, "package_status": "final", "status": "delivered"}
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/regenerate")
+async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
+    """Write the next held version of the stored plan and re-apply package rules.
+
+    Does not email, and does not mark the package final or approved.
+    """
+    from package_facts import next_release
+
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not stored:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
+    release = next_release(stored)
+    prepared = prepare_deliverable(lead, stored)
+    update = {key: value for key, value in prepared.items() if key != "_id"}
+    for key in (
+        "source_afters",
+        "front_view_url",
+        "floor_plan_url",
+        "view_1_url",
+        "view_2_url",
+        "view_3_url",
+        "contact_sheet_url",
+        "non_room_uploads",
+        "shopping_links",
+    ):
+        if key in stored and key not in update:
+            update[key] = stored[key]
+    now = _iso(datetime.now(timezone.utc))
+    update.update(
+        {
+            "lead_id": lead_id,
+            "package_version": release["package_version"],
+            "package_status": release["package_status"],
+            "design_plan_approved": False,
+            "updated_at": now,
+        }
+    )
+    update.pop("emailed", None)
+    await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
+    await db.leads.update_one(
+        {"id": lead_id},
+        {
+            "$set": {
+                "status": release["package_status"],
+                "package_status": release["package_status"],
+                "email_sent": False,
+                "updated_at": now,
+            }
+        },
+    )
+    base = f"/api/admin/leads/{lead_id}/deliverable"
+    return {
+        "lead_id": lead_id,
+        "package_version": release["package_version"],
+        "version_label": release["version_label"],
+        "package_status": release["package_status"],
+        "emailed": False,
+        "pieces": {
+            "board": f"{base}/board",
+            "zone_map": f"{base}/zone-map",
+            "pdf": f"{base}/pdf",
+        },
+    }
 
 
 # ──────────────────────────── Stripe ─────────────────────────────
