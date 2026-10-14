@@ -91,28 +91,63 @@ def _outside_parens(text: str, index: int) -> bool:
     return text[:index].count("(") <= text[:index].count(")")
 
 
+def _clause_options(text: str) -> List[str]:
+    """Whole sentences, then whole clauses. Nothing here ends mid-sentence."""
+    options: List[str] = []
+    for match in _SENTENCE_END.finditer(text):
+        options.append(text[: match.end()])
+    for match in _CLAUSE.finditer(text):
+        if not _outside_parens(text, match.start()):
+            continue
+        kept = _strip_dangling(text[: match.start()].split())
+        if len(kept) >= 3:
+            options.append(" ".join(kept).rstrip(".,;:—– ") + ".")
+    unique: List[str] = []
+    for option in options:
+        if option and option not in unique and not ends_dangling(option):
+            unique.append(option)
+    return unique
+
+
+def shorten_whole(text: str, fits) -> str:
+    """The longest whole sentence or clause that ``fits``.
+
+    A fragment such as "warmth and tie." is never returned. When no shorter
+    unit fits, the first whole sentence (or the full text) is returned so the
+    caller can wrap it or set the type size before drawing.
+    """
+    text = _clean(text)
+    if not text or fits(text):
+        return text
+    options = sorted(_clause_options(text), key=len, reverse=True)
+    for option in options:
+        if fits(option):
+            return option
+    if options:
+        return options[-1]
+    return text
+
+
 def complete_clip(text: str, max_words: int) -> str:
-    """At most ``max_words`` words, ending on a whole sentence or clause. Always ends with a period."""
+    """At most ``max_words`` words when a whole sentence or clause fits there.
+
+    Otherwise the first whole sentence is kept, even if it is longer, instead of
+    a mid-sentence fragment with a period glued on.
+    """
     text = _clean(text)
     if not text:
         return ""
     words = text.split()
     if len(words) <= max_words:
         return text
-    head = " ".join(words[:max_words])
-    for match in reversed(list(_SENTENCE_END.finditer(head))):
-        if match.start() >= len(head) * 0.3:
-            return head[: match.end()]
-    for match in reversed(list(_CLAUSE.finditer(head))):
-        if match.start() >= len(head) * 0.4 and _outside_parens(head, match.start()):
-            kept = _strip_dangling(head[: match.start()].split())
-            if kept:
-                return " ".join(kept).rstrip(".,;:—– ") + "."
+
+    def fits(value: str) -> bool:
+        return len(value.split()) <= max_words
+
+    shortened = shorten_whole(text, fits)
+    if shortened != text and fits(shortened):
+        return shortened
     first = _SENTENCE_END.search(text)
-    if first and len(text[: first.end()].split()) <= max_words + 4:
+    if first:
         return text[: first.end()]
-    kept = _strip_dangling(head.split())
-    joined = " ".join(kept).rstrip(".,;:—–( ")
-    if joined.count("(") > joined.count(")"):
-        joined = joined[: joined.rfind("(")].rstrip(" ,")
-    return (joined or head).rstrip(".,;:—– ") + "."
+    return text

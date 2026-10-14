@@ -112,7 +112,11 @@ def apply_item_classes(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[str]:
 
 # ──────────────────────────── Frame and basket sizes ─────────────────────────────
 
-_SIZED_PIECE = re.compile(r"\b(?:picture\s+)?(?:frames?|baskets?|bins?)\b", re.I)
+# Any of these product words plus a size is an invented dimension until the room is measured.
+_SIZED_PIECE = re.compile(
+    r"\b(?:picture\s+)?(?:frames?|baskets?|bins?|prints?|trays?|pillows?|covers?|cushions?|mats?|rugs?)\b",
+    re.I,
+)
 _UNIT = r"(?:\s?(?:in(?:\.|ches)?\b|\"|”|cm\b|ft\b\.?|feet\b)|-in\.?)"
 _NUM = r"(?<![\d$.,])\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)?"
 DIMENSION = re.compile(rf"{_NUM}{_UNIT}?(?:\s?(?:×|x|X|by)\s?{_NUM}{_UNIT}?)+|{_NUM}{_UNIT}")
@@ -133,13 +137,18 @@ def has_measurements(lead: Optional[Dict[str, Any]], doc: Optional[Dict[str, Any
 
 
 def strip_dimensions(text: str) -> str:
-    out = DIMENSION.sub(" ", str(text or ""))
+    raw = str(text or "")
+    out = DIMENSION.sub(" ", raw)
+    removed = _clean(out) != _clean(raw)
     out = re.sub(r"\(\s*[,;]?\s*", "(", out)
     out = re.sub(r"\s*[,;]?\s*\)", ")", out)
     out = re.sub(r"\(\s*\)", "", out)
     out = re.sub(r"\s+([,.;:)])", r"\1", out)
     out = re.sub(r",\s*,", ",", out)
     out = re.sub(r"\b(an?)\s+(?=an?\b)", "", out)
+    if removed:
+        # "16x20 inches each" — "each" only qualified the size that was removed.
+        out = re.sub(r"\s+\beach\b(?=\s*[.!?]?$)", "", out, flags=re.I)
     return _clean(out).strip(" ,;")
 
 
@@ -152,7 +161,7 @@ def _measure_sentence(sentence: str) -> str:
 
 
 def measure_text(text: str) -> str:
-    """Copy with frame and basket sizes removed and "measure before buying" in their place."""
+    """Copy with invented product sizes removed and "measure before buying" in their place."""
     sentences = re.findall(r"[^.!?]+(?:[.!?](?!\d)|$)", str(text or ""))
     if not sentences:
         return str(text or "")
@@ -165,7 +174,11 @@ def apply_measurement_rule(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[st
         return []
     changed = False
     for item in doc.get("shopping_list") or []:
-        if not isinstance(item, dict) or not _SIZED_PIECE.search(str(item.get("name") or "")):
+        if not isinstance(item, dict):
+            continue
+        named = " ".join(str(item.get(key) or "") for key in ("name", "short_name"))
+        # Any size on a shopping line is invented until the room is measured.
+        if not DIMENSION.search(named):
             continue
         for key in ("name", "short_name"):
             if item.get(key):
@@ -193,7 +206,7 @@ def apply_measurement_rule(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[st
     instruction = layers.get("customer_instruction") if isinstance(layers, dict) else None
     if isinstance(instruction, dict) and instruction.get("do_this_week"):
         instruction["do_this_week"] = [measure_text(str(x)) for x in instruction["do_this_week"]]
-    return ["frame and basket sizes need measurements; the plan says measure before buying"] if changed else []
+    return ["product sizes need measurements; the plan says measure before buying"] if changed else []
 
 
 def apply_package_rules(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[str]:
