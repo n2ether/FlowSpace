@@ -113,9 +113,10 @@ def _board_text(monkeypatch, lead, deliverable, images=None):
 
 def test_version_labels_and_next_release_stay_held():
     assert package_version({}) == 1
-    assert version_label(1) == "V1"
+    assert version_label(1) == "Versão 1 para sua análise"
     assert version_label(2) == "Versão 2 para sua análise"
-    assert version_label(3) == "V3"
+    assert version_label(3) == "Versão 3 para sua análise"
+    assert "V3" not in version_label(3)
     held = next_release({"package_status": "review"})
     assert held == {
         "package_version": 2,
@@ -124,13 +125,35 @@ def test_version_labels_and_next_release_stay_held():
         "design_plan_approved": False,
         "emailed": False,
     }
+    # A final package from before sent_for_review existed counts as already emailed.
     bumped = next_release({"package_status": "final", "package_version": 2, "design_plan_approved": True})
     assert bumped["package_version"] == 3
-    assert bumped["version_label"] == "V3"
+    assert bumped["version_label"] == "Versão 3 para sua análise"
+    assert bumped["sent_for_review"] == 2
     assert bumped["package_status"] == "review"
     assert bumped["design_plan_approved"] is False
     assert bumped["emailed"] is False
     assert next_release({"package_status": "incomplete"})["package_status"] == "incomplete"
+
+
+def test_version_counts_only_copies_sent_for_review():
+    """Regenerating an unsent copy keeps its number. This lead has not been sent V2."""
+    unsent = next_release({"package_status": "review", "package_version": 2})
+    assert unsent["package_version"] == 2
+    assert unsent["version_label"] == "Versão 2 para sua análise"
+    assert "sent_for_review" not in unsent
+    # A mistaken bump to 3, with nothing emailed, collapses back to Versão 2.
+    collapsed = next_release({"package_status": "review", "package_version": 3})
+    assert collapsed["package_version"] == 2
+    assert collapsed["version_label"] == "Versão 2 para sua análise"
+    sent = next_release({"package_status": "review", "package_version": 2, "sent_for_review": 2})
+    assert sent["package_version"] == 3
+    assert sent["version_label"] == "Versão 3 para sua análise"
+    assert sent["sent_for_review"] == 2
+    kept = next_release({"package_status": "review", "package_version": 3, "sent_for_review": 2})
+    assert kept["package_version"] == 3
+    assert kept["version_label"] == "Versão 3 para sua análise"
+    assert kept["emailed"] is False
 
 
 def test_playpen_is_an_item_inside_the_play_zone():
@@ -304,3 +327,113 @@ def test_regenerate_endpoint_bumps_version_and_does_not_email(monkeypatch):
     assert lead["email_sent"] is False
     assert lead["status"] == "review"
     assert lead["package_status"] != "final"
+    # Nothing has been emailed, so a second regenerate keeps Versão 2.
+    again = asyncio.run(server.regenerate_package(LEAD_ID, True))
+    assert again["package_version"] == 2
+    assert again["version_label"] == "Versão 2 para sua análise"
+    assert db.deliverables.docs[LEAD_ID]["package_version"] == 2
+    assert "sent_for_review" not in db.deliverables.docs[LEAD_ID]
+
+
+def test_regenerate_keeps_versao_2_until_a_copy_is_sent(monkeypatch):
+    """Lead 4a2f3284 has not been sent V2, even if a regenerate already stored 3."""
+    monkeypatch.setenv("MONGO_URL", "mongodb://localhost:27017")
+    monkeypatch.setenv("DB_NAME", "flowspace_test")
+    import server
+
+    class _Coll:
+        def __init__(self):
+            self.docs = {}
+
+        async def find_one(self, query, proj=None):
+            key = query.get("id") or query.get("lead_id")
+            doc = self.docs.get(key)
+            return dict(doc) if doc else None
+
+        async def update_one(self, query, update, upsert=False):
+            key = query.get("id") or query.get("lead_id")
+            doc = self.docs.setdefault(key, {})
+            if "id" in query:
+                doc.setdefault("id", query["id"])
+            if "lead_id" in query:
+                doc.setdefault("lead_id", query["lead_id"])
+            doc.update(update.get("$set") or {})
+
+    class _DB:
+        def __init__(self):
+            self.leads = _Coll()
+            self.deliverables = _Coll()
+
+    db = _DB()
+    db.leads.docs[LEAD_ID] = _lead()
+    db.deliverables.docs[LEAD_ID] = _deliverable(package_version=3)
+    monkeypatch.setattr(server, "db", db)
+    monkeypatch.setattr(server, "send_blueprint", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not email")))
+    monkeypatch.setattr(server, "send_draft_package", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not email")))
+
+    result = asyncio.run(server.regenerate_package(LEAD_ID, True))
+    assert result["package_version"] == 2
+    assert result["version_label"] == "Versão 2 para sua análise"
+    assert result["emailed"] is False
+    assert db.deliverables.docs[LEAD_ID]["package_version"] == 2
+    assert "sent_for_review" not in db.deliverables.docs[LEAD_ID]
+
+    db.deliverables.docs[LEAD_ID]["sent_for_review"] = 2
+    db.deliverables.docs[LEAD_ID]["package_version"] = 2
+    after_send = asyncio.run(server.regenerate_package(LEAD_ID, True))
+    assert after_send["package_version"] == 3
+    assert after_send["version_label"] == "Versão 3 para sua análise"
+    assert db.deliverables.docs[LEAD_ID]["sent_for_review"] == 2
+    stayed = asyncio.run(server.regenerate_package(LEAD_ID, True))
+    assert stayed["package_version"] == 3
+    assert stayed["version_label"] == "Versão 3 para sua análise"
+
+
+def test_send_records_the_emailed_version_without_bumping_it(monkeypatch):
+    monkeypatch.setenv("MONGO_URL", "mongodb://localhost:27017")
+    monkeypatch.setenv("DB_NAME", "flowspace_test")
+    import server
+
+    lead = _lead()
+    deliverable = _deliverable(package_version=2, package_status="review")
+    saved = {}
+
+    class _Coll:
+        async def update_one(self, query, update, upsert=False):
+            saved.update(update.get("$set") or {})
+
+    class _DB:
+        leads = _Coll()
+        deliverables = _Coll()
+
+    async def _inputs(_lead_id, _request):
+        return lead, deliverable, {}
+
+    async def _sent(**_kwargs):
+        return True, None
+
+    monkeypatch.setattr(server, "db", _DB())
+    monkeypatch.setattr(server, "_blueprint_render_inputs", _inputs)
+    monkeypatch.setattr(server, "build_pdf", lambda **_kw: b"%PDF")
+    monkeypatch.setattr(server, "build_image_board", lambda **_kw: b"png")
+    monkeypatch.setattr(server, "build_zone_map", lambda **_kw: b"png")
+    monkeypatch.setattr(server, "draft_send_block_reason", lambda _d: None)
+    monkeypatch.setattr(server, "final_email_block_reason", lambda _d: None)
+    monkeypatch.setattr(server, "send_draft_package", _sent)
+    monkeypatch.setattr(server, "send_blueprint", _sent)
+
+    class _Request:
+        query_params = {}
+
+    draft = asyncio.run(server.send_draft_package_endpoint(LEAD_ID, _Request(), to=None, _=True))
+    assert draft["sent_for_review"] == 2
+    assert draft["package_version"] == 2
+    assert saved["sent_for_review"] == 2
+    assert "package_version" not in saved
+
+    final = asyncio.run(server.send_final_package(LEAD_ID, _Request(), _=True))
+    assert final["sent_for_review"] == 2
+    assert final["package_version"] == 2
+    assert final["package_status"] == "final"
+    assert saved["sent_for_review"] == 2
+    assert saved["package_status"] == "final"

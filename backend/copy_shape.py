@@ -1,9 +1,11 @@
 """Whole sentences and whole headings for customer copy.
 
 Fitting copy into a card must never cut mid-phrase ("…and secure or.",
-"INSTALL THE."). Clipping prefers a whole sentence, then a whole clause
-outside parentheses, and never ends on an article, conjunction, or
-preposition. Headings never take a period.
+"with calm.", "INSTALL THE."). Shortening stops only at a real sentence
+boundary (.!?), never at a comma, semicolon, colon, or dash inside a phrase,
+and never ends on an article, conjunction, or preposition. A sentence that
+does not fit is kept whole so the caller can wrap it or shrink the type.
+Headings never take a period.
 """
 from __future__ import annotations
 
@@ -19,7 +21,6 @@ FUNCTION_WORDS = frozenset(
 )
 
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
-_CLAUSE = re.compile(r",\s|;\s|:\s|\s[—–]\s")
 
 
 def _clean(text: str) -> str:
@@ -87,52 +88,41 @@ def whole_title(text: str, max_words: int = 5) -> str:
     return " ".join(picked or words[:max_words]).rstrip(".,;:—– ")
 
 
-def _outside_parens(text: str, index: int) -> bool:
-    return text[:index].count("(") <= text[:index].count(")")
-
-
-def _clause_options(text: str) -> List[str]:
-    """Whole sentences, then whole clauses. Nothing here ends mid-sentence."""
-    options: List[str] = []
+def _sentence_prefixes(text: str) -> List[str]:
+    """Text through each sentence end, in order. Commas and dashes are not ends."""
+    prefixes: List[str] = []
     for match in _SENTENCE_END.finditer(text):
-        options.append(text[: match.end()])
-    for match in _CLAUSE.finditer(text):
-        if not _outside_parens(text, match.start()):
-            continue
-        kept = _strip_dangling(text[: match.start()].split())
-        if len(kept) >= 3:
-            options.append(" ".join(kept).rstrip(".,;:—– ") + ".")
-    unique: List[str] = []
-    for option in options:
-        if option and option not in unique and not ends_dangling(option):
-            unique.append(option)
-    return unique
+        prefix = text[: match.end()].strip()
+        if prefix and prefix not in prefixes and not ends_dangling(prefix):
+            prefixes.append(prefix)
+    return prefixes
 
 
 def shorten_whole(text: str, fits) -> str:
-    """The longest whole sentence or clause that ``fits``.
+    """The longest leading run of whole sentences that ``fits``.
 
-    A fragment such as "warmth and tie." is never returned. When no shorter
-    unit fits, the first whole sentence (or the full text) is returned so the
-    caller can wrap it or set the type size before drawing.
+    A comma, semicolon, colon, or dash inside a sentence is never a cut, so
+    "with calm, cohesive art" is never shortened to "with calm.". When the
+    first sentence itself does not fit, that sentence (or the full text) is
+    returned so the caller can wrap it or shrink the type.
     """
     text = _clean(text)
     if not text or fits(text):
         return text
-    options = sorted(_clause_options(text), key=len, reverse=True)
-    for option in options:
+    options = _sentence_prefixes(text)
+    for option in reversed(options):
         if fits(option):
             return option
     if options:
-        return options[-1]
+        return options[0]
     return text
 
 
 def complete_clip(text: str, max_words: int) -> str:
-    """At most ``max_words`` words when a whole sentence or clause fits there.
+    """At most ``max_words`` words when whole leading sentences fit there.
 
-    Otherwise the first whole sentence is kept, even if it is longer, instead of
-    a mid-sentence fragment with a period glued on.
+    Otherwise the first whole sentence is kept, even if it is longer. A cut
+    never lands on a comma inside a phrase, and never leaves a dangling modifier.
     """
     text = _clean(text)
     if not text:

@@ -102,12 +102,10 @@ PACKAGE_PIECES: Tuple[Tuple[str, str], ...] = (
 )
 
 FIRST_PACKAGE_VERSION = 1
-# Camila's internal review label for the second version. Review chrome only; customer copy stays English.
-VERSION_LABELS = {2: "Versão 2 para sua análise"}
 
 
 def package_version(deliverable: Optional[Dict[str, Any]]) -> int:
-    """Version of the stored package. A package from before versioning is V1."""
+    """Version of the stored package. A package from before versioning is version 1."""
     try:
         version = int((deliverable or {}).get("package_version") or FIRST_PACKAGE_VERSION)
     except (TypeError, ValueError):
@@ -116,7 +114,11 @@ def package_version(deliverable: Optional[Dict[str, Any]]) -> int:
 
 
 def version_label(version: int) -> str:
-    return VERSION_LABELS.get(int(version), f"V{int(version)}")
+    """Internal review chrome. The same Portuguese sentence for every version.
+
+    Customer copy stays English. File names use :func:`version_tag` instead.
+    """
+    return f"Versão {int(version)} para sua análise"
 
 
 def version_tag(version: int) -> str:
