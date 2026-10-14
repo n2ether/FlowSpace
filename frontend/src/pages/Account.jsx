@@ -176,10 +176,15 @@ export default function Account() {
                                             : space.photos?.[0]?.url
                                     );
                                 const status = customerStatus(space);
+                                const hasPlan = Boolean(space.deliverable?.has_plan);
                                 return (
                                     <article
                                         key={space.id}
-                                        className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                                        className={`relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm ${
+                                            hasPlan
+                                                ? "transition-shadow hover:shadow-md active:bg-stone-50 focus-within:ring-2 focus-within:ring-stone-300"
+                                                : ""
+                                        }`}
                                         data-testid={`space-card-${space.id}`}
                                     >
                                         <div className="h-40 bg-slate-100">
@@ -221,6 +226,17 @@ export default function Account() {
                                             <p className="mt-3 text-sm text-slate-500">
                                                 {space.email_sent ? DELIVERED.note : status.note}
                                             </p>
+                                            {hasPlan && (
+                                                <Link
+                                                    to={`/account/spaces/${encodeURIComponent(space.id)}`}
+                                                    className="fs-btn-warm mt-5 w-full sm:w-auto"
+                                                    aria-label={`Open plan: ${spaceTitle(space)}`}
+                                                    data-testid={`space-open-${space.id}`}
+                                                >
+                                                    Open plan
+                                                    <span className="absolute inset-0" aria-hidden="true" />
+                                                </Link>
+                                            )}
                                         </div>
                                     </article>
                                 );

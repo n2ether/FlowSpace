@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -185,6 +185,70 @@ body {
 .card-hover:hover {
   transform: translateY(-4px);
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+/* My Spaces plan view: Montserrat on warm neutrals, scoped so the rest of the site is unchanged. */
+.fs-editorial {
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f7f3ee;
+  color: #3b342e;
+}
+
+.fs-editorial .fs-title {
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: #2b2520;
+}
+
+.fs-editorial .fs-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #8a7a6a;
+}
+
+.fs-editorial .fs-muted {
+  color: #6f645a;
+}
+
+.fs-editorial .fs-panel {
+  background: #fffdfa;
+  border: 1px solid #e8dfd4;
+  border-radius: 1.25rem;
+}
+
+.fs-btn-warm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0.85rem 1.5rem;
+  border-radius: 9999px;
+  background: #3b342e;
+  color: #fffdfa;
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.fs-btn-warm:hover {
+  background: #2b2520;
+}
+
+.fs-btn-warm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fs-btn-warm:focus-visible {
+  outline: 2px solid #b59f86;
+  outline-offset: 3px;
 }
 
 /* logo wordmark gradient */

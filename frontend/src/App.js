@@ -10,6 +10,7 @@ import Success from "./pages/Success";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Account from "./pages/Account";
+import AccountSpace from "./pages/AccountSpace";
 import AdminLogin from "./pages/AdminLogin";
 import Admin from "./pages/Admin";
 import AdminDeliverable from "./pages/AdminDeliverable";
@@ -27,6 +28,7 @@ function App() {
                         <Route path="/login" element={<Login />} />
                         <Route path="/signup" element={<Signup />} />
                         <Route path="/account" element={<Account />} />
+                        <Route path="/account/spaces/:leadId" element={<AccountSpace />} />
                         <Route path="/admin/login" element={<AdminLogin />} />
                         <Route path="/admin" element={<Admin />} />
                         <Route path="/admin/leads/:leadId/design" element={<AdminDeliverable />} />

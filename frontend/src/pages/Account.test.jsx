@@ -68,3 +68,18 @@ describe("My Spaces", () => {
         expect(spaceTitle({ space_type: "laundry_room" })).toBe("Laundry room");
     });
 });
+
+describe("My Spaces: open plan", () => {
+    it("adds an Open plan link that covers the card when a plan exists", async () => {
+        renderAccount([
+            { id: "s4", title: "Closet", space_type: "closet", status: "in_review", deliverable: { has_plan: true } },
+            { id: "s5", title: "Garage", space_type: "garage", status: "in_review", deliverable: { has_plan: false } },
+        ]);
+        const open = await screen.findByTestId("space-open-s4");
+        expect(open).toHaveTextContent("Open plan");
+        expect(open).toHaveAttribute("href", "/account/spaces/s4");
+        expect(open.querySelector("span.absolute.inset-0")).not.toBeNull();
+        expect(screen.getByTestId("space-card-s4")).toHaveClass("relative");
+        expect(screen.queryByTestId("space-open-s5")).not.toBeInTheDocument();
+    });
+});
