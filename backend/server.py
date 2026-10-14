@@ -55,6 +55,7 @@ from members import (
     is_free_package,
     new_member_doc,
     public_member,
+    public_plan,
     public_space,
     usage_for_member,
 )
@@ -671,6 +672,24 @@ async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
     }
 
 
+async def _member_plan_or_404(lead_id: str, member: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The member's own lead and its deliverable. Someone else's lead reads as missing, not forbidden."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead or not member.get("id") or lead.get("member_id") != member["id"]:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return lead, d
+
+
+@api_router.get("/me/spaces/{lead_id}/plan")
+async def my_space_plan(lead_id: str, member: Dict[str, Any] = Depends(require_member)):
+    """Read-only plan for the owner. Never emails anyone or changes the lead status."""
+    lead, d = await _member_plan_or_404(lead_id, member)
+    return public_plan(lead, d)
+
+
 def check_lead_intake(data: Dict[str, Any]) -> None:
     """Reject over-cap photos and, for the beta intake, any answer the browser should have caught."""
     pkg = PACKAGES.get(data.get("package_id") or "free") or PACKAGES["free"]
@@ -1077,6 +1096,32 @@ async def render_deliverable_board(lead_id: str, request: Request, _: bool = Dep
         content=png_bytes,
         media_type="image/png",
         headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@api_router.get("/me/spaces/{lead_id}/board")
+async def my_space_board(lead_id: str, request: Request, member: Dict[str, Any] = Depends(require_member)):
+    await _member_plan_or_404(lead_id, member)
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
+    filename, _pdf_name, _package = _blueprint_filenames(lead, d)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "private, no-store"},
+    )
+
+
+@api_router.get("/me/spaces/{lead_id}/pdf")
+async def my_space_pdf(lead_id: str, request: Request, member: Dict[str, Any] = Depends(require_member)):
+    await _member_plan_or_404(lead_id, member)
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
+    _board_name, filename, _package = _blueprint_filenames(lead, d)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
     )
 
 

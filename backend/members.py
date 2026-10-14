@@ -119,6 +119,54 @@ def public_space(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = N
     return out
 
 
+def _clean_list(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(v).strip() for v in values if isinstance(v, str) and v.strip()]
+
+
+def public_plan(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, Any]:
+    """Read-only plan a member sees for their own space.
+
+    Built from an allowlist so admin fields (automation_error, notes,
+    render_qa, contact_sheet_*) never reach the customer.
+    """
+    zones = []
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict) and str(zone.get("title") or "").strip():
+            zones.append({"title": str(zone["title"]).strip(), "desc": str(zone.get("desc") or "").strip()})
+    shopping = []
+    for item in deliverable.get("shopping_list") or []:
+        if isinstance(item, dict) and str(item.get("name") or "").strip():
+            shopping.append(
+                {
+                    "name": str(item["name"]).strip(),
+                    "qty": item.get("qty") if isinstance(item.get("qty"), (int, float)) else 1,
+                    "price": item.get("price") if isinstance(item.get("price"), (int, float)) else 0,
+                }
+            )
+    afters = []
+    for entry in deliverable.get("source_afters") or []:
+        if not isinstance(entry, dict):
+            continue
+        url = str(entry.get("after_url") or "").strip()
+        if url and str(entry.get("status") or "").strip().lower() == "approved":
+            afters.append({"after_url": url})
+    summary = deliverable.get("summary")
+    return {
+        "lead_id": lead.get("id"),
+        "title": space_title(lead),
+        **customer_status(lead.get("status")),
+        "approved": bool(deliverable.get("design_plan_approved")),
+        "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
+        "strategy": _clean_list(deliverable.get("strategy")),
+        "zones": zones,
+        "shopping_list": shopping,
+        "afters": afters,
+        "updated_at": deliverable.get("updated_at"),
+    }
+
+
 def usage_payload(free_used: int, paid_count: int = 0) -> Dict[str, Any]:
     used = int(free_used)
     return {

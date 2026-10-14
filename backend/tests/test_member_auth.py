@@ -386,3 +386,149 @@ class TestLeadAccountAndQuota:
         c.cookies.clear()
         unauth = c.get("/api/me/spaces")
         assert unauth.status_code == 401
+
+
+# ──────────────────────────── My Spaces read-only plan ─────────────────────────────
+def _seed_plan(db, member_id, lead_id="lead-review-1"):
+    db.leads.docs.append(
+        {
+            "id": lead_id,
+            "name": "Ada Lovelace",
+            "email": "ada@example.com",
+            "space_type": "closet",
+            "package_id": "free",
+            "member_id": member_id,
+            "status": "review",
+            "automation_error": "secret pipeline trace",
+            "photos": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    db.deliverables.docs.append(
+        {
+            "lead_id": lead_id,
+            "summary": "A calm closet with a clear landing zone.",
+            "strategy": ["Hang daily wear at eye level", ""],
+            "zones": [{"title": "Daily wear", "desc": "Front rail", "internal": "x"}],
+            "shopping_list": [{"name": "Slim hangers", "qty": 30, "price": 24.0, "sku": "admin"}],
+            "notes": "admin only note",
+            "render_qa": {"score": 0.4},
+            "contact_sheet_url": "/api/uploads/photo/admin",
+            "automation_error": "boom",
+            "source_afters": [
+                {"label": "SOURCE_01", "status": "approved", "after_url": "/api/uploads/photo/after1", "source_url": "/api/uploads/photo/src1"},
+                {"label": "SOURCE_02", "status": "failed", "after_url": "/api/uploads/photo/after2"},
+                {"label": "SOURCE_03", "status": "approved", "after_url": ""},
+            ],
+            "design_plan_approved": False,
+        }
+    )
+
+
+@pytest.fixture
+def no_email(monkeypatch):
+    """Any outbound email from these routes is a failure."""
+    import automation
+    import email_service
+    import resend
+    import server
+
+    calls = []
+
+    def record(name):
+        async def fake(*args, **kwargs):
+            calls.append(name)
+            return True, None
+
+        return fake
+
+    for name in ("send_blueprint", "send_contact_sheet", "send_draft_package"):
+        monkeypatch.setattr(server, name, record(name))
+        monkeypatch.setattr(email_service, name, record(name))
+    monkeypatch.setattr(automation, "send_blueprint", record("automation.send_blueprint"))
+    monkeypatch.setattr(resend.Emails, "send", lambda *a, **k: calls.append("resend.Emails.send"))
+    return calls
+
+
+class TestMySpacePlan:
+    def _two_members(self, c):
+        ada = _signup(c, email="ada@example.com").json()
+        grace = _signup(c, email="grace@example.com", name="Grace").json()
+        c.cookies.clear()
+        return ada, grace
+
+    def test_owner_reads_plan_without_admin_fields(self, client, no_email):
+        c, db = client
+        ada, _ = self._two_members(c)
+        _seed_plan(db, ada["member"]["id"])
+        r = c.get("/api/me/spaces/lead-review-1/plan", headers={"Authorization": f"Bearer {ada['token']}"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["summary"] == "A calm closet with a clear landing zone."
+        assert body["strategy"] == ["Hang daily wear at eye level"]
+        assert body["zones"] == [{"title": "Daily wear", "desc": "Front rail"}]
+        assert body["shopping_list"] == [{"name": "Slim hangers", "qty": 30, "price": 24.0}]
+        assert body["afters"] == [{"after_url": "/api/uploads/photo/after1"}]
+        assert body["status"] == "in_review"
+        assert body["approved"] is False
+        text = r.text
+        for leaked in ("automation_error", "notes", "render_qa", "contact_sheet", "secret pipeline", "admin only", "source_url"):
+            assert leaked not in text
+        assert db.leads.docs[0]["status"] == "review"
+        assert no_email == []
+
+    def test_owner_gets_board_and_pdf(self, client, no_email):
+        c, db = client
+        ada, _ = self._two_members(c)
+        _seed_plan(db, ada["member"]["id"])
+        headers = {"Authorization": f"Bearer {ada['token']}"}
+        board = c.get("/api/me/spaces/lead-review-1/board", headers=headers)
+        assert board.status_code == 200, board.text
+        assert board.headers["content-type"] == "image/png"
+        assert board.content[:8] == b"\x89PNG\r\n\x1a\n"
+        pdf = c.get("/api/me/spaces/lead-review-1/pdf", headers=headers)
+        assert pdf.status_code == 200, pdf.text
+        assert pdf.headers["content-type"] == "application/pdf"
+        assert pdf.headers["content-disposition"].startswith("attachment;")
+        assert pdf.content[:5] == b"%PDF-"
+        assert db.leads.docs[0]["status"] == "review"
+        assert no_email == []
+
+    def test_owner_via_session_cookie(self, client, no_email):
+        c, db = client
+        _signup(c, email="grace@example.com", name="Grace")
+        c.cookies.clear()
+        ada = _signup(c, email="ada@example.com").json()
+        _seed_plan(db, ada["member"]["id"])
+        assert c.cookies.get(COOKIE_NAME)
+        assert c.get("/api/me/spaces/lead-review-1/plan").status_code == 200
+
+    @pytest.mark.parametrize("suffix", ["plan", "board", "pdf"])
+    def test_other_member_gets_404(self, client, no_email, suffix):
+        c, db = client
+        ada, grace = self._two_members(c)
+        _seed_plan(db, ada["member"]["id"])
+        r = c.get(f"/api/me/spaces/lead-review-1/{suffix}", headers={"Authorization": f"Bearer {grace['token']}"})
+        assert r.status_code == 404
+        missing = c.get(f"/api/me/spaces/no-such-lead/{suffix}", headers={"Authorization": f"Bearer {ada['token']}"})
+        assert missing.status_code == 404
+        assert db.leads.docs[0]["status"] == "review"
+        assert no_email == []
+
+    @pytest.mark.parametrize("suffix", ["plan", "board", "pdf"])
+    def test_signed_out_gets_401(self, client, no_email, suffix):
+        c, db = client
+        ada, _ = self._two_members(c)
+        _seed_plan(db, ada["member"]["id"])
+        r = c.get(f"/api/me/spaces/lead-review-1/{suffix}")
+        assert r.status_code == 401
+        assert r.json()["detail"]["code"] == "ACCOUNT_REQUIRED"
+        assert no_email == []
+
+    def test_lead_without_plan_is_404(self, client, no_email):
+        c, db = client
+        ada, _ = self._two_members(c)
+        _seed_plan(db, ada["member"]["id"])
+        db.deliverables.docs.clear()
+        r = c.get("/api/me/spaces/lead-review-1/plan", headers={"Authorization": f"Bearer {ada['token']}"})
+        assert r.status_code == 404
