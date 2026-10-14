@@ -34,7 +34,7 @@ from blueprint_consistency import (
     reference_total_line,
     safety_guidance,
 )
-from copy_shape import complete_clip, heading, whole_title
+from copy_shape import complete_clip, heading, shorten_whole, whole_title
 from design_plan_standards import (
     BOARD_WORDS,
     BRAND_NAME,
@@ -240,21 +240,22 @@ class _Pen:
         return lines
 
     def fit(self, text: str, kind: str, size: float, width: float, max_lines: int) -> List[str]:
-        """Wrap on word boundaries. If it still overflows, end on a whole sentence or phrase."""
+        """Wrap on word boundaries. Overflow ends on a whole sentence or clause, never mid-sentence."""
         text = _clean(text)
         if not text:
             return []
         lines = self.wrap(text, kind, size, width)
         if len(lines) <= max_lines:
             return lines
-        count = len(text.split())
-        while count > 1:
-            count -= 1
-            clipped = complete_clip(text, count)
-            lines = self.wrap(clipped, kind, size, width)
-            if len(lines) <= max_lines:
-                return lines
-        return self.wrap(complete_clip(text, 1), kind, size, width)[:max_lines]
+
+        def fits(value: str) -> bool:
+            return len(self.wrap(value, kind, size, width)) <= max_lines
+
+        shortened = shorten_whole(text, fits)
+        lines = self.wrap(shortened, kind, size, width)
+        if len(lines) <= max_lines:
+            return lines
+        return lines
 
     def rrect(self, box, radius: float, fill=None, outline=None, width: float = 0) -> None:
         x0, y0, x1, y1 = box
@@ -625,6 +626,17 @@ def _move_title(text: str, index: int) -> str:
     return title or f"CHANGE {index + 1}"
 
 
+def _whole_sentence(text: str) -> str:
+    """The first sentence, intact. A missing period is added; the sentence is not cut."""
+    text = _clean(text)
+    if not text:
+        return ""
+    sentence = re.split(r"(?<=[.!?])\s+", text)[0].strip()
+    if not sentence:
+        return ""
+    return sentence if sentence.endswith((".", "!", "?")) else sentence + "."
+
+
 def _moves(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     from space_rails import is_nursery_space
 
@@ -632,7 +644,7 @@ def _moves(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -
         return _nursery_moves(lead or {}, deliverable)
     strategy = [_clean(str(x)) for x in (deliverable.get("strategy") or []) if _clean(str(x))]
     return [
-        {"title": _move_title(text, i), "body": complete_clip(text, BOARD_WORDS["change"])}
+        {"title": _move_title(text, i), "body": _whole_sentence(text)}
         for i, text in enumerate(strategy[:4])
     ]
 
@@ -1068,19 +1080,29 @@ def _story_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
     return 20 + _label_h() + 12 + len(head) * 35 + 10 + len(body) * 31 + 20
 
 
-def _change_rows(pen: _Pen, moves: Sequence[Dict[str, str]], width: float) -> List[Tuple[List[str], List[str]]]:
+def _fit_change_body(pen: _Pen, text: str, width: float) -> Tuple[List[str], float]:
+    """Wrap a whole change sentence. Shrink the type before shortening it, and never cut mid-sentence."""
+    for size in (17, 16, 15, 14):
+        lines = pen.wrap(text, "regular", size, width)
+        if lines and len(lines) <= 4:
+            return lines, float(size)
+    lines = pen.fit(text, "regular", 14, width, 4)
+    return lines, 14.0
+
+
+def _change_rows(pen: _Pen, moves: Sequence[Dict[str, str]], width: float) -> List[Tuple[List[str], List[str], float]]:
     inner = width - 48 - 38
     rows = []
     for move in list(moves)[:4]:
         title = pen.fit(move["title"], "semibold", 18, inner, 2)
-        body = pen.fit(move["body"], "regular", 17, inner, 3)
-        rows.append((title, body))
+        body, body_size = _fit_change_body(pen, move["body"], inner)
+        rows.append((title, body, body_size))
     return rows
 
 
 def _changes_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
     rows = _change_rows(pen, spec["moves"], width)
-    h = sum(max(26, len(t) * 23.4 + 2 + len(b) * 23.8) for t, b in rows) + 9 * max(0, len(rows) - 1)
+    h = sum(max(26, len(t) * 23.4 + 2 + len(b) * 23.8) for t, b, _size in rows) + 9 * max(0, len(rows) - 1)
     return 20 + _label_h() + 12 + h + 20
 
 
@@ -1373,7 +1395,7 @@ def _draw_changes(pen: _Pen, spec: Dict[str, Any], box) -> None:
     x0, y0, x1, _ = box
     _section_label(pen, x0 + 24, y0 + 20, "02")
     y = y0 + 20 + _label_h() + 12
-    for title, body in _change_rows(pen, spec["moves"], x1 - x0):
+    for title, body, body_size in _change_rows(pen, spec["moves"], x1 - x0):
         _check_icon(pen, x0 + 24, y + 1)
         ty = y
         for line in title:
@@ -1381,7 +1403,7 @@ def _draw_changes(pen: _Pen, spec: Dict[str, Any], box) -> None:
             ty += 23.4
         ty += 2
         for line in body:
-            pen.text(x0 + 24 + 38, ty, line, "regular", 17, CHANGE_INK)
+            pen.text(x0 + 24 + 38, ty, line, "regular", body_size, CHANGE_INK)
             ty += 23.8
         y = max(y + 26, ty) + 9
 

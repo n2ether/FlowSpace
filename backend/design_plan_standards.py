@@ -404,7 +404,7 @@ FlowSpace Design Plan standards (every plan):
 - zones: up to four, each with one clear job. For a nursery use Sleep, Change, Comfort, and Play + Storage.
 - shopping_list names are generic product descriptions (no brand or retailer names). Prices are typical mid-range retail examples.
 - Give each shopping_list item "priority": "functional" (storage, organizing, safety, the entry catch-all) or "decorative" (optional styling: art, frames, pillows, throws, plants).
-- Do not state an exact frame or basket size unless the customer gave wall, table, or niche measurements; write "measure before buying" instead.
+- Do not state an exact size for a frame, basket, print, tray, pillow, or any other product unless the customer gave wall, table, or niche measurements; write "measure before buying" instead.
 - A playpen is an item inside a zone, never a zone of its own.
 - Outside a nursery, action_plan is: measure and verify, set up functional storage, then add styling.
 - Safety, climate, maintenance, and styling detail belong in the companion guide; keep them out of intro and summary.

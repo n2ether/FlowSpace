@@ -631,6 +631,49 @@ def spaced_text(draw: ImageDraw.ImageDraw, xy, text: str, face, fill, tracking: 
         x += draw.textlength(ch, font=face) + tracking
 
 
+def _fit_block(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    width: float,
+    max_lines: int,
+    size: float,
+    min_size: float,
+) -> Tuple[List[str], Any]:
+    """Lines that fit ``width`` × ``max_lines``. Shrinks type, then shortens at a sentence boundary.
+
+    The returned lines are a whole sentence or clause. They are not a mid-sentence slice.
+    """
+    from copy_shape import shorten_whole
+
+    cleaned = _clean(text)
+    if not cleaned:
+        return [], font("sans", size)
+    px = int(round(size))
+    floor = int(round(min_size))
+    while px >= floor:
+        face = font("sans", px)
+        lines = wrap(draw, cleaned, face, width)
+        if lines and len(lines) <= max_lines:
+            return lines, face
+        px -= 1
+    face = font("sans", floor)
+
+    def fits(value: str) -> bool:
+        return len(wrap(draw, value, face, width)) <= max_lines
+
+    shortened = shorten_whole(cleaned, fits)
+    lines = wrap(draw, shortened, face, width)
+    if len(lines) <= max_lines:
+        return lines, face
+    # One sentence that still overflows: keep shrinking until the whole sentence fits.
+    smaller = floor - 1
+    while smaller >= max(8, floor - 4) and len(lines) > max_lines:
+        face = font("sans", smaller)
+        lines = wrap(draw, shortened, face, width)
+        smaller -= 1
+    return lines, face
+
+
 def wrap(draw: ImageDraw.ImageDraw, text: str, face, width: float) -> List[str]:
     words = _clean(text).split()
     lines: List[str] = []
@@ -1320,11 +1363,35 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     phrases = spec["phrases"]
     spaced_text(draw, (_s(69), _s(242)), "01 ROOM FLOW + FUNCTIONAL ZONES", font("sans-medium", _s(9.5)), GREEN, _s(1.2))
     draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
-    if spec.get("what_stays"):
-        stays_face = font("sans", _s(7.2))
-        draw.text((_s(69), _s(274)), spec["what_stays"], font=stays_face, fill=MUTED)
-    draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
+    geom = draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
     draw = ImageDraw.Draw(base)
+    if spec.get("what_stays"):
+        # Under the map, clear of the WINDOW WALL label that sits above the outline.
+        stays_face = font("sans", _s(7.2))
+        stays_w = _s(500) - _s(49)
+        stays_lines = wrap(draw, spec["what_stays"], stays_face, stays_w) or [spec["what_stays"]]
+        line_h = _s(11)
+        block_h = line_h * len(stays_lines)
+        x0, x1 = _s(49), _s(500)
+        y = _s(648)
+        for _step in range(6):
+            block = (x0, y, x1, y + block_h)
+            hit = next(
+                (
+                    box
+                    for box in (geom.get("label_boxes") or [])
+                    if block[0] < box[2] and block[2] > box[0] and block[1] < box[3] and block[3] > box[1]
+                ),
+                None,
+            )
+            if hit is None or y + block_h > _s(748):
+                break
+            y = hit[3] + _s(4)
+        if y + block_h > _s(748):
+            y = max(_s(648), _s(748) - block_h)
+        for line in stays_lines:
+            draw.text((x0, y), line, font=stays_face, fill=MUTED)
+            y += line_h
 
     # 02 Zones column
     col_x, col_r = _s(522), _s(668)
@@ -1342,9 +1409,17 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
         draw.text((cx - draw.textlength(number, font=num_face) / 2, cy - num_face.size * 0.62), number, font=num_face, fill=GREEN)
         spaced_text(draw, (col_x + _s(36), y), str(zone.get("title") or "").upper(), font("sans-bold", _s(8.6)), GREEN, _s(0.7))
         ty = y + _s(16)
-        for line in wrap(draw, str(zone.get("job") or ""), font("sans", _s(7.8)), col_r - col_x - _s(50))[:3]:
-            draw.text((col_x + _s(36), ty), line, font=font("sans", _s(7.8)), fill=INK)
-            ty += _s(13.5)
+        job_lines, job_face = _fit_block(
+            draw,
+            str(zone.get("job") or ""),
+            col_r - col_x - _s(50),
+            3,
+            _s(7.8),
+            _s(6.2),
+        )
+        for line in job_lines:
+            draw.text((col_x + _s(36), ty), line, font=job_face, fill=INK)
+            ty += _s(12) if job_face.size < _s(7.2) else _s(13.5)
         y += _s(72)
     rule_y = max(y - _s(14), _s(576))
     draw.line((col_x, rule_y, col_r - _s(20), rule_y), fill=CARD_EDGE, width=_s(0.8))
@@ -1354,8 +1429,11 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
         draw.text((col_x, py), line, font=font("serif", _s(15)), fill=GREEN)
         py += _s(22)
     py += _s(6)
-    for line in wrap(draw, spec["flow_note"], font("sans", _s(7.8)), col_r - col_x - _s(8))[:4]:
-        draw.text((col_x, py), line, font=font("sans", _s(7.8)), fill=INK)
+    note_lines, note_face = _fit_block(
+        draw, spec["flow_note"], col_r - col_x - _s(8), 4, _s(7.8), _s(6.4)
+    )
+    for line in note_lines:
+        draw.text((col_x, py), line, font=note_face, fill=INK)
         py += _s(13.5)
 
     # 03 Why the zone approach helps
