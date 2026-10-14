@@ -72,7 +72,7 @@ no code fences) — keep every list short and concrete (max ~5 items each):
   "wall_color_code": string,
   "wall_color_hex": string,
   "wall_color_note": string,
-  "shopping_list": [{"name": string, "qty": number, "price": number}],
+  "shopping_list": [{"name": string, "qty": number, "price": number, "priority": "functional" | "decorative"}],
   "budget_note": string,
   "strategy": [string],
   "action_plan": [string],
@@ -596,7 +596,11 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
             qty, price = 1.0, 0.0
         name = as_str(it.get("name"))
         if name:
-            shopping_list.append({"name": name, "qty": qty, "price": price})
+            row = {"name": name, "qty": qty, "price": price}
+            priority = as_str(it.get("priority")).lower()
+            if priority in {"functional", "decorative"}:
+                row["priority"] = priority
+            shopping_list.append(row)
 
     hex_color = as_str(plan.get("wall_color_hex"))
     if hex_color and not hex_color.startswith("#"):

@@ -230,7 +230,9 @@ def test_automation_does_not_crash_pipeline_on_flux_failure(monkeypatch):
 
     sent, captured, db, fs = _run(monkeypatch, generate=boom)
     assert sent is True
-    assert db.leads.docs["lead-img-1"]["status"] == "delivered"
+    assert db.leads.docs["lead-img-1"]["status"] == "review"
+    assert db.leads.docs["lead-img-1"]["email_sent"] is False
+    assert not captured.get("send_calls")
 
 
 def test_automation_passes_before_and_after_when_both_exist(monkeypatch):

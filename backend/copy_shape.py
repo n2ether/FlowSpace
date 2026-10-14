@@ -56,6 +56,37 @@ def heading(text: str, max_words: int = 3) -> str:
     return " ".join(picked).rstrip(".,;:—– ")
 
 
+_TITLE_BREAK = frozenset(
+    """
+    by at in on near beside between for with without from into onto under over along across
+    so to that which where when while because using
+    """.split()
+)
+
+
+def whole_title(text: str, max_words: int = 5) -> str:
+    """A complete title: the whole phrase when short, else the phrase up to its first natural break.
+
+    "Create a drop zone by the entry for keys" becomes "Create a drop zone", never
+    "Create a drop" or "Create a drop zone by the.". No trailing period.
+    """
+    cleaned = _clean(re.sub(r"\s*\([^)]*\)", "", _clean(text)))
+    cleaned = re.split(r"[.!?;:]\s|\s[—–]\s|,\s", cleaned + " ", maxsplit=1)[0].strip().rstrip(".!?;:,")
+    words = cleaned.split()
+    if not words:
+        return ""
+    if len(words) <= max_words and not ends_dangling(cleaned):
+        return cleaned
+    for index, word in enumerate(words):
+        if index >= 2 and word.lower().strip(".,") in _TITLE_BREAK:
+            picked = _strip_dangling(words[:index])
+            if 2 <= len(picked) <= max_words:
+                return " ".join(picked)
+            break
+    picked = _strip_dangling(words[:max_words])
+    return " ".join(picked or words[:max_words]).rstrip(".,;:—– ")
+
+
 def _outside_parens(text: str, index: int) -> bool:
     return text[:index].count("(") <= text[:index].count(")")
 

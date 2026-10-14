@@ -35,12 +35,16 @@ from design_plan_standards import (
     BRAND_OFF,
     BRAND_TINTS,
     DEFAULT_SUBTITLE,
+    LIVING_ROOM_SUBTITLE,
     MONTSERRAT,
     NURSERY_SUBTITLE,
     NURSERY_ZONES,
     REVIEW_STATUS,
     TAGLINE,
     hex_rgb,
+    is_released,
+    package_version,
+    version_label,
 )
 
 BACKEND = Path(__file__).resolve().parent
@@ -272,7 +276,70 @@ def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict
     subtitle = "A calmer flow for " + (
         ", ".join(titles[:-1]) + " & " + titles[-1] if len(titles) > 1 else titles[0]
     )
+    if _space_key(lead) in {"living_room", "living"}:
+        subtitle = LIVING_ROOM_SUBTITLE
     return {**base, "zones": zones, "subtitle": subtitle}
+
+
+def _space_key(lead: Optional[Dict[str, Any]]) -> str:
+    return str((lead or {}).get("space_type") or "").strip().lower().replace("-", " ").replace(" ", "_")
+
+
+def _playpen_requested(deliverable: Dict[str, Any]) -> bool:
+    """True when the plan already classifies a playpen, or a zone is named for one."""
+    for item in deliverable.get("room_items") or []:
+        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == "playpen":
+            return True
+    from package_facts import PLAYPEN
+
+    blob = []
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict):
+            blob.append(str(zone.get("title") or ""))
+    for item in deliverable.get("shopping_list") or []:
+        if isinstance(item, dict):
+            blob.append(str(item.get("name") or ""))
+    return bool(PLAYPEN.search(" ".join(blob)))
+
+
+def _with_playpen(lead: Dict[str, Any], deliverable: Dict[str, Any], flow: Dict[str, Any]) -> Dict[str, Any]:
+    """A playpen is furniture inside the play zone. Nursery furniture is left as drawn."""
+    from space_rails import is_nursery_space
+
+    if is_nursery_space(lead) or not _playpen_requested(deliverable):
+        return flow
+    furniture = [item for item in (flow.get("furniture") or []) if isinstance(item, dict)]
+    if any(str(item.get("id") or "") == "playpen" or str(item.get("label") or "").upper() == "PLAYPEN" for item in furniture):
+        return flow
+    zone = next(
+        (
+            z
+            for z in flow.get("zones") or []
+            if isinstance(z, dict)
+            and ("play" in str(z.get("id") or "").lower() or "play" in str(z.get("title") or "").lower())
+        ),
+        None,
+    )
+    if not zone or not zone.get("rect"):
+        return flow
+    left, top, right, bottom = [float(v) for v in zone["rect"]]
+    pad_x = (right - left) * 0.18
+    pad_y = (bottom - top) * 0.22
+    rect = [left + pad_x, top + pad_y, right - pad_x, bottom - pad_y]
+    if rect[2] - rect[0] < 0.08 or rect[3] - rect[1] < 0.06:
+        return flow
+    flow = copy.deepcopy(flow)
+    flow["furniture"] = [
+        *[item for item in (flow.get("furniture") or []) if isinstance(item, dict)],
+        {
+            "id": "playpen",
+            "kind": "block",
+            "label": "PLAYPEN",
+            "zone": zone.get("id") or "play",
+            "rect": rect,
+        },
+    ]
+    return flow
 
 
 def record_view_names(lead: Optional[Dict[str, Any]]) -> List[str]:
@@ -310,11 +377,11 @@ def resolve_room_flow(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict
     deliverable = deliverable or {}
     stored = deliverable.get("room_flow")
     if isinstance(stored, dict) and stored.get("outline"):
-        return copy.deepcopy(stored)
-    record = load_record(str(lead.get("id") or deliverable.get("lead_id") or ""))
-    if record:
-        return record
-    return default_room_flow(lead, deliverable)
+        flow = copy.deepcopy(stored)
+    else:
+        record = load_record(str(lead.get("id") or deliverable.get("lead_id") or ""))
+        flow = record if record else default_room_flow(lead, deliverable)
+    return _with_playpen(lead, deliverable, flow)
 
 
 def outline_caption(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
@@ -442,9 +509,16 @@ def zone_map_spec(
     title = customer_project_title(lead, doc) or plan_title(lead.get("space_type"))
     phrases = outline_phrases(flow)
     status = "ROOM FLOW PLAN" if final else "DRAFT CONCEPT"
+    subtitle = LIVING_ROOM_SUBTITLE if _space_key(lead) in {"living_room", "living"} else (
+        _clean(flow.get("subtitle")) or DEFAULT_SUBTITLE
+    )
+    released = final or is_released(deliverable)
+    from package_facts import uses_general_standard, what_stays
+
+    stays = what_stays(lead, doc) if uses_general_standard(lead) else ""
     return {
         "title": title.upper(),
-        "subtitle": _clean(flow.get("subtitle")) or DEFAULT_SUBTITLE,
+        "subtitle": subtitle,
         "badge_status": status,
         "badge_outline": phrases["badge"],
         "phrases": phrases,
@@ -457,6 +531,8 @@ def zone_map_spec(
         "source_rule": source_rule(flow, views),
         "footer_status": "ROOM FLOW PLAN" if final else "DRAFT CONCEPT FOR REVIEW",
         "final": final,
+        "version_label": "" if released else version_label(package_version(deliverable)),
+        "what_stays": stays,
     }
 
 
@@ -482,6 +558,8 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         "SOURCE RULE",
         spec["source_rule"],
         spec["footer_status"],
+        spec.get("version_label") or "",
+        spec.get("what_stays") or "",
         "CLEAR PATH",
     ]
     for zone in spec["zones"]:
@@ -1242,6 +1320,9 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     phrases = spec["phrases"]
     spaced_text(draw, (_s(69), _s(242)), "01 ROOM FLOW + FUNCTIONAL ZONES", font("sans-medium", _s(9.5)), GREEN, _s(1.2))
     draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
+    if spec.get("what_stays"):
+        stays_face = font("sans", _s(7.2))
+        draw.text((_s(69), _s(274)), spec["what_stays"], font=stays_face, fill=MUTED)
     draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
     draw = ImageDraw.Draw(base)
 
@@ -1307,3 +1388,12 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     brand_face = font("sans-bold", _s(9))
     draw.text((_s(668) - draw.textlength("FlowSpace", font=brand_face), _s(948)), "FlowSpace", font=brand_face, fill=GREEN)
     spaced_text(draw, (_s(49), _s(982)), spec["footer_status"], font("sans", _s(6.8)), MUTED, _s(1.1))
+    if spec.get("version_label"):
+        label_face = font("sans", _s(6.8))
+        label = spec["version_label"]
+        draw.text(
+            (_s(668) - draw.textlength(label, font=label_face), _s(980)),
+            label,
+            font=label_face,
+            fill=MUTED,
+        )
