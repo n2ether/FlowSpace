@@ -19,6 +19,7 @@ from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
 from design_plan_standards import DRAFTER_DESIGN_PLAN_RULES
 from evergreen_copy import DRAFTER_EVERGREEN_RULE
 from image_orientation import jpeg_for_vision, upright_bytes
+from intake import fact_sheet_prompt
 from space_rails import NURSERY_DRAFT_RULES, nursery_draft_addon
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ no code fences) — keep every list short and concrete (max ~5 items each):
   "wall_color_code": string,
   "wall_color_hex": string,
   "wall_color_note": string,
-  "shopping_list": [{"name": string, "qty": number, "price": number}],
+  "shopping_list": [{"name": string, "qty": number, "price": number, "priority": "functional" | "decorative"}],
   "budget_note": string,
   "strategy": [string],
   "action_plan": [string],
@@ -134,8 +135,10 @@ COLORS = {
     "wood": "Wood tones", "black": "Black accents",
 }
 BUDGET = {
+    "use_owned": "Use what I own (no purchases)",
     "under_100": "Under $100", "100_300": "$100 – 300",
     "300_700": "$300 – 700", "700_plus": "$700+",
+    "not_sure": "Not sure yet (reorganize first; purchases optional)",
 }
 DIY = {
     "very": "Very DIY-friendly", "simple": "Simple assembly only",
@@ -236,6 +239,9 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
         parts.append("DIY: " + DIY.get(lead["diy_level"], lead["diy_level"]))
     if lead.get("daily_improvement"):
         parts.append(f"Daily improvement goal: {lead['daily_improvement']}")
+    facts = fact_sheet_prompt(lead.get("fact_sheet"))
+    if facts:
+        parts.append(facts)
     return "\n".join(parts) or f"Space: {space}"
 
 
@@ -590,7 +596,11 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
             qty, price = 1.0, 0.0
         name = as_str(it.get("name"))
         if name:
-            shopping_list.append({"name": name, "qty": qty, "price": price})
+            row = {"name": name, "qty": qty, "price": price}
+            priority = as_str(it.get("priority")).lower()
+            if priority in {"functional", "decorative"}:
+                row["priority"] = priority
+            shopping_list.append(row)
 
     hex_color = as_str(plan.get("wall_color_hex"))
     if hex_color and not hex_color.startswith("#"):

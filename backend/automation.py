@@ -31,7 +31,7 @@ from ai_image_generator import (
     generate_supporting_views,
 )
 from contact_sheet import build_contact_sheet
-from email_service import send_blueprint
+from email_service import send_blueprint  # kept so tests can patch it; this pipeline does not send
 from image_orientation import (
     UnreadableImage,
     normalize_photo_bytes,
@@ -39,7 +39,6 @@ from image_orientation import (
     upright_bytes,
 )
 from image_board import build_image_board
-from room_flow import build_zone_map
 from pdf_generator import build_pdf
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from render_qa import RenderQAResult, review_organized_render
@@ -415,20 +414,19 @@ async def run_automation(
     """
     Run the full automation pipeline for a lead.
 
-    Returns True when the customer email was sent, or when every required room
-    photo has an approved after and the package is waiting in review.
+    Returns True when the package is held for review (a finished photo package,
+    or a conceptual plan with no room photo). Nothing here emails the customer.
     Returns False when a required source failed, or the pipeline raised.
     """
     lead_id = lead.get("id", "unknown")
     customer_name = lead.get("name", "there")
     customer_email = lead.get("email", "")
-    space_type = lead.get("space_type", "space")
 
     logger.info("[automation] Starting pipeline for lead %s (%s)", lead_id, customer_email)
 
     await db.leads.update_one(
         {"id": lead_id},
-        {"$set": {"status": "processing", "updated_at": _iso(datetime.now(timezone.utc))}},
+        {"$set": {"status": "processing", "automation_failed": False, "updated_at": _iso(datetime.now(timezone.utc))}},
     )
 
     try:
@@ -450,7 +448,12 @@ async def run_automation(
         logger.info("[automation] Step 1: AI drafting plan...")
         plan = await draft_deliverable(lead, reference_photo_bytes=draft_bytes)
         plan["lead_id"] = lead_id
+        if lead.get("fact_sheet"):
+            plan["fact_sheet"] = lead["fact_sheet"]
         plan["updated_at"] = _iso(datetime.now(timezone.utc))
+        stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0, "package_version": 1})
+        if not (stored or {}).get("package_version"):
+            plan["package_version"] = 1
         await db.deliverables.update_one(
             {"lead_id": lead_id},
             {"$set": plan},
@@ -770,37 +773,49 @@ async def run_automation(
             logger.info("[automation] Lead %s package_status=%s (no final email)", lead_id, package_status)
             return package_status == "review"
 
-        logger.info("[automation] Step 4: Sending email to %s...", customer_email)
-        zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable_doc, images=images, final=True)
-        sent, email_error = await send_blueprint(
-            customer_name=customer_name,
-            customer_email=customer_email,
-            space_type=space_type,
-            lead_id=lead_id,
-            pdf_bytes=pdf_bytes,
-            board_bytes=board_bytes,
-            zone_map_bytes=zone_map_bytes,
+        # No room photo: hold the package. Regeneration and automation never email.
+        note = "DRAFT. Review version. Not yet approved. Customer release held."
+        if lead.get("intake"):
+            note += " Conceptual plan (no photos)."
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"package_status": "review", "updated_at": _iso(datetime.now(timezone.utc))}},
         )
-        final_status = "delivered" if sent else "pdf_ready"
-        update = {
-            "status": final_status,
-            "email_sent": bool(sent),
-            "updated_at": _iso(datetime.now(timezone.utc)),
-        }
-        if sent:
-            update["email_error"] = None
-            update["automation_error"] = None
-        else:
-            update["email_error"] = email_error or "Email was not sent"
-            logger.error("[automation] PDF built but email not sent for %s: %s", lead_id, email_error)
-        await db.leads.update_one({"id": lead_id}, {"$set": update})
-        logger.info("[automation] Pipeline complete for lead %s — status: %s", lead_id, final_status)
-        return sent
+        await db.leads.update_one(
+            {"id": lead_id},
+            {
+                "$set": {
+                    "status": "review",
+                    "package_status": "review",
+                    "email_sent": False,
+                    "email_error": None,
+                    "automation_error": None,
+                    "automation_note": note,
+                    "updated_at": _iso(datetime.now(timezone.utc)),
+                }
+            },
+        )
+        logger.info("[automation] Lead %s package held for review (no email)", lead_id)
+        return True
 
     except Exception as e:
         logger.exception("[automation] Pipeline failed for lead %s: %s", lead_id, e)
+        # Held for admin review/retry. automation_error and automation_failed_at
+        # are admin-only; customers only ever see "In review".
+        now = _iso(datetime.now(timezone.utc))
         await db.leads.update_one(
             {"id": lead_id},
-            {"$set": {"status": "error", "automation_error": str(e), "updated_at": _iso(datetime.now(timezone.utc))}},
+            {
+                "$set": {
+                    "status": "review",
+                    "package_status": "review",
+                    "email_sent": False,
+                    "automation_failed": True,
+                    "automation_error": str(e) or e.__class__.__name__,
+                    "automation_failed_at": now,
+                    "automation_note": "Generation failed. Held for review. Retry automation from the admin.",
+                    "updated_at": now,
+                }
+            },
         )
         return False

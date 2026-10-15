@@ -35,12 +35,16 @@ from design_plan_standards import (
     BRAND_OFF,
     BRAND_TINTS,
     DEFAULT_SUBTITLE,
+    LIVING_ROOM_SUBTITLE,
     MONTSERRAT,
     NURSERY_SUBTITLE,
     NURSERY_ZONES,
     REVIEW_STATUS,
     TAGLINE,
     hex_rgb,
+    is_released,
+    package_version,
+    version_label,
 )
 
 BACKEND = Path(__file__).resolve().parent
@@ -272,7 +276,70 @@ def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict
     subtitle = "A calmer flow for " + (
         ", ".join(titles[:-1]) + " & " + titles[-1] if len(titles) > 1 else titles[0]
     )
+    if _space_key(lead) in {"living_room", "living"}:
+        subtitle = LIVING_ROOM_SUBTITLE
     return {**base, "zones": zones, "subtitle": subtitle}
+
+
+def _space_key(lead: Optional[Dict[str, Any]]) -> str:
+    return str((lead or {}).get("space_type") or "").strip().lower().replace("-", " ").replace(" ", "_")
+
+
+def _playpen_requested(deliverable: Dict[str, Any]) -> bool:
+    """True when the plan already classifies a playpen, or a zone is named for one."""
+    for item in deliverable.get("room_items") or []:
+        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == "playpen":
+            return True
+    from package_facts import PLAYPEN
+
+    blob = []
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict):
+            blob.append(str(zone.get("title") or ""))
+    for item in deliverable.get("shopping_list") or []:
+        if isinstance(item, dict):
+            blob.append(str(item.get("name") or ""))
+    return bool(PLAYPEN.search(" ".join(blob)))
+
+
+def _with_playpen(lead: Dict[str, Any], deliverable: Dict[str, Any], flow: Dict[str, Any]) -> Dict[str, Any]:
+    """A playpen is furniture inside the play zone. Nursery furniture is left as drawn."""
+    from space_rails import is_nursery_space
+
+    if is_nursery_space(lead) or not _playpen_requested(deliverable):
+        return flow
+    furniture = [item for item in (flow.get("furniture") or []) if isinstance(item, dict)]
+    if any(str(item.get("id") or "") == "playpen" or str(item.get("label") or "").upper() == "PLAYPEN" for item in furniture):
+        return flow
+    zone = next(
+        (
+            z
+            for z in flow.get("zones") or []
+            if isinstance(z, dict)
+            and ("play" in str(z.get("id") or "").lower() or "play" in str(z.get("title") or "").lower())
+        ),
+        None,
+    )
+    if not zone or not zone.get("rect"):
+        return flow
+    left, top, right, bottom = [float(v) for v in zone["rect"]]
+    pad_x = (right - left) * 0.18
+    pad_y = (bottom - top) * 0.22
+    rect = [left + pad_x, top + pad_y, right - pad_x, bottom - pad_y]
+    if rect[2] - rect[0] < 0.08 or rect[3] - rect[1] < 0.06:
+        return flow
+    flow = copy.deepcopy(flow)
+    flow["furniture"] = [
+        *[item for item in (flow.get("furniture") or []) if isinstance(item, dict)],
+        {
+            "id": "playpen",
+            "kind": "block",
+            "label": "PLAYPEN",
+            "zone": zone.get("id") or "play",
+            "rect": rect,
+        },
+    ]
+    return flow
 
 
 def record_view_names(lead: Optional[Dict[str, Any]]) -> List[str]:
@@ -310,11 +377,11 @@ def resolve_room_flow(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict
     deliverable = deliverable or {}
     stored = deliverable.get("room_flow")
     if isinstance(stored, dict) and stored.get("outline"):
-        return copy.deepcopy(stored)
-    record = load_record(str(lead.get("id") or deliverable.get("lead_id") or ""))
-    if record:
-        return record
-    return default_room_flow(lead, deliverable)
+        flow = copy.deepcopy(stored)
+    else:
+        record = load_record(str(lead.get("id") or deliverable.get("lead_id") or ""))
+        flow = record if record else default_room_flow(lead, deliverable)
+    return _with_playpen(lead, deliverable, flow)
 
 
 def outline_caption(lead: Optional[Dict[str, Any]], deliverable: Optional[Dict[str, Any]]) -> str:
@@ -442,9 +509,16 @@ def zone_map_spec(
     title = customer_project_title(lead, doc) or plan_title(lead.get("space_type"))
     phrases = outline_phrases(flow)
     status = "ROOM FLOW PLAN" if final else "DRAFT CONCEPT"
+    subtitle = LIVING_ROOM_SUBTITLE if _space_key(lead) in {"living_room", "living"} else (
+        _clean(flow.get("subtitle")) or DEFAULT_SUBTITLE
+    )
+    released = final or is_released(deliverable)
+    from package_facts import uses_general_standard, what_stays
+
+    stays = what_stays(lead, doc) if uses_general_standard(lead) else ""
     return {
         "title": title.upper(),
-        "subtitle": _clean(flow.get("subtitle")) or DEFAULT_SUBTITLE,
+        "subtitle": subtitle,
         "badge_status": status,
         "badge_outline": phrases["badge"],
         "phrases": phrases,
@@ -457,6 +531,8 @@ def zone_map_spec(
         "source_rule": source_rule(flow, views),
         "footer_status": "ROOM FLOW PLAN" if final else "DRAFT CONCEPT FOR REVIEW",
         "final": final,
+        "version_label": "" if released else version_label(package_version(deliverable)),
+        "what_stays": stays,
     }
 
 
@@ -482,6 +558,8 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         "SOURCE RULE",
         spec["source_rule"],
         spec["footer_status"],
+        spec.get("version_label") or "",
+        spec.get("what_stays") or "",
         "CLEAR PATH",
     ]
     for zone in spec["zones"]:
@@ -551,6 +629,49 @@ def spaced_text(draw: ImageDraw.ImageDraw, xy, text: str, face, fill, tracking: 
     for ch in text:
         draw.text((x, y), ch, font=face, fill=fill)
         x += draw.textlength(ch, font=face) + tracking
+
+
+def _fit_block(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    width: float,
+    max_lines: int,
+    size: float,
+    min_size: float,
+) -> Tuple[List[str], Any]:
+    """Lines that fit ``width`` × ``max_lines``. Shrinks type, then shortens at a sentence boundary.
+
+    The returned lines are whole sentences. A comma inside a phrase is never a cut.
+    """
+    from copy_shape import shorten_whole
+
+    cleaned = _clean(text)
+    if not cleaned:
+        return [], font("sans", size)
+    px = int(round(size))
+    floor = int(round(min_size))
+    while px >= floor:
+        face = font("sans", px)
+        lines = wrap(draw, cleaned, face, width)
+        if lines and len(lines) <= max_lines:
+            return lines, face
+        px -= 1
+    face = font("sans", floor)
+
+    def fits(value: str) -> bool:
+        return len(wrap(draw, value, face, width)) <= max_lines
+
+    shortened = shorten_whole(cleaned, fits)
+    lines = wrap(draw, shortened, face, width)
+    if len(lines) <= max_lines:
+        return lines, face
+    # One sentence that still overflows: keep shrinking until the whole sentence fits.
+    smaller = floor - 1
+    while smaller >= max(8, floor - 4) and len(lines) > max_lines:
+        face = font("sans", smaller)
+        lines = wrap(draw, shortened, face, width)
+        smaller -= 1
+    return lines, face
 
 
 def wrap(draw: ImageDraw.ImageDraw, text: str, face, width: float) -> List[str]:
@@ -1242,8 +1363,35 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     phrases = spec["phrases"]
     spaced_text(draw, (_s(69), _s(242)), "01 ROOM FLOW + FUNCTIONAL ZONES", font("sans-medium", _s(9.5)), GREEN, _s(1.2))
     draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
-    draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
+    geom = draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
     draw = ImageDraw.Draw(base)
+    if spec.get("what_stays"):
+        # Under the map, clear of the WINDOW WALL label that sits above the outline.
+        stays_face = font("sans", _s(7.2))
+        stays_w = _s(500) - _s(49)
+        stays_lines = wrap(draw, spec["what_stays"], stays_face, stays_w) or [spec["what_stays"]]
+        line_h = _s(11)
+        block_h = line_h * len(stays_lines)
+        x0, x1 = _s(49), _s(500)
+        y = _s(648)
+        for _step in range(6):
+            block = (x0, y, x1, y + block_h)
+            hit = next(
+                (
+                    box
+                    for box in (geom.get("label_boxes") or [])
+                    if block[0] < box[2] and block[2] > box[0] and block[1] < box[3] and block[3] > box[1]
+                ),
+                None,
+            )
+            if hit is None or y + block_h > _s(748):
+                break
+            y = hit[3] + _s(4)
+        if y + block_h > _s(748):
+            y = max(_s(648), _s(748) - block_h)
+        for line in stays_lines:
+            draw.text((x0, y), line, font=stays_face, fill=MUTED)
+            y += line_h
 
     # 02 Zones column
     col_x, col_r = _s(522), _s(668)
@@ -1261,9 +1409,17 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
         draw.text((cx - draw.textlength(number, font=num_face) / 2, cy - num_face.size * 0.62), number, font=num_face, fill=GREEN)
         spaced_text(draw, (col_x + _s(36), y), str(zone.get("title") or "").upper(), font("sans-bold", _s(8.6)), GREEN, _s(0.7))
         ty = y + _s(16)
-        for line in wrap(draw, str(zone.get("job") or ""), font("sans", _s(7.8)), col_r - col_x - _s(50))[:3]:
-            draw.text((col_x + _s(36), ty), line, font=font("sans", _s(7.8)), fill=INK)
-            ty += _s(13.5)
+        job_lines, job_face = _fit_block(
+            draw,
+            str(zone.get("job") or ""),
+            col_r - col_x - _s(50),
+            3,
+            _s(7.8),
+            _s(6.2),
+        )
+        for line in job_lines:
+            draw.text((col_x + _s(36), ty), line, font=job_face, fill=INK)
+            ty += _s(12) if job_face.size < _s(7.2) else _s(13.5)
         y += _s(72)
     rule_y = max(y - _s(14), _s(576))
     draw.line((col_x, rule_y, col_r - _s(20), rule_y), fill=CARD_EDGE, width=_s(0.8))
@@ -1273,8 +1429,11 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
         draw.text((col_x, py), line, font=font("serif", _s(15)), fill=GREEN)
         py += _s(22)
     py += _s(6)
-    for line in wrap(draw, spec["flow_note"], font("sans", _s(7.8)), col_r - col_x - _s(8))[:4]:
-        draw.text((col_x, py), line, font=font("sans", _s(7.8)), fill=INK)
+    note_lines, note_face = _fit_block(
+        draw, spec["flow_note"], col_r - col_x - _s(8), 4, _s(7.8), _s(6.4)
+    )
+    for line in note_lines:
+        draw.text((col_x, py), line, font=note_face, fill=INK)
         py += _s(13.5)
 
     # 03 Why the zone approach helps
@@ -1307,3 +1466,12 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     brand_face = font("sans-bold", _s(9))
     draw.text((_s(668) - draw.textlength("FlowSpace", font=brand_face), _s(948)), "FlowSpace", font=brand_face, fill=GREEN)
     spaced_text(draw, (_s(49), _s(982)), spec["footer_status"], font("sans", _s(6.8)), MUTED, _s(1.1))
+    if spec.get("version_label"):
+        label_face = font("sans", _s(6.8))
+        label = spec["version_label"]
+        draw.text(
+            (_s(668) - draw.textlength(label, font=label_face), _s(980)),
+            label,
+            font=label_face,
+            fill=MUTED,
+        )

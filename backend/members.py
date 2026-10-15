@@ -50,8 +50,64 @@ def public_member(doc: Dict[str, Any], usage: Optional[Dict[str, Any]] = None) -
     return out
 
 
+SPACE_TITLES = {
+    "closet": "Closet",
+    "garage": "Garage",
+    "laundry_room": "Laundry room",
+    "laundry": "Laundry room",
+    "pantry": "Pantry",
+    "mudroom": "Mudroom",
+    "storage": "Storage area",
+    "kids_room": "Kids' room",
+    "nursery": "Nursery",
+    "home_office": "Home office",
+    "living_room": "Living room",
+    "bedroom": "Bedroom",
+}
+
+# Customer-facing status. Raw lead statuses (including legacy "error") and
+# automation errors are admin-only.
+IN_PROGRESS = ("in_progress", "In progress", "We're preparing your Design Plan.")
+IN_REVIEW = (
+    "in_review",
+    "In review",
+    "Our beta team reviews every plan before it's sent.",
+)
+DELIVERED = ("delivered", "Delivered", "Design Plan emailed to you.")
+CUSTOMER_STATUS = {
+    "new": IN_PROGRESS,
+    "paid": IN_PROGRESS,
+    "processing": IN_PROGRESS,
+    "review": IN_REVIEW,
+    "incomplete": IN_REVIEW,
+    "pdf_ready": IN_REVIEW,
+    "error": IN_REVIEW,
+    "delivered": DELIVERED,
+}
+
+
+def space_title(lead: Dict[str, Any]) -> str:
+    """The space's name as the customer chose it: room type label or their 'Other' name."""
+    intake = lead.get("intake") if isinstance(lead.get("intake"), dict) else {}
+    space_type = str(intake.get("space_type") or lead.get("space_type") or "").strip().lower()
+    if space_type == "other":
+        fact_space = (lead.get("fact_sheet") or {}).get("space") if isinstance(lead.get("fact_sheet"), dict) else None
+        custom = str(intake.get("other_label") or (fact_space or {}).get("label") or "").strip()
+        return custom or "Other space"
+    if space_type in SPACE_TITLES:
+        return SPACE_TITLES[space_type]
+    return space_type.replace("_", " ").capitalize() or "Your space"
+
+
+def customer_status(status: Optional[str]) -> Dict[str, str]:
+    code, label, note = CUSTOMER_STATUS.get(str(status or "new").strip().lower(), IN_REVIEW)
+    return {"status": code, "status_label": label, "status_note": note}
+
+
 def public_space(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     out = {k: lead.get(k) for k in SPACE_PUBLIC_FIELDS}
+    out["title"] = space_title(lead)
+    out.update(customer_status(lead.get("status")))
     if deliverable:
         out["deliverable"] = {
             "has_plan": True,
@@ -61,6 +117,54 @@ def public_space(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = N
     else:
         out["deliverable"] = {"has_plan": False, "front_view_url": None, "updated_at": None}
     return out
+
+
+def _clean_list(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(v).strip() for v in values if isinstance(v, str) and v.strip()]
+
+
+def public_plan(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, Any]:
+    """Read-only plan a member sees for their own space.
+
+    Built from an allowlist so admin fields (automation_error, notes,
+    render_qa, contact_sheet_*) never reach the customer.
+    """
+    zones = []
+    for zone in deliverable.get("zones") or []:
+        if isinstance(zone, dict) and str(zone.get("title") or "").strip():
+            zones.append({"title": str(zone["title"]).strip(), "desc": str(zone.get("desc") or "").strip()})
+    shopping = []
+    for item in deliverable.get("shopping_list") or []:
+        if isinstance(item, dict) and str(item.get("name") or "").strip():
+            shopping.append(
+                {
+                    "name": str(item["name"]).strip(),
+                    "qty": item.get("qty") if isinstance(item.get("qty"), (int, float)) else 1,
+                    "price": item.get("price") if isinstance(item.get("price"), (int, float)) else 0,
+                }
+            )
+    afters = []
+    for entry in deliverable.get("source_afters") or []:
+        if not isinstance(entry, dict):
+            continue
+        url = str(entry.get("after_url") or "").strip()
+        if url and str(entry.get("status") or "").strip().lower() == "approved":
+            afters.append({"after_url": url})
+    summary = deliverable.get("summary")
+    return {
+        "lead_id": lead.get("id"),
+        "title": space_title(lead),
+        **customer_status(lead.get("status")),
+        "approved": bool(deliverable.get("design_plan_approved")),
+        "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
+        "strategy": _clean_list(deliverable.get("strategy")),
+        "zones": zones,
+        "shopping_list": shopping,
+        "afters": afters,
+        "updated_at": deliverable.get("updated_at"),
+    }
 
 
 def usage_payload(free_used: int, paid_count: int = 0) -> Dict[str, Any]:
@@ -77,7 +181,7 @@ def free_limit_error(used: int) -> Dict[str, Any]:
     return {
         "code": "FREE_TIER_LIMIT",
         "message": (
-            "You've used your free Blueprint. Upgrade to Plus or Premium "
+            "You've used your free Design Plan. Upgrade to Plus or Premium "
             "to organize another space."
         ),
         "used": int(used),

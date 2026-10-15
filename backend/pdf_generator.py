@@ -311,17 +311,20 @@ def customer_project_title(
     lead: Optional[Dict[str, Any]],
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Nursery title the customer sees. Empty for every other room.
+    """Nursery title the customer sees. A named living room is "Living Room".
 
     A nursery plan that names the child — "Nicholas is turning one" or
     "Nicholas's nursery" in the outcome — becomes "Nicholas's Nursery".
     A nursery with no child name becomes "Nursery". Other rooms keep
-    their own plan title at the call site.
+    their own plan title at the call site, except a living room.
     """
     from space_rails import is_nursery_space
 
     if not is_nursery_space(lead):
-        return ""
+        from design_plan_standards import PROJECT_TITLES
+
+        key = str((lead or {}).get("space_type") or "").strip().lower().replace(" ", "_")
+        return PROJECT_TITLES.get(key, "")
     child = _child_first_name(lead, deliverable)
     if child:
         return f"{child}'s Nursery"
@@ -1026,7 +1029,7 @@ def _page_box(canvas):
     return page_w, page_h, inset
 
 
-def _draw_footer(canvas, page: int) -> None:
+def _draw_footer(canvas, page: int, version_label: str = "") -> None:
     canvas.saveState()
     page_w, _page_h, inset = _page_box(canvas)
     y = FOOTER_H
@@ -1036,17 +1039,21 @@ def _draw_footer(canvas, page: int) -> None:
     canvas.setFillColor(SOFT)
     canvas.rect(0, 0, page_w, y, fill=1, stroke=0)
     canvas.setFillColor(SLATE_SOFT)
-    canvas.setFont(_font("FSSans"), 8 if page_w < 500 else 6.1)
-    note = "The FlowSpace Design Team · Windows and room proportions follow your photos."
     if page_w < 500:
-        canvas.drawString(inset, 12, note)
-        canvas.drawRightString(page_w - inset, 12, str(page))
-    elif page == 1:
-        canvas.drawString(inset, 14, FOOTER_NOTE)
-        canvas.drawRightString(page_w - inset, 14, "The FlowSpace Design Team")
+        canvas.setFont(_font("FSSans"), 8)
+        canvas.drawString(inset, 16, "FlowSpace Design System")
+        canvas.drawString(inset, 6, "Windows and room proportions follow your photos.")
+        if version_label:
+            canvas.drawRightString(page_w - inset, 16, version_label)
+        canvas.drawRightString(page_w - inset, 6, str(page))
     else:
-        canvas.drawString(inset, 14, "The FlowSpace Design Team  ·  Functional design  ·  Lasting value")
-        canvas.drawRightString(page_w - inset, 14, f"Page {page}")
+        canvas.setFont(_font("FSSans"), 6.1)
+        if page == 1:
+            canvas.drawString(inset, 14, FOOTER_NOTE)
+            canvas.drawRightString(page_w - inset, 14, "FlowSpace")
+        else:
+            canvas.drawString(inset, 14, "FlowSpace  ·  Functional design  ·  Lasting value")
+            canvas.drawRightString(page_w - inset, 14, f"Page {page}")
     canvas.restoreState()
 
 
@@ -1130,13 +1137,13 @@ def _draw_interior_header(canvas, title: str, kind: str = "interior") -> None:
     canvas.restoreState()
 
 
-def _make_on_page(kind: str, title: str, vibe: str):
+def _make_on_page(kind: str, title: str, vibe: str, version_label: str = ""):
     def _on_page(canvas, doc):
         if kind == "dashboard":
             _draw_dashboard_header(canvas, title, vibe)
         else:
             _draw_interior_header(canvas, title, kind)
-        _draw_footer(canvas, canvas.getPageNumber())
+        _draw_footer(canvas, canvas.getPageNumber(), version_label=version_label)
 
     return _on_page
 
@@ -1817,6 +1824,49 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
     return table
 
 
+def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
+    """Functional lines, then optional decorative lines, each with its link kind."""
+    from design_plan_standards import LINK_KIND_NOTE
+
+    s = _styles()
+    flows: List[Any] = []
+    for group in facts.get("groups") or []:
+        rows = [row for row in group.get("items") or [] if isinstance(row, dict)]
+        if not rows:
+            continue
+        flows.append(Paragraph(str(group.get("title") or "").upper(), s["guideH3"]))
+        for row in rows:
+            link = row.get("link") or {}
+            name = str(row.get("name") or "Organizer")
+            qty_label = str(row.get("qty"))
+            price_label = _money(float(row.get("unit_price") or 0)) if row.get("unit_price") else "Typical"
+            sub_label = str(row.get("price") or "—")
+            url = str(link.get("url") or "").strip()
+            link_label = str(link.get("label") or "").strip()
+            kind = str(link.get("kind_label") or "").strip()
+            title = f"<b>{_esc(name)}</b>"
+            if url and link_label:
+                title = (
+                    f"<b>{_esc(name)}</b><br/>"
+                    f'<link href="{_esc(url)}" color="#047857"><u>{_esc(link_label)}</u></link>'
+                )
+            elif url:
+                title = f'<link href="{_esc(url)}" color="#047857"><u><b>{_esc(name)}</b></u></link>'
+            extra = f" · {_esc(kind)}" if kind else ""
+            measure = " · measure before buying" if row.get("measure_first") else ""
+            flows.append(
+                Paragraph(
+                    f"{title}<br/>Qty {qty_label} · {price_label} each · {sub_label}{extra}{measure}",
+                    s["shopItem"],
+                )
+            )
+    if not flows:
+        flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
+    else:
+        flows.append(Paragraph(_esc(LINK_KIND_NOTE), s["shopNote"]))
+    return flows
+
+
 def _shopping_blocks(
     items: List[Dict[str, Any]],
     links: Optional[Sequence[Dict[str, str]]] = None,
@@ -1943,6 +1993,11 @@ _MODULE_PHRASES = {
     "assessment": "the designer assessment",
     "shopping": "the shopping list",
     "views": "each before-and-after view",
+    "process": "how FlowSpace works",
+    "first_step": "the first step",
+    "check": "what to check before buying",
+    "priority": "functional and decorative priority",
+    "reset": "a self-paced reset",
 }
 
 
@@ -1962,6 +2017,49 @@ def _bullets(lines: Sequence[str], style) -> List[Any]:
 def _module_flowables(module: str, sections: Dict[str, Any], s: Dict[str, ParagraphStyle]) -> List[Any]:
     """Text modules of the guide. Shopping and before/after pages are laid out by the caller."""
     title = COMPANION_MODULE_TITLES.get(module, module.upper())
+    facts = sections.get("facts") or {}
+    if module == "process":
+        steps = facts.get("process") or []
+        rows = [Paragraph(f'<font name="{_font("FSSans-Semi")}">{_esc(step["name"])}.</font> {_esc(step["body"])}', s["guideBody"]) for step in steps]
+        return [Paragraph(title, s["guideH"]), *rows] if rows else []
+    if module == "first_step":
+        step = (facts.get("steps") or [{}])[0]
+        if not step:
+            return []
+        return [
+            Paragraph(title, s["guideH"]),
+            Paragraph(f'<font name="{_font("FSSans-Semi")}">{_esc(step.get("title") or "")}.</font> {_esc(step.get("detail") or step.get("body") or "")}', s["guideBody"]),
+        ]
+    if module == "check":
+        lines = [
+            "Measure the wall, table, or niche a piece will sit on before you buy it.",
+            "A frame or a basket has no exact size in this plan unless those measurements are already recorded. Measure before buying.",
+        ]
+        named = facts.get("measure_items") or []
+        if named:
+            lines.append("Measure before buying: " + ", ".join(str(name) for name in named) + ".")
+        lines.append("On the product page, confirm the size, the finish, and the price.")
+        return [Paragraph(title, s["guideH"]), *_bullets(lines, s["guideBody"])]
+    if module == "priority":
+        lines = [
+            "Functional items come first. They give everyday things a home.",
+            "Optional decorative items come after storage is working. Skip any of them.",
+        ]
+        for group in facts.get("groups") or []:
+            names = [str(row.get("short") or row.get("name") or "") for row in group.get("items") or []]
+            if names:
+                lines.append(f"{group['title']}: " + "; ".join(names) + ".")
+        return [Paragraph(title, s["guideH"]), *_bullets(lines, s["guideBody"])]
+    if module == "reset":
+        body = [p.strip() for p in str(sections.get("maintenance") or "").split("\n\n") if p.strip()]
+        if not body:
+            return []
+        out = [Paragraph(title, s["guideH"])]
+        reset_title = str(sections.get("reset_title") or "").strip()
+        if reset_title:
+            out.append(Paragraph(_esc(reset_title), s["guideH3"]))
+        out.extend(Paragraph(_esc(p), s["guideBody"]) for p in body)
+        return out
     if module == "safety":
         return [Paragraph(title, s["guideH"]), *_bullets(sections["safety_essentials"], s["guideBody"])]
     if module == "climate":
@@ -1997,10 +2095,11 @@ def _module_flowables(module: str, sections: Dict[str, Any], s: Dict[str, Paragr
                         s["guideBody"],
                     )
                 )
+        stays = str(sections.get("what_stays") or "").strip()
         kept = assessment.get("kept") or []
-        if kept:
+        if stays or kept:
             out.append(Paragraph("What stays", s["guideH3"]))
-            out.append(Paragraph(_esc(", ".join(kept)) + ".", s["guideBody"]))
+            out.append(Paragraph(_esc(stays or (", ".join(kept) + ".")), s["guideBody"]))
         out.append(Paragraph(ZONE_APPROACH_HEADING, s["guideH3"]))
         out.append(Paragraph(_esc(assessment.get("why") or sections.get("why") or ""), s["guideBody"]))
         return out
@@ -2055,12 +2154,15 @@ def _render_companion(
         bottomPadding=2,
         showBoundary=0,
     )
+    from design_plan_standards import is_released, package_version, version_label
+
+    review_label = "" if is_released(deliverable) else version_label(package_version(deliverable))
     doc = _GuideDoc(
         buf,
         pagesize=(page_w, page_h),
         pageTemplates=[
-            PageTemplate(id="guide", frames=[int_frame], onPage=_make_on_page("guide", title_text, vibe)),
-            PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe)),
+            PageTemplate(id="guide", frames=[int_frame], onPage=_make_on_page("guide", title_text, vibe, review_label)),
+            PageTemplate(id="compare", frames=[int_frame], onPage=_make_on_page("compare", title_text, vibe, review_label)),
         ],
         title=f"{title_text} — FlowSpace {COMPANION_NAME}",
         author="FlowSpace",
@@ -2084,8 +2186,13 @@ def _render_companion(
     for module in modules:
         story.extend(_module_flowables(module, sections, s))
 
-    items = _shopping_blocks(deliverable.get("shopping_list") or [], sections["links"])
-    total_line = reference_total_line(str(sections["list_total"]))
+    facts = sections.get("facts") or {}
+    if facts.get("general"):
+        items = _grouped_shopping_blocks(facts)
+        total_line = str(facts.get("total_line") or "")
+    else:
+        items = _shopping_blocks(deliverable.get("shopping_list") or [], sections["links"])
+        total_line = reference_total_line(str(sections["list_total"]))
     tail: List[Any] = [Paragraph(_esc(total_line), s["shopTotal"])] if total_line else []
     if sections["stated_budget"]:
         tail.append(Paragraph(f"Your stated budget: {_esc(sections['stated_budget'])}.", s["shopNote"]))
