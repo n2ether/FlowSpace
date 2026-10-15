@@ -372,19 +372,46 @@ def what_stays_chips(doc: Dict[str, Any]) -> List[str]:
     return list(WHAT_STAYS_CHIPS) if is_keep_existing_wall(doc) else [WHAT_STAYS_CHIPS[1]]
 
 
+def sent_review_version(deliverable: Optional[Dict[str, Any]]) -> int:
+    """The highest package version actually emailed for review. Missing means none."""
+    try:
+        return max(0, int((deliverable or {}).get("sent_for_review") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def next_release(deliverable: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The next held version of a package. Never emails and never marks it final."""
-    status = str((deliverable or {}).get("package_status") or "").strip().lower()
-    if status in {"", "final"}:
-        status = "review"
-    version = package_version(deliverable) + 1
-    return {
+    """The review copy to prepare next. Never emails and never marks it final.
+
+    The version counts copies sent to the customer for review, not regenerations.
+    The original unlabeled package is version 1. Regenerating before anything has
+    been emailed prepares Versão 2, and further regenerations of that unsent copy
+    keep 2 — including a copy whose stored number was bumped by mistake. A package
+    already marked final, with no ``sent_for_review``, counts as sent at its
+    current version. After a successful send, the next regeneration starts the
+    following number; regenerating that newer unsent copy keeps it.
+    """
+    raw_status = str((deliverable or {}).get("package_status") or "").strip().lower()
+    recorded = sent_review_version(deliverable)
+    current = package_version(deliverable)
+    sent = current if recorded <= 0 and raw_status == "final" else recorded
+    status = "review" if raw_status in {"", "final"} else raw_status
+    if sent <= 0:
+        version = 2
+    elif current <= sent:
+        version = sent + 1
+    else:
+        version = current
+    release = {
         "package_version": version,
         "version_label": version_label(version),
         "package_status": status,
         "design_plan_approved": False,
         "emailed": False,
     }
+    if sent > 0:
+        release["sent_for_review"] = sent
+    return release
 
 
 def package_facts(

@@ -240,7 +240,7 @@ class _Pen:
         return lines
 
     def fit(self, text: str, kind: str, size: float, width: float, max_lines: int) -> List[str]:
-        """Wrap on word boundaries. Overflow ends on a whole sentence or clause, never mid-sentence."""
+        """Wrap on word boundaries. Overflow ends on a sentence boundary, never at a comma."""
         text = _clean(text)
         if not text:
             return []
@@ -1106,16 +1106,26 @@ def _changes_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
     return 20 + _label_h() + 12 + h + 20
 
 
+def _fit_zone_job(pen: _Pen, text: str, width: float) -> Tuple[List[str], float]:
+    """Keep the whole job sentence. Shrink the type, then wrap. Never cut at a comma."""
+    cleaned = _clean(text)
+    for size in (18, 17, 16, 15, 14, 13):
+        lines = pen.wrap(cleaned, "regular", size, width)
+        if lines and len(lines) <= 3:
+            return lines, float(size)
+    return pen.wrap(cleaned, "regular", 13, width), 13.0
+
+
 def _zone_card_parts(pen: _Pen, card: Dict[str, str], width: float):
     inner = width - 44
     title = pen.fit(card["title"], "semibold", 22, inner, 2)
     obj = pen.fit(card["object"].upper(), "medium", 14, inner, 1) if card.get("object") else []
-    job = pen.fit(card["job"], "regular", 18, inner, 3)
-    return title, obj, job
+    job, job_size = _fit_zone_job(pen, card["job"], inner)
+    return title, obj, job, job_size
 
 
 def _zone_card_h(pen: _Pen, card: Dict[str, str], width: float) -> float:
-    title, obj, job = _zone_card_parts(pen, card, width)
+    title, obj, job, _job_size = _zone_card_parts(pen, card, width)
     return 20 + 40 + 10 + len(title) * 27 + (4 + 17.5 if obj else 0) + 10 + len(job) * 26 + 22
 
 
@@ -1424,7 +1434,7 @@ def _draw_zones(pen: _Pen, spec: Dict[str, Any], layout: Dict[str, Any]) -> None
         pen.rrect((x0 + 22, y0 + 28, x0 + 22 + nw + 24, y0 + 28 + 28), 14, fill=SAGE_L)
         pen.text(x0 + 34, y0 + 33, num, "semibold", 15, GREEN, tracking=0.1)
         _zone_icon(pen, card["icon"], x1 - 22 - 40, y0 + 20, 40)
-        title, obj, job = _zone_card_parts(pen, card, x1 - x0)
+        title, obj, job, job_size = _zone_card_parts(pen, card, x1 - x0)
         y = y0 + 20 + 40 + 10
         for line in title:
             pen.text(x0 + 22, y, line, "semibold", 22, CHAR)
@@ -1435,7 +1445,7 @@ def _draw_zones(pen: _Pen, spec: Dict[str, Any], layout: Dict[str, Any]) -> None
             y += 17.5
         y += 10
         for line in job:
-            pen.text(x0 + 22, y, line, "regular", 18, SOFT_INK)
+            pen.text(x0 + 22, y, line, "regular", job_size, SOFT_INK)
             y += 26
 
 

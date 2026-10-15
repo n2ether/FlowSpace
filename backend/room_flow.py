@@ -641,7 +641,7 @@ def _fit_block(
 ) -> Tuple[List[str], Any]:
     """Lines that fit ``width`` × ``max_lines``. Shrinks type, then shortens at a sentence boundary.
 
-    The returned lines are a whole sentence or clause. They are not a mid-sentence slice.
+    The returned lines are whole sentences. A comma inside a phrase is never a cut.
     """
     from copy_shape import shorten_whole
 

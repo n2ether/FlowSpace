@@ -1,9 +1,14 @@
 """QA fixes for the living-room package: invented sizes, mid-sentence cuts, and the window-wall overlap."""
+import io
+
 from PIL import Image, ImageDraw
+from pypdf import PdfReader
 
 from blueprint_consistency import prepare_deliverable
-from copy_shape import complete_clip, ends_dangling
-from image_board import _Pen, _change_rows, board_spec
+from copy_shape import complete_clip, ends_dangling, shorten_whole
+from design_plan_standards import BOARD_WORDS
+from image_board import _Pen, _change_rows, _zone_card_parts, board_spec, build_image_board
+from pdf_generator import build_pdf
 from package_facts import apply_measurement_rule, package_facts
 from room_flow import _s, build_zone_map
 
@@ -18,6 +23,7 @@ ENTRY = (
     "The entry path keeps clear circulation with a small landing for shoes, bags, and keys."
 )
 CHANGE = "Add a soft textile layer for warmth and tie the seating to the wood already in the room."
+DINING = "The table and chairs — meals and conversation with calm, cohesive art overhead."
 
 
 def _deliverable():
@@ -115,3 +121,51 @@ def test_what_stays_sits_below_the_window_wall_label(monkeypatch):
     assert wall_y, "WINDOW WALL label was not drawn"
     assert min(stays) > max(wall_y) + 20
     assert min(stays) > _s(620)
+
+
+def test_dining_sentence_is_not_cut_at_the_comma(monkeypatch):
+    """The dining job stays whole on the board and in the companion guide."""
+    clipped = complete_clip(DINING, BOARD_WORDS["zone_job"])
+    assert clipped == DINING
+    assert "cohesive art overhead" in clipped
+    assert not clipped.endswith("calm.")
+    assert not ends_dangling(clipped)
+
+    def _only_the_comma_prefix_fits(value: str) -> bool:
+        return "cohesive" not in value
+
+    assert shorten_whole(DINING, _only_the_comma_prefix_fits) == DINING
+
+    deliverable = _deliverable()
+    deliverable["zones"] = [
+        {"title": "Entry Path", "desc": ENTRY},
+        {"title": "Living", "desc": "The seating stays easy to walk around."},
+        {"title": "Dining", "desc": DINING},
+    ]
+    spec = board_spec(LEAD, deliverable, {})
+    dining = next(card for card in spec["zone_cards"] if "Dining" in card["title"])
+    assert dining["job"] == DINING
+    pen = _Pen(Image.new("RGB", (3200, 4000), "white"), 2)
+    _title, _obj, lines, _size = _zone_card_parts(pen, dining, 360)
+    shown = " ".join(lines)
+    assert shown == DINING
+    assert "calm," in shown
+    assert not shown.endswith("calm.")
+
+    calls = _drawn(
+        monkeypatch,
+        lambda: build_image_board(lead=LEAD, deliverable=deliverable, images={}),
+    )
+    board = " ".join(text for text, _xy in calls)
+    assert "cohesive art overhead" in board
+    assert "with calm." not in board
+
+    reader = PdfReader(io.BytesIO(build_pdf(lead=LEAD, deliverable=deliverable, images={})))
+    pages = [" ".join((page.extract_text() or "").split()) for page in reader.pages]
+    dining_pages = [page for page in pages if "Dining" in page]
+    assert dining_pages, pages
+    for page in dining_pages:
+        assert DINING in page
+        assert "cohesive art overhead" in page
+        assert "with calm." not in page
+    assert DINING in pages[2]

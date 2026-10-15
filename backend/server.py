@@ -272,8 +272,12 @@ class Deliverable(BaseModel):
     source_afters: List[Dict[str, Any]] = []
     non_room_uploads: List[Dict[str, Any]] = []
     package_status: Optional[str] = None
-    # Missing means V1. Regeneration writes the next version; automation does not bump it.
+    # Missing means version 1. The number advances on regenerate only after this
+    # copy has been emailed for review (see sent_for_review).
     package_version: Optional[int] = None
+    # Highest package_version successfully emailed by send-draft or send-final.
+    # Missing means nothing has been sent, so regenerate keeps preparing Versão 2.
+    sent_for_review: Optional[int] = None
     # Reviewer sign-off on the Design Plan. Until set, every surface reads DRAFT / REVIEW.
     design_plan_approved: bool = False
     contact_sheet_url: Optional[str] = None
@@ -1520,10 +1524,18 @@ async def send_draft_package_endpoint(
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
+    now = _iso(datetime.now(timezone.utc))
+    sent_version = package_version(deliverable)
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {"sent_for_review": sent_version, "updated_at": now}},
+    )
     return {
         "sent": True,
         "final": False,
         "package_status": deliverable.get("package_status"),
+        "package_version": sent_version,
+        "sent_for_review": sent_version,
         "to": recipient,
         "cc": cc_emails,
     }
@@ -1557,9 +1569,10 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
             {"$set": {"status": "pdf_ready", "email_sent": False, "email_error": error, "updated_at": now}},
         )
         raise HTTPException(status_code=502, detail=error or "Final email was not sent")
+    sent_version = package_version(deliverable)
     await db.deliverables.update_one(
         {"lead_id": lead_id},
-        {"$set": {"package_status": "final", "updated_at": now}},
+        {"$set": {"package_status": "final", "sent_for_review": sent_version, "updated_at": now}},
     )
     await db.leads.update_one(
         {"id": lead_id},
@@ -1574,14 +1587,22 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
             }
         },
     )
-    return {"sent": True, "final": True, "package_status": "final", "status": "delivered"}
+    return {
+        "sent": True,
+        "final": True,
+        "package_status": "final",
+        "status": "delivered",
+        "package_version": sent_version,
+        "sent_for_review": sent_version,
+    }
 
 
 @api_router.post("/admin/leads/{lead_id}/deliverable/regenerate")
 async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
-    """Write the next held version of the stored plan and re-apply package rules.
+    """Rewrite the held review copy and re-apply package rules.
 
-    Does not email, and does not mark the package final or approved.
+    Does not email, and does not mark the package final or approved. The version
+    number stays put until send-draft or send-final has emailed that copy.
     """
     from package_facts import next_release
 
@@ -1604,6 +1625,7 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
         "contact_sheet_url",
         "non_room_uploads",
         "shopping_links",
+        "sent_for_review",
     ):
         if key in stored and key not in update:
             update[key] = stored[key]
@@ -1617,6 +1639,8 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
             "updated_at": now,
         }
     )
+    if release.get("sent_for_review"):
+        update["sent_for_review"] = release["sent_for_review"]
     update.pop("emailed", None)
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     await db.leads.update_one(
