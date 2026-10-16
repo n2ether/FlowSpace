@@ -16,7 +16,10 @@ single text-to-image path and may still email that result.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -101,7 +104,7 @@ async def _persist_upright_original(
 ) -> tuple[bytes, Optional[str]]:
     """Gravity-correct one stored original so retries share the same upright source."""
     try:
-        upright, info = normalize_photo_bytes(raw_bytes)
+        upright, info = await asyncio.to_thread(normalize_photo_bytes, raw_bytes)
     except UnreadableImage as exc:
         logger.warning("[automation] Could not normalize original photo: %s", exc)
         return raw_bytes, None
@@ -167,7 +170,9 @@ async def _load_lead_photos(lead: Dict[str, Any], db, fs_bucket) -> List[Dict[st
             if new_url:
                 url = new_url
                 photo = _replace_photo_url(photo, new_url)
-        kind, reason = classify_upload(photo, upright, filename=filename)
+        kind, reason = await asyncio.to_thread(
+            classify_upload, photo, upright, filename=filename
+        )
         loaded.append(
             {
                 "index": index,
@@ -250,7 +255,8 @@ async def _generate_organized_with_qa(
         )
         return None, image_mime, RenderQAResult(ok=False, reasons=[str(img_err)], error="generate_failed")
 
-    qa = review_organized_render(
+    qa = await asyncio.to_thread(
+        review_organized_render,
         after_bytes=organized_bytes,
         before_bytes=original_bytes,
         attempt=1,
@@ -288,7 +294,8 @@ async def _generate_organized_with_qa(
             error="retry_generate_failed",
         )
 
-    qa2 = review_organized_render(
+    qa2 = await asyncio.to_thread(
+        review_organized_render,
         after_bytes=organized_bytes,
         before_bytes=retry_ref or original_bytes,
         attempt=2,
@@ -405,7 +412,41 @@ async def _store_supporting_views(
             )
 
 
+_RENDER_SEMAPHORES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def render_concurrency() -> int:
+    """Max concurrent run_automation renders (env RENDER_CONCURRENCY, default 3)."""
+    try:
+        return max(1, int(os.environ.get("RENDER_CONCURRENCY", "3")))
+    except ValueError:
+        return 3
+
+
+def _render_semaphore() -> asyncio.Semaphore:
+    # One semaphore per event loop (a semaphore is bound to the loop that uses it).
+    loop = asyncio.get_running_loop()
+    sem = _RENDER_SEMAPHORES.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(render_concurrency())
+        _RENDER_SEMAPHORES[loop] = sem
+    return sem
+
+
 async def run_automation(
+    *,
+    lead: Dict[str, Any],
+    db,
+    fs_bucket,
+) -> bool:
+    """Run the pipeline, capping concurrent renders at RENDER_CONCURRENCY."""
+    async with _render_semaphore():
+        return await _run_automation(lead=lead, db=db, fs_bucket=fs_bucket)
+
+
+async def _run_automation(
     *,
     lead: Dict[str, Any],
     db,
@@ -608,7 +649,8 @@ async def run_automation(
                 fetched={},
             )
             package_status = "incomplete" if incomplete else "review"
-            contact_bytes = build_contact_sheet(
+            contact_bytes = await asyncio.to_thread(
+                build_contact_sheet,
                 source_pairs,
                 customer_name=customer_name,
                 incomplete=incomplete,
@@ -740,8 +782,12 @@ async def run_automation(
         )
 
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
-        pdf_bytes = build_pdf(lead=lead, deliverable=deliverable_doc, images=images)
-        board_bytes = build_image_board(lead=lead, deliverable=deliverable_doc, images=images)
+        pdf_bytes = await asyncio.to_thread(
+            build_pdf, lead=lead, deliverable=deliverable_doc, images=images
+        )
+        board_bytes = await asyncio.to_thread(
+            build_image_board, lead=lead, deliverable=deliverable_doc, images=images
+        )
         logger.info(
             "[automation] Companion PDF %d bytes, image board %d bytes",
             len(pdf_bytes),

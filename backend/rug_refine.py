@@ -10,6 +10,7 @@ change, and nothing is emailed.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -293,13 +294,17 @@ async def refine_one(
             reasons.append(f"edit failed: {exc}")
             logger.warning("[rug_refine] %s edit failed: %s", after_label, exc)
             break
-        render = qa(after_bytes=refined, before_bytes=source or after, attempt=attempt)
+        render = await asyncio.to_thread(
+            qa, after_bytes=refined, before_bytes=source or after, attempt=attempt
+        )
         last_qa = render.as_dict()
         if not _passed(render):
             reasons = list(render.reasons) or [render.error or "render QA did not pass"]
             retry_note = "; ".join(reasons[:3])
             continue
-        check = rug_check(refined=refined, previous=after, rug=rug)
+        check = await asyncio.to_thread(
+            rug_check, refined=refined, previous=after, rug=rug
+        )
         last_rug = check.as_dict()
         if not _passed(check):
             reasons = list(check.reasons) or [check.error or "rug check did not pass"]
