@@ -16,6 +16,7 @@ is scheduled to shut down on 2026-10-23, so new work should not target it.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -334,7 +335,7 @@ async def refine_after_image(prompt: str, after: bytes, reference: Optional[byte
     """Targeted edit of an existing organized after (same Images edit model and settings)."""
     client = _openai_client(_require_openai_key())
     try:
-        data, _mime = await _edit_image(client, prompt, upright_bytes(after) or after, reference)
+        data, _mime = await _edit_image(client, prompt, (await asyncio.to_thread(upright_bytes, after)) or after, reference)
     except RuntimeError:
         raise
     except Exception as exc:
@@ -371,7 +372,9 @@ async def generate_front_view(
 
     try:
         if reference_photo_bytes:
-            reference_photo_bytes = upright_bytes(reference_photo_bytes) or reference_photo_bytes
+            reference_photo_bytes = (
+                await asyncio.to_thread(upright_bytes, reference_photo_bytes)
+            ) or reference_photo_bytes
             prompt = _build_edit_prompt(
                 lead,
                 deliverable,
@@ -471,8 +474,12 @@ async def generate_supporting_views(
     source = organized_bytes or reference_photo_bytes
     if not source:
         return {}
-    source = upright_bytes(source) or source
-    before = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
+    source = (await asyncio.to_thread(upright_bytes, source)) or source
+    before = (
+        await asyncio.to_thread(upright_bytes, reference_photo_bytes)
+        if reference_photo_bytes
+        else None
+    )
     if before is None:
         before = reference_photo_bytes
 
@@ -493,7 +500,12 @@ async def generate_supporting_views(
             except Exception as exc:
                 logger.warning("[images] Supporting view %s failed: %s", key, exc)
                 break
-            qa = review_organized_render(after_bytes=raw, before_bytes=before or source, attempt=attempt)
+            qa = await asyncio.to_thread(
+                review_organized_render,
+                after_bytes=raw,
+                before_bytes=before or source,
+                attempt=attempt,
+            )
             if qa.failed:
                 logger.warning(
                     "[images] Dropping supporting view %s after QA: %s",
@@ -502,7 +514,9 @@ async def generate_supporting_views(
                 )
                 break
             references = [source, *found.values()]
-            if any(renders_too_similar(raw, ref) for ref in references):
+            if await asyncio.to_thread(
+                lambda: any(renders_too_similar(raw, ref) for ref in references)
+            ):
                 logger.warning(
                     "[images] Supporting view %s is too similar to the hero or another view (attempt %s)",
                     key,

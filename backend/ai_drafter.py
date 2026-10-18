@@ -6,6 +6,7 @@ that maps directly to the Deliverable model.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -31,6 +32,8 @@ MODEL_NAME = "claude-sonnet-4-5"
 # a cut-off reply.
 DRAFT_MAX_TOKENS = 8192
 _DRAFT_ATTEMPTS = 2
+# Per-request timeout (seconds) so a stalled Anthropic call cannot hang a render.
+DRAFT_TIMEOUT_SECONDS = 120.0
 _RETRY_HINT = (
     "\n\nYour previous reply was truncated or was not valid JSON. "
     "Return ONE compact JSON object and nothing else — no markdown fences, no commentary. "
@@ -646,6 +649,13 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
     return prepare_deliverable(lead or {}, coerced)
 
 
+def _photo_to_vision_b64(photo: bytes) -> str:
+    import base64
+
+    vision_jpeg = jpeg_for_vision(photo, max_side=1280)
+    return base64.b64encode(vision_jpeg).decode("ascii")
+
+
 async def draft_deliverable(
     lead: Dict[str, Any],
     *,
@@ -660,7 +670,7 @@ async def draft_deliverable(
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not configured")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.AsyncAnthropic(api_key=api_key, timeout=DRAFT_TIMEOUT_SECONDS)
     user_text = (
         "Customer questionnaire answers:\n\n"
         + _summarize_lead(lead)
@@ -675,12 +685,13 @@ async def draft_deliverable(
         user_text += "\n\n" + nursery_addon
 
     photo_b64: Optional[str] = None
-    photo = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
+    photo = (
+        await asyncio.to_thread(upright_bytes, reference_photo_bytes)
+        if reference_photo_bytes
+        else None
+    )
     if photo:
-        import base64
-
-        vision_jpeg = jpeg_for_vision(photo, max_side=1280)
-        photo_b64 = base64.b64encode(vision_jpeg).decode("ascii")
+        photo_b64 = await asyncio.to_thread(_photo_to_vision_b64, photo)
         user_text = (
             "A gravity-corrected photo of the customer's space is attached. "
             "Floor is at the bottom; ceiling is at the top. Use it for observation "
@@ -691,7 +702,7 @@ async def draft_deliverable(
     last_error: Optional[DraftJSONError] = None
     for attempt in range(1, _DRAFT_ATTEMPTS + 1):
         prompt = user_text if attempt == 1 else user_text + _RETRY_HINT
-        message = client.messages.create(
+        message = await client.messages.create(
             model=MODEL_NAME,
             max_tokens=DRAFT_MAX_TOKENS,
             system=SYSTEM_PROMPT,
