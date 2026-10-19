@@ -304,21 +304,32 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-def _safe_metadata(sess) -> Dict[str, str]:
-    """
-    Safely extract a plain dict from a Stripe object's .metadata field.
+def _stripe_dict(obj: Any) -> Dict[str, Any]:
+    """Plain dict from a Stripe object or dict.
 
-    IMPORTANT: do not use the bare dict(...) constructor on a Stripe SDK
-    object here. Stripe's response objects can trigger Python's fallback
-    "sequence of pairs" protocol instead of being treated as a mapping,
-    causing dict(...) to probe for an integer index (0) and raise
-    KeyError: 0. Using .items() explicitly avoids that path entirely.
+    stripe>=15 objects are no longer dict subclasses: ``.items()``, ``.get()``
+    and ``dict(obj)`` all fail. ``to_dict()`` is the supported accessor.
     """
-    raw = getattr(sess, "metadata", None)
-    if not raw:
+    if obj is None:
         return {}
+    if isinstance(obj, dict):
+        return obj
+    to_dict = getattr(obj, "to_dict", None)
+    if callable(to_dict):
+        out = to_dict()
+        return out if isinstance(out, dict) else {}
+    return {}
+
+
+def _safe_metadata(sess: Any) -> Dict[str, str]:
+    """String metadata from a Stripe checkout session (object or dict)."""
+    if isinstance(sess, dict):
+        raw = sess.get("metadata")
+    else:
+        raw = getattr(sess, "metadata", None)
     try:
-        return {str(k): str(v) for k, v in raw.items()}
+        data = _stripe_dict(raw)
+        return {str(k): str(v) for k, v in data.items() if v is not None}
     except Exception:
         logging.warning("Could not parse Stripe metadata safely; defaulting to {}")
         return {}
