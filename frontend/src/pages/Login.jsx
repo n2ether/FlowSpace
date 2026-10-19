@@ -68,6 +68,15 @@ export default function Login() {
                         autoComplete="current-password"
                         data-testid="login-password"
                     />
+                    <p className="mt-2 text-right text-sm">
+                        <Link
+                            to="/forgot-password"
+                            className="font-medium text-emerald-700 hover:text-emerald-800"
+                            data-testid="login-forgot-password"
+                        >
+                            Forgot password?
+                        </Link>
+                    </p>
                     <button
                         type="submit"
                         disabled={loading}
