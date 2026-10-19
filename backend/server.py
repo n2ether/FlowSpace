@@ -248,6 +248,10 @@ class ShoppingItem(BaseModel):
     price: float = 0
     # "functional" or "decorative" (optional styling). Empty means classify by name.
     priority: Optional[str] = None
+    # Per-item tags set by the package rules. Kept so an admin edit does not drop them.
+    measure_first: Optional[bool] = None
+    short_name: Optional[str] = None
+    item_class: Optional[str] = None
 
 
 class Zone(BaseModel):
@@ -1101,6 +1105,29 @@ async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
     return {"lead": _hydrate(sign_photo_urls(lead), ["created_at"]), "deliverable": d}
 
 
+_ITEM_TAGS = ("measure_first", "short_name", "item_class")
+
+
+def _keep_item_tags(items: List[Dict[str, Any]], stored: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Carry tags from the stored line with the same name when the edit did not send them,
+    and drop unset tags so they do not overwrite anything with null."""
+    by_name = {
+        str(item.get("name") or "").strip().lower(): item for item in stored if isinstance(item, dict)
+    }
+    out = []
+    for item in items:
+        row = dict(item)
+        previous = by_name.get(str(row.get("name") or "").strip().lower()) or {}
+        for tag in _ITEM_TAGS:
+            if row.get(tag) is None:
+                if previous.get(tag) is not None:
+                    row[tag] = previous[tag]
+                else:
+                    row.pop(tag, None)
+        out.append(row)
+    return out
+
+
 @api_router.put("/admin/leads/{lead_id}/deliverable", response_model=Deliverable)
 async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depends(require_admin)):
     lead = await db.leads.find_one({"id": lead_id})
@@ -1111,6 +1138,8 @@ async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depen
     if payload.blueprint_layers:
         payload.blueprint_layers = coerce_layers(payload.blueprint_layers)
     doc = canonicalize_photo_urls(_doc(payload))
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0, "shopping_list": 1}) or {}
+    doc["shopping_list"] = _keep_item_tags(doc.get("shopping_list") or [], stored.get("shopping_list") or [])
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
     return sign_photo_urls(doc)
 

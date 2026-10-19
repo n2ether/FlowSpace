@@ -178,7 +178,7 @@ def apply_measurement_rule(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[st
             continue
         named = " ".join(str(item.get(key) or "") for key in ("name", "short_name"))
         # A frame, basket, or other sized piece is measure-first until the room is measured,
-        # even when its line carries no size (the admin editor does not keep the flag).
+        # even when its line carries no size.
         if _SIZED_PIECE.search(named):
             item["measure_first"] = True
         # Any size on a shopping line is invented until the room is measured.
