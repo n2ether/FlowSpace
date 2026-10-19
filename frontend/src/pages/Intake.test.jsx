@@ -189,6 +189,11 @@ test("full paid journey: conditional questions, contradiction, review, payment",
     expect(screen.getByRole("region", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Payment" })).toBeInTheDocument();
     expect(screen.queryByText(/first .*free/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("intake-legal-consent")).toHaveTextContent(
+        "By continuing you agree to the Terms and Privacy Policy.",
+    );
+    expect(screen.getByTestId("intake-terms-link")).toHaveAttribute("href", "/terms");
+    expect(screen.getByTestId("intake-privacy-link")).toHaveAttribute("href", "/privacy");
 
     await user.click(screen.getByRole("button", { name: "Edit essentials" }));
     await screen.findByText("Step 3 of 4");

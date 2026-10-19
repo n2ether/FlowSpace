@@ -12,6 +12,7 @@ from email_service import (
     display_filename,
     send_blueprint,
     send_draft_package,
+    send_password_reset,
 )
 
 
@@ -452,3 +453,74 @@ def test_room_flow_block_carries_the_outline_sentence():
     )
     assert note in html
     assert "not a measured" not in html.lower()
+
+
+def _capture_sends(monkeypatch):
+    calls = []
+
+    def fake_send(payload):
+        calls.append(payload)
+        return {"id": f"msg_{len(calls)}"}
+
+    monkeypatch.setattr("email_service.resend.Emails.send", fake_send)
+    return calls
+
+
+def _send_blueprint_to_ada():
+    return asyncio.run(
+        send_blueprint(
+            customer_name="Ada Lovelace",
+            customer_email="ada@example.com",
+            space_type="garage",
+            lead_id="lead-1",
+            pdf_bytes=PDF,
+        )
+    )
+
+
+def _send_reset_to_ada():
+    return asyncio.run(
+        send_password_reset(
+            to_email="ada@example.com",
+            reset_link="https://app.example.test/reset-password?token=abc",
+            ttl_minutes=60,
+        )
+    )
+
+
+def test_customer_emails_reply_to_help_by_default(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.delenv("EMAIL_REPLY_TO", raising=False)
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "FlowSpace <blueprints@flowspace.solutions>")
+    calls = _capture_sends(monkeypatch)
+
+    assert _send_blueprint_to_ada() == (True, None)
+    assert _send_reset_to_ada() == (True, None)
+
+    customer, admin, reset = calls
+    assert customer["from"] == "FlowSpace <blueprints@flowspace.solutions>"
+    assert customer["reply_to"] == "help@flowspace.solutions"
+    assert reset["reply_to"] == "help@flowspace.solutions"
+    assert "reply_to" not in admin
+
+
+def test_reply_to_is_configurable(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("EMAIL_REPLY_TO", "  care@example.test ")
+    calls = _capture_sends(monkeypatch)
+
+    _send_blueprint_to_ada()
+    _send_reset_to_ada()
+
+    assert calls[0]["reply_to"] == "care@example.test"
+    assert calls[2]["reply_to"] == "care@example.test"
+
+
+def test_blank_reply_to_falls_back_to_help(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("EMAIL_REPLY_TO", "   ")
+    calls = _capture_sends(monkeypatch)
+
+    _send_blueprint_to_ada()
+
+    assert calls[0]["reply_to"] == "help@flowspace.solutions"

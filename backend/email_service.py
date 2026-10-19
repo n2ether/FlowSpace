@@ -39,19 +39,28 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_FROM = "FlowSpace <blueprints@flowspace.solutions>"
 DEFAULT_ADMIN = "hello@flowspace.solutions"
+DEFAULT_REPLY_TO = "help@flowspace.solutions"
 
 
 def _from_email() -> str:
     return (os.environ.get("RESEND_FROM_EMAIL") or DEFAULT_FROM).strip() or DEFAULT_FROM
 
 
+def reply_to_email() -> str:
+    """Where customer replies land; the From mailbox is send-only."""
+    return (os.environ.get("EMAIL_REPLY_TO") or DEFAULT_REPLY_TO).strip() or DEFAULT_REPLY_TO
+
+
 def _admin_email() -> str:
     return (os.environ.get("ADMIN_EMAIL") or DEFAULT_ADMIN).strip() or DEFAULT_ADMIN
 
 
+def public_app_url() -> str:
+    return (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").strip().rstrip("/")
+
+
 def _preview_url(lead_id: str) -> str:
-    base = (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").rstrip("/")
-    return f"{base}/admin/leads/{lead_id}/blueprint"
+    return f"{public_app_url()}/admin/leads/{lead_id}/blueprint"
 
 
 def _first_name(customer_name: str) -> str:
@@ -484,6 +493,7 @@ async def send_blueprint(
             {
                 "from": sender,
                 "to": [customer_email.strip()],
+                "reply_to": reply_to_email(),
                 "subject": subject,
                 "html": html,
                 "attachments": attachments,
@@ -683,3 +693,55 @@ async def send_draft_package(
         logger.exception("Draft package email failed: %s", exc)
         return False, f"Resend draft package send failed: {exc}"
 
+
+
+def password_reset_html(reset_link: str, ttl_minutes: int) -> str:
+    link = html.escape(reset_link, quote=True)
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:24px;background:{BRAND_OFF};font-family:{FONT_STACK};color:#1f2937;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px;">
+    <p style="{_LABEL}">FlowSpace</p>
+    <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#1f2937;">Reset your password</h1>
+    <p style="{_BODY}">We received a request to reset the password for your FlowSpace account.
+    Use the button below to choose a new one. The link works once and expires in {ttl_minutes} minutes.</p>
+    <p style="margin:24px 0;">
+      <a href="{link}" style="display:inline-block;background:{_GREEN};color:#ffffff;text-decoration:none;
+      padding:12px 24px;border-radius:999px;font-weight:600;">Choose a new password</a>
+    </p>
+    <p style="{_BODY}">If you didn't ask for this, you can ignore this email. Your password stays the same.</p>
+    <p style="margin:0;font-size:13px;color:{_MUTED};">Questions? Write to help@flowspace.solutions.</p>
+  </div>
+</body>
+</html>
+"""
+
+
+async def send_password_reset(*, to_email: str, reset_link: str, ttl_minutes: int) -> Tuple[bool, Optional[str]]:
+    """Email a password reset link. Never logs the link: it carries the token."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        logger.error("RESEND_API_KEY not configured — skipping password reset email")
+        return False, "RESEND_API_KEY is not configured on this server"
+    recipient = (to_email or "").strip()
+    if not recipient:
+        return False, "Reset recipient is missing"
+
+    resend.api_key = api_key
+    try:
+        await asyncio.to_thread(
+            resend.Emails.send,
+            {
+                "from": _from_email(),
+                "to": [recipient],
+                "reply_to": reply_to_email(),
+                "subject": "Reset your FlowSpace password",
+                "html": password_reset_html(reset_link, ttl_minutes),
+            },
+        )
+        logger.info("Password reset email sent")
+        return True, None
+    except Exception as exc:
+        logger.error("Password reset email failed (%s)", type(exc).__name__)
+        return False, "Resend password reset send failed"
