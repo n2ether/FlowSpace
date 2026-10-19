@@ -179,6 +179,10 @@ WHY_IT_WORKS_BODY = (
 DEFAULT_SUBTITLE = "A calmer flow for the room you already have"
 
 SHOPPING_DISCLAIMER = "Representative examples for reference; prices and availability may vary."
+# Board caption for every room but the nursery (which keeps its approved v5 line).
+BOARD_SHOPPING_CAPTION = (
+    "Representative examples for reference. Full shopping detail, links, and extra costs are in the Companion Guide."
+)
 SNAPSHOT_TOTAL_LABEL = "Illustrative reference total"
 SNAPSHOT_MAX_ITEMS = 5
 KEPT_LABEL = "Kept as-is"

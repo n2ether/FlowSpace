@@ -73,7 +73,14 @@ def _with_space_rails(
     from space_rails import image_prompt_rails, rug_prompt_rails
 
     must_stay = str((lead or {}).get("must_stay") or "").strip()
-    must_line = f"MUST KEEP from the photo: {must_stay}." if must_stay else ""
+    must_line = (
+        f"MUST KEEP from the photo: {must_stay}. Every existing furniture piece and large object "
+        "(including any playpen or baby gear) stays in its place and in frame. Do not add new "
+        "furniture such as consoles, shelves, cabinets, or tables; only tidy loose items and add "
+        "small accessories."
+        if must_stay
+        else ""
+    )
     parts = [
         image_prompt_rails(lead, deliverable),
         rug_prompt_rails(lead, deliverable),
