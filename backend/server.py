@@ -36,6 +36,7 @@ from ai_image_generator import generate_front_view, refine_after_image
 from rug_refine import describe_rug, refine_one, resolve_refine_rug
 from automation import run_automation
 from render_recovery import sweep_forever
+from draft_watermark import needs_draft_watermark, watermark_pdf, watermark_png
 from image_orientation import UnreadableImage, is_heif_upload, normalize_photo_bytes, upright_bytes
 from admin_session import create_admin_token, password_matches, verify_admin_token
 from photo_access import (
@@ -1327,6 +1328,8 @@ async def my_space_board(lead_id: str, request: Request, member: Dict[str, Any] 
     await _member_plan_or_404(lead_id, member)
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
+    if needs_draft_watermark(d):
+        png_bytes = await asyncio.to_thread(watermark_png, png_bytes)
     filename, _pdf_name, _package = _blueprint_filenames(lead, d)
     return Response(
         content=png_bytes,
@@ -1340,6 +1343,8 @@ async def my_space_pdf(lead_id: str, request: Request, member: Dict[str, Any] = 
     await _member_plan_or_404(lead_id, member)
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
+    if needs_draft_watermark(d):
+        pdf_bytes = await asyncio.to_thread(watermark_pdf, pdf_bytes)
     _board_name, filename, _package = _blueprint_filenames(lead, d)
     return Response(
         content=pdf_bytes,
