@@ -320,3 +320,14 @@ def test_qa_prompt_does_not_bias_against_warm_walls():
     assert qa_prompt() == QA_PROMPT
     asked = qa_prompt("terracotta").lower()
     assert "terracotta" in asked and "expected and correct" in asked
+
+
+def test_keep_furniture_rail_and_wall_rules_coexist():
+    keep = {"space_type": "living_room", "must_stay": "Sectional, TV console, playpen"}
+    prompt = _build_kontext_prompt(keep).lower()
+    assert "every existing furniture piece" in prompt and "do not add new furniture" in prompt
+    assert "playpen" in prompt
+    assert "wall paint lock" in prompt and "blue" not in prompt
+    painted = _build_kontext_prompt({**keep, "goals": "Please paint the walls a soft sage green."}).lower()
+    assert "do not add new furniture" in painted
+    assert "customer paint request" in painted and "soft sage green" in painted
