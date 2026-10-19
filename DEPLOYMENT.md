@@ -55,6 +55,8 @@ git push origin main
 | `OPENAI_API_KEY` | `sk-...` from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Required for the organized after-image. Customer photo → Images **edit**; no photo → Images **generations**. Model: `gpt-image-2.5-sunburst`. Already set on the Backend service in production — redeploy Backend to pick up this path. The backend raises `OPENAI_API_KEY is not configured` if this is missing, and the board + PDF continue with the labeled original (or a placeholder). |
 | `RESEND_API_KEY` | `re_...` (required for any PDF email — without it the PDF is built but never sent; lead status becomes `pdf_ready`) |
 | `RESEND_FROM_EMAIL` | Optional. Defaults to `FlowSpace <blueprints@flowspace.solutions>` |
+| `EMAIL_REPLY_TO` | Optional. Reply-To on customer emails (Design Plan delivery, password reset). Defaults to `help@flowspace.solutions` |
+| `PUBLIC_APP_URL` | Frontend base URL used in emailed links, including password reset links (`/reset-password?token=…`). Defaults to `https://flowspace.solutions`; set it to the Railway frontend URL on staging |
 | `ADMIN_EMAIL` | Your email (receives admin copies) |
 | `STRIPE_API_KEY` | `sk_live_...` (or `sk_test_...` for testing) |
 | `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below. Required: without it the webhook returns 503 unless `ENVIRONMENT=development` |

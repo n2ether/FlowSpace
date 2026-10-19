@@ -109,6 +109,17 @@ export default function Signup() {
                     >
                         {loading ? "Creating account…" : "Create free account"}
                     </button>
+                    <p className="mt-3 text-center text-xs text-slate-500" data-testid="signup-legal-consent">
+                        By continuing you agree to the{" "}
+                        <Link to="/terms" className="underline hover:text-emerald-700">
+                            Terms
+                        </Link>{" "}
+                        and{" "}
+                        <Link to="/privacy" className="underline hover:text-emerald-700">
+                            Privacy Policy
+                        </Link>
+                        .
+                    </p>
                     <p className="mt-4 text-center text-sm text-slate-600">
                         Already a member?{" "}
                         <Link

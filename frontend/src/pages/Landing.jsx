@@ -78,7 +78,6 @@ const PLANS = [
       "AI-generated organized rooms",
       "Custom PDF organization plan",
       "Shopping & labeling guide",
-      "Priority delivery",
     ],
     pdf: true,
   },
@@ -267,25 +266,6 @@ export default function Landing() {
                 See examples
               </a>
             </div>
-            <div className="flex flex-wrap items-center gap-5 pt-2 text-sm text-slate-500">
-              <div className="flex items-center gap-1.5" data-testid="hero-rating">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <svg
-                    key={i}
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="#fbbf24"
-                    stroke="#fbbf24"
-                    strokeWidth="1.6"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                  >
-                    <path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />
-                  </svg>
-                ))}
-                <span className="ml-1">4.9 / 500+ homes organized</span>
-              </div>
-            </div>
           </div>
           <div className="relative">
             <div className="absolute -top-6 -left-6 hidden h-28 w-28 rounded-2xl bg-sky-50 md:block" />
@@ -337,7 +317,7 @@ export default function Landing() {
           <div className="flex flex-col items-start gap-4 fade-in">
             <span className="eyebrow">Process</span>
             <h2 className="font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-              Simple. Fast. Done for you.
+              Simple. Guided. Made for your space.
             </h2>
           </div>
           <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
@@ -386,8 +366,7 @@ export default function Landing() {
             </h2>
             <p className="mt-4 text-slate-600">
               All plans include an AI-organized room image and an emailed PDF
-              plan. Upgrade for more photos, a fuller shopping guide, and
-              priority delivery.
+              plan. Upgrade for more photos and a fuller shopping guide.
             </p>
           </div>
           {checkoutCanceled && (
@@ -564,7 +543,7 @@ export default function Landing() {
             <div className="relative grid grid-cols-1 items-center gap-10 md:grid-cols-[1.4fr_1fr]">
               <div>
                 <h2 className="font-display text-4xl font-light tracking-tight sm:text-5xl">
-                  Your space can feel different — fast.
+                  Your space can feel different.
                 </h2>
                 <p className="mt-4 max-w-xl text-lg text-emerald-50">
                   Upload your room photos and get a visual plan for a cleaner,

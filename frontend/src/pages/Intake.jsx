@@ -566,6 +566,19 @@ export default function Intake() {
                                         </button>
                                     )}
                                 </div>
+                                {isReview && (
+                                    <p className="text-center text-xs text-slate-500 sm:text-right" data-testid="intake-legal-consent">
+                                        By continuing you agree to the{" "}
+                                        <Link to="/terms" className="underline hover:text-emerald-700" data-testid="intake-terms-link">
+                                            Terms
+                                        </Link>{" "}
+                                        and{" "}
+                                        <Link to="/privacy" className="underline hover:text-emerald-700" data-testid="intake-privacy-link">
+                                            Privacy Policy
+                                        </Link>
+                                        .
+                                    </p>
+                                )}
                             </form>
                         </>
                     )}

@@ -17,7 +17,7 @@ export default function Footer() {
             laundry rooms, storage areas, and every space in between.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-6 text-sm md:col-span-2 md:justify-end">
+        <div className="grid grid-cols-2 gap-6 text-sm sm:grid-cols-3 md:col-span-2 md:justify-end">
           <div>
             <h4 className="font-semibold text-slate-900 mb-3">Product</h4>
             <ul className="space-y-2 text-slate-600">
@@ -64,11 +64,11 @@ export default function Footer() {
             <ul className="space-y-2 text-slate-600">
               <li>
                 <a
-                  href="mailto:contact@flowspace.solutions"
+                  href="mailto:help@flowspace.solutions"
                   className="break-all hover:text-emerald-600"
                   data-testid="footer-link-contact"
                 >
-                  contact@flowspace.solutions
+                  help@flowspace.solutions
                 </a>
               </li>
               <li>
@@ -78,6 +78,47 @@ export default function Footer() {
                   data-testid="footer-link-faq"
                 >
                   FAQ
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/support"
+                  className="hover:text-emerald-600"
+                  data-testid="footer-link-support"
+                >
+                  Support
+                </a>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-semibold text-slate-900 mb-3">Legal</h4>
+            <ul className="space-y-2 text-slate-600">
+              <li>
+                <a
+                  href="/privacy"
+                  className="hover:text-emerald-600"
+                  data-testid="footer-link-privacy"
+                >
+                  Privacy Policy
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/photo-use"
+                  className="hover:text-emerald-600"
+                  data-testid="footer-link-photo-use"
+                >
+                  Photo Use
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/terms"
+                  className="hover:text-emerald-600"
+                  data-testid="footer-link-terms"
+                >
+                  Terms of Purchase
                 </a>
               </li>
             </ul>

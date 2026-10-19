@@ -16,7 +16,7 @@ export const translations = {
             cta_secondary: "See Examples",
             beforeLabel: "Before",
             afterLabel: "After",
-            delivery: "Delivery 24–48h",
+            delivery: "We'll email you as soon as your plan is ready.",
         },
         value: {
             eyebrow: "Value",
@@ -30,13 +30,13 @@ export const translations = {
         },
         how: {
             eyebrow: "Process",
-            title: "Simple. Fast. Done for you.",
+            title: "Simple. Guided. Made for your space.",
             steps: [
                 { t: "Show us your space", d: "Upload photos and answer a few quick questions." },
                 { t: "We design your system", d: "We create a layout, categories, and shopping plan." },
                 { t: "You bring it to life", d: "Follow the plan and transform your space." },
             ],
-            delivery: "Delivered in 24–48 hours",
+            delivery: "We'll email you as soon as your plan is ready.",
         },
         what: {
             eyebrow: "Deliverables",
@@ -57,7 +57,7 @@ export const translations = {
             cta: "Start this plan",
             basic: { name: "Basic", tagline: "For simple organization", features: ["Personalized layout", "Category system", "PDF delivery"] },
             standard: { name: "Standard", tagline: "Best balance", features: ["Personalized layout", "Category system", "Full shopping list", "Setup guidance"] },
-            premium: { name: "Premium", tagline: "Full transformation", features: ["Everything in Standard", "3D mockup of final space", "Priority design (24h)", "Revisions included"] },
+            premium: { name: "Premium", tagline: "Full transformation", features: ["Everything in Standard", "3D mockup of final space", "Revisions included"] },
         },
         gallery: {
             eyebrow: "Real results",
@@ -81,7 +81,7 @@ export const translations = {
             ],
         },
         finalCta: {
-            title: "Your space can feel different — fast",
+            title: "Your space can feel different",
             sub: "Start your personalized plan today and finally create a space that works for you.",
             btn: "Start My Project",
         },
@@ -118,7 +118,7 @@ export const translations = {
             otherPlaceholder: "Type your answer…",
             limitReached: "You can pick up to 3.",
             thankYou: "Thank you!",
-            thankYouSub: "We've received your project. Our design team will reach out within 24–48 hours with your personalized plan.",
+            thankYouSub: "We've received your project. We'll email you as soon as your plan is ready.",
             uploading: "Uploading…",
             tooLarge: "File too large (max 10MB)",
             uploadFailed: "Upload failed. Try again.",
@@ -240,7 +240,7 @@ export const translations = {
             finalPlaceholder: "E.g. I'd start the day calm instead of searching for my keys…",
             // Section 11 (contact)
             contactTitle: "Where should we send your plan?",
-            contactSub: "We'll deliver your design within 24–48 hours.",
+            contactSub: "We'll email you as soon as your plan is ready.",
             name: "Your name",
             email: "Email",
             phone: "Phone (optional)",
@@ -258,7 +258,7 @@ export const translations = {
             cta_secondary: "Ver ejemplos",
             beforeLabel: "Antes",
             afterLabel: "Después",
-            delivery: "Entrega 24–48h",
+            delivery: "Te enviaremos un correo en cuanto tu plan esté listo.",
         },
         value: {
             eyebrow: "Valor",
@@ -272,13 +272,13 @@ export const translations = {
         },
         how: {
             eyebrow: "Proceso",
-            title: "Simple. Rápido. Hecho por nosotros.",
+            title: "Simple. Guiado. Hecho para tu espacio.",
             steps: [
                 { t: "Muéstranos tu espacio", d: "Sube fotos y responde unas preguntas rápidas." },
                 { t: "Diseñamos tu sistema", d: "Creamos un plano, categorías y plan de compras." },
                 { t: "Tú lo haces realidad", d: "Sigue el plan y transforma tu espacio." },
             ],
-            delivery: "Entregado en 24–48 horas",
+            delivery: "Te enviaremos un correo en cuanto tu plan esté listo.",
         },
         what: {
             eyebrow: "Entregables",
@@ -299,7 +299,7 @@ export const translations = {
             cta: "Empezar este plan",
             basic: { name: "Básico", tagline: "Para organización simple", features: ["Distribución personalizada", "Sistema de categorías", "Entrega en PDF"] },
             standard: { name: "Estándar", tagline: "Mejor equilibrio", features: ["Distribución personalizada", "Sistema de categorías", "Lista de compras completa", "Guía de instalación"] },
-            premium: { name: "Premium", tagline: "Transformación total", features: ["Todo lo del Estándar", "Maqueta 3D del espacio final", "Diseño prioritario (24h)", "Revisiones incluidas"] },
+            premium: { name: "Premium", tagline: "Transformación total", features: ["Todo lo del Estándar", "Maqueta 3D del espacio final", "Revisiones incluidas"] },
         },
         gallery: {
             eyebrow: "Resultados reales",
@@ -318,12 +318,12 @@ export const translations = {
             items: [
                 { q: "¿Necesito medidas exactas?", a: "No. Con algunas fotos y medidas aproximadas es suficiente para diseñar tu sistema." },
                 { q: "¿Qué pasa si no sé qué comprar?", a: "Te lo decimos. Los planes Estándar y Premium incluyen una lista completa con enlaces." },
-                { q: "¿Cuánto tarda?", a: "La mayoría de planes se entregan en 24–48 horas. Premium tiene prioridad 24h." },
+                { q: "¿Cuánto tarda?", a: "Durante la beta, nuestro equipo revisa cada FlowSpace Design Plan antes de enviártelo por correo." },
                 { q: "¿Necesito instalar algo complicado?", a: "No. Diseñamos con pasos simples y alcanzables — sin obras ni construcciones." },
             ],
         },
         finalCta: {
-            title: "Tu espacio puede sentirse diferente — rápido",
+            title: "Tu espacio puede sentirse diferente",
             sub: "Empieza hoy tu plan personalizado y crea por fin un espacio que funcione para ti.",
             btn: "Empezar mi proyecto",
         },
@@ -360,7 +360,7 @@ export const translations = {
             otherPlaceholder: "Escribe tu respuesta…",
             limitReached: "Puedes elegir hasta 3.",
             thankYou: "¡Gracias!",
-            thankYouSub: "Hemos recibido tu proyecto. Nuestro equipo te enviará tu plan personalizado en 24–48 horas.",
+            thankYouSub: "Hemos recibido tu proyecto. Te enviaremos un correo en cuanto tu plan esté listo.",
             uploading: "Subiendo…",
             tooLarge: "Archivo muy grande (máx 10MB)",
             uploadFailed: "Error al subir. Intenta de nuevo.",
@@ -432,7 +432,7 @@ export const translations = {
             finalTitle: "Si esta habitación pudiera mejorar tu día a día en UNA sola cosa, ¿cuál sería?",
             finalPlaceholder: "Ej: Empezar el día tranquilo en lugar de buscar las llaves…",
             contactTitle: "¿A dónde te enviamos tu plan?",
-            contactSub: "Entregamos tu diseño en 24–48 horas.",
+            contactSub: "Te enviaremos un correo en cuanto tu plan esté listo.",
             name: "Tu nombre",
             email: "Correo",
             phone: "Teléfono (opcional)",
@@ -450,7 +450,7 @@ export const translations = {
             cta_secondary: "Ver exemplos",
             beforeLabel: "Antes",
             afterLabel: "Depois",
-            delivery: "Entrega 24–48h",
+            delivery: "Enviaremos um e-mail assim que seu plano estiver pronto.",
         },
         value: {
             eyebrow: "Valor",
@@ -464,13 +464,13 @@ export const translations = {
         },
         how: {
             eyebrow: "Processo",
-            title: "Simples. Rápido. Feito para você.",
+            title: "Simples. Guiado. Feito para o seu espaço.",
             steps: [
                 { t: "Mostre seu espaço", d: "Envie fotos e responda algumas perguntas rápidas." },
                 { t: "Projetamos seu sistema", d: "Criamos layout, categorias e plano de compras." },
                 { t: "Você coloca em prática", d: "Siga o plano e transforme seu espaço." },
             ],
-            delivery: "Entregue em 24–48 horas",
+            delivery: "Enviaremos um e-mail assim que seu plano estiver pronto.",
         },
         what: {
             eyebrow: "Entregáveis",
@@ -491,7 +491,7 @@ export const translations = {
             cta: "Começar este plano",
             basic: { name: "Básico", tagline: "Para organização simples", features: ["Layout personalizado", "Sistema de categorias", "Entrega em PDF"] },
             standard: { name: "Padrão", tagline: "Melhor equilíbrio", features: ["Layout personalizado", "Sistema de categorias", "Lista de compras completa", "Guia de instalação"] },
-            premium: { name: "Premium", tagline: "Transformação total", features: ["Tudo do Padrão", "Mockup 3D do espaço final", "Design prioritário (24h)", "Revisões incluídas"] },
+            premium: { name: "Premium", tagline: "Transformação total", features: ["Tudo do Padrão", "Mockup 3D do espaço final", "Revisões incluídas"] },
         },
         gallery: {
             eyebrow: "Resultados reais",
@@ -510,12 +510,12 @@ export const translations = {
             items: [
                 { q: "Preciso de medidas exatas?", a: "Não. Algumas fotos e medidas aproximadas são suficientes para projetar seu sistema." },
                 { q: "E se eu não souber o que comprar?", a: "A gente te diz. Planos Padrão e Premium incluem lista completa com links." },
-                { q: "Quanto tempo leva?", a: "A maioria dos planos é entregue em 24–48 horas. Premium tem prioridade 24h." },
+                { q: "Quanto tempo leva?", a: "Durante o beta, nossa equipe revisa cada FlowSpace Design Plan antes de enviá-lo por e-mail." },
                 { q: "Preciso instalar algo complicado?", a: "Não. Projetamos com passos simples — sem obras pesadas." },
             ],
         },
         finalCta: {
-            title: "Seu espaço pode se sentir diferente — rápido",
+            title: "Seu espaço pode se sentir diferente",
             sub: "Comece seu plano personalizado hoje e finalmente tenha um espaço que funciona.",
             btn: "Começar meu projeto",
         },
@@ -552,7 +552,7 @@ export const translations = {
             otherPlaceholder: "Digite sua resposta…",
             limitReached: "Você pode escolher até 3.",
             thankYou: "Obrigado!",
-            thankYouSub: "Recebemos seu projeto. Nossa equipe enviará seu plano personalizado em 24–48 horas.",
+            thankYouSub: "Recebemos seu projeto. Enviaremos um e-mail assim que seu plano estiver pronto.",
             uploading: "Enviando…",
             tooLarge: "Arquivo muito grande (máx 10MB)",
             uploadFailed: "Falha no envio. Tente novamente.",
@@ -624,7 +624,7 @@ export const translations = {
             finalTitle: "Se esse cômodo pudesse melhorar seu dia a dia em UMA coisa, qual seria?",
             finalPlaceholder: "Ex: Começar o dia calmo em vez de procurar minhas chaves…",
             contactTitle: "Para onde enviamos seu plano?",
-            contactSub: "Entregamos seu design em 24–48 horas.",
+            contactSub: "Enviaremos um e-mail assim que seu plano estiver pronto.",
             name: "Seu nome",
             email: "E-mail",
             phone: "Telefone (opcional)",

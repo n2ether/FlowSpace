@@ -125,6 +125,8 @@ class FakeDB:
         self.payment_transactions = FakeCollection()
         self.stripe_events = FakeCollection(unique="event_id")
         self.checkout_fulfillments = FakeCollection(unique="session_id")
+        self.password_resets = FakeCollection(unique="token_hash")
+        self.password_reset_requests = FakeCollection()
 
 
 def _project(doc, projection):
