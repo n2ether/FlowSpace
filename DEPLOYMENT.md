@@ -57,9 +57,14 @@ git push origin main
 | `RESEND_FROM_EMAIL` | Optional. Defaults to `FlowSpace <blueprints@flowspace.solutions>` |
 | `ADMIN_EMAIL` | Your email (receives admin copies) |
 | `STRIPE_API_KEY` | `sk_live_...` (or `sk_test_...` for testing) |
-| `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below |
-| `ADMIN_PASSWORD` | Change this to a strong password |
+| `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below. Required: without it the webhook returns 503 unless `ENVIRONMENT=development` |
+| `ALLOW_STRIPE_TEST_EVENTS` | Preview only: `1` to process Stripe test-mode (`livemode: false`) events. **Never set in production** — test events are acknowledged and ignored there |
+| `ENVIRONMENT` | Optional. `development` lets a local backend accept unsigned Stripe events when no webhook secret is set |
+| `ADMIN_PASSWORD` | Change this to a strong password. Used to log in; the browser receives a 12-hour session token, not the password |
 | `JWT_SECRET` | Long random string for member session JWTs |
+| `PHOTO_URL_SECRET` | Optional, recommended. Long random string that signs photo URLs (1-hour links). Falls back to a value derived from `JWT_SECRET`. Rotating it expires every outstanding photo link |
+| `ADMIN_SESSION_SECRET` | Optional. Signs admin session tokens; falls back to a value derived from `JWT_SECRET` |
+| `RENDER_MAX_RECOVERIES` | Optional, default `2`. How many times a render orphaned by a restart is re-queued before the lead is held as failed |
 | `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` (plus the Railway frontend origin if it is different) |
 
 `REPLICATE_API_TOKEN` is no longer read by the after-image path. If it is already set on the Backend service, leave the secret in place — this deploy does not require deleting it.
