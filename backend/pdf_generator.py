@@ -1713,6 +1713,9 @@ class _GuideDoc(BaseDocTemplate):
     """Records how far down each page the content reaches, for the page-fill check."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # reportlab opens every page with Helvetica unless told otherwise, which leaves
+        # an unembedded base-14 font reference in the file.
+        kwargs.setdefault("initialFontName", _font("FSSans"))
         super().__init__(*args, **kwargs)
         self.page_fill: Dict[int, float] = {}
 

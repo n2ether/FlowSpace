@@ -42,21 +42,29 @@ def watermark_png(png: bytes, text: str = WATERMARK_TEXT) -> bytes:
     return buf.getvalue()
 
 
+def _pdf_font() -> str:
+    """Embedded Montserrat Bold (registered by the guide), never an unembedded base-14 font."""
+    from pdf_generator import _font
+
+    return _font("FSSans-Bold")
+
+
 def _pdf_stamp(width: float, height: float, text: str) -> bytes:
     from reportlab.lib.colors import Color
     from reportlab.pdfgen import canvas
 
+    face = _pdf_font()
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(width, height))
+    c = canvas.Canvas(buf, pagesize=(width, height), initialFontName=face)
     c.saveState()
     c.setFillColor(Color(_FILL[0] / 255, _FILL[1] / 255, _FILL[2] / 255, alpha=0.18))
-    c.setFont("Helvetica-Bold", min(width, height) * 0.22)
+    c.setFont(face, min(width, height) * 0.22)
     c.translate(width / 2, height / 2)
     c.rotate(35)
     c.drawCentredString(0, -min(width, height) * 0.08, text)
     c.restoreState()
     c.setFillColor(Color(_FILL[0] / 255, _FILL[1] / 255, _FILL[2] / 255, alpha=0.85))
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont(face, 9)
     c.drawString(18, height - 16, f"{text} — in review, not final")
     c.save()
     return buf.getvalue()
