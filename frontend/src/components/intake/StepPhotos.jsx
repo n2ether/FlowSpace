@@ -7,6 +7,7 @@ import {
     SHOT_TYPES,
     angleTip,
     blockingIssues,
+    isConceptual,
     needsAcknowledgement,
     photoLabel,
 } from "../../lib/intake/model";
@@ -144,7 +145,7 @@ export default function StepPhotos({
 }) {
     const full = photos.length >= plan.maxPhotos;
     const busy = uploading || Boolean(pending);
-    const conceptual = form.photo_mode === "conceptual";
+    const conceptual = isConceptual(form, plan);
 
     return (
         <div className="space-y-7">
@@ -163,7 +164,7 @@ export default function StepPhotos({
             <section aria-labelledby="photos-heading" id="photos">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h2 id="photos-heading" className="text-sm font-medium text-slate-800">
-                        Your photos
+                        {conceptual ? "Photos" : "Your photos"}
                     </h2>
                     <p className="text-xs text-slate-500" data-testid="photo-count">
                         {photos.length} of {plan.maxPhotos} added — the {plan.name} plan includes up to {plan.maxPhotos}

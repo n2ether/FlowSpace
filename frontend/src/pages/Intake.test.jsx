@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Intake from "./Intake";
 import { api } from "../lib/api";
-import { DRAFT_KEY, emptyForm, serializeDraft } from "../lib/intake/model";
+import { CONCEPTUAL_PHOTOS_LINE, DRAFT_KEY, PAID_PHOTO_REQUIRED, emptyForm, serializeDraft } from "../lib/intake/model";
 import { measurePhoto } from "../lib/intake/photoChecks";
 import { bakeRotation, inspectPhotoFile } from "../lib/photoOrientation";
 
@@ -293,4 +293,57 @@ test("review falls back to the neutral notice when checkout answers payments dis
     await user.click(screen.getByRole("button", { name: "Continue to payment — $20" }));
     await screen.findByTestId("payments-disabled-notice");
     expectNeutralPaymentsOff(screen.getByRole("button", { name: "Continue to payment — $20" }));
+});
+
+function seedDraft({ form: over = {}, photos = [], step = 3 } = {}) {
+    const form = {
+        ...emptyForm(),
+        space_type: "bedroom",
+        priority: "storage",
+        keep: "keep_all",
+        limits: ["none"],
+        budget: "100_300",
+        name: "Camila",
+        email: "camila@example.com",
+        ...over,
+    };
+    localStorage.setItem(DRAFT_KEY, serializeDraft({ form, photos, step }));
+}
+
+const conceptualDraft = { photo_mode: "conceptual", conceptual_ack: true, coverage: "" };
+
+test("switching a conceptual Free draft to a paid plan sends the user to Photos", async () => {
+    seedDraft({ form: conceptualDraft });
+    renderIntake("plus");
+    await screen.findByText("Step 2 of 4");
+    expect(await screen.findByRole("alert")).toHaveTextContent(PAID_PHOTO_REQUIRED);
+    expect(screen.queryByTestId("photo-mode-conceptual")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Continue to payment/ })).not.toBeInTheDocument();
+    await waitFor(() => {
+        const saved = JSON.parse(localStorage.getItem(DRAFT_KEY)).form;
+        expect(saved).toMatchObject({ photo_mode: "photos", conceptual_ack: false });
+    });
+});
+
+test("review hides the pay button until a paid plan has a wide photo", async () => {
+    const closeUp = { id: "p1", url: "/api/uploads/photo/aaaaaaaaaaaaaaaaaaaaaaaa", label: "", shot: "detail", metrics: mockMetrics };
+    seedDraft({ form: { coverage: "whole" }, photos: [closeUp] });
+    renderIntake("plus");
+    await screen.findByText("Step 4 of 4");
+    expect(screen.getByTestId("review-photo-required")).toHaveTextContent(PAID_PHOTO_REQUIRED);
+    expect(screen.queryByRole("button", { name: /Continue to payment/ })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("intake-add-photo"));
+    await screen.findByText("Step 2 of 4");
+    expect(api.post).not.toHaveBeenCalled();
+});
+
+test("conceptual review uses neutral wording instead of photo promises", async () => {
+    seedDraft({ form: conceptualDraft });
+    renderIntake("free");
+    await screen.findByText("Step 4 of 4");
+    expect(screen.getByTestId("review-photos")).toHaveTextContent(CONCEPTUAL_PHOTOS_LINE);
+    expect(screen.getByTestId("review-scope")).not.toHaveTextContent(/your photos/i);
+    expect(screen.queryByText(/Match my current space/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Your photos")).not.toBeInTheDocument();
 });

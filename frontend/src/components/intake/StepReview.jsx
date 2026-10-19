@@ -6,10 +6,11 @@ import {
     KEEP_OPTIONS,
     KIDS_ACTIVITIES,
     KIDS_STAGES,
+    CONCEPTUAL_PHOTOS_LINE,
     MEASURE_UNITS,
+    PAID_PHOTO_REQUIRED,
     PALETTES,
     PAYMENTS_DISABLED_NOTICE,
-    PLAN_SCOPE,
     PRIORITIES,
     PRODUCT_NAME,
     ROOM_FLOW_COPY,
@@ -22,9 +23,11 @@ import {
     limitsText,
     photoLabel,
     planLine,
+    planScope,
     roomFlowMode,
     spaceLabel,
     spaceQuestion,
+    visualMode,
 } from "../../lib/intake/model";
 
 function Row({ term, children }) {
@@ -75,12 +78,23 @@ function spaceDetail(form) {
     return a.text.trim();
 }
 
-export default function StepReview({ form, update, plan, photos, errors, member, onEdit, planId, paymentsDisabled = false }) {
+export default function StepReview({
+    form,
+    update,
+    plan,
+    photos,
+    errors,
+    member,
+    onEdit,
+    planId,
+    paymentsDisabled = false,
+    photoRequired = false,
+}) {
     const accepted = acceptedPhotos(photos);
     const conceptual = isConceptual(form, plan);
     const flow = roomFlowMode(form, plan);
     const limitations = coverageLimitations(form, photos, plan);
-    const visual = labelFor(VISUAL_MODES, form.visual_mode) || "Match my current space";
+    const visual = labelFor(VISUAL_MODES, visualMode(form, plan));
     const visualDetail =
         form.visual_mode === "choose_style"
             ? ` — ${[labelFor(STYLES, form.style), labelFor(PALETTES, form.palette)].filter(Boolean).join(", ")}`
@@ -96,9 +110,14 @@ export default function StepReview({ form, update, plan, photos, errors, member,
                 {form.specifics.trim() && <Row term="Specifics">{form.specifics.trim()}</Row>}
             </Section>
 
-            <Section id="photos" title="Photos & coverage" onEdit={() => onEdit(1)} editLabel="Edit photos">
+            <Section
+                id="photos"
+                title={conceptual ? "Photos" : "Photos & coverage"}
+                onEdit={() => onEdit(1)}
+                editLabel="Edit photos"
+            >
                 {conceptual ? (
-                    <Row term="Photos">None — conceptual plan</Row>
+                    <Row term="Plan type">{CONCEPTUAL_PHOTOS_LINE}</Row>
                 ) : (
                     <>
                         <Row term="Accepted photos">
@@ -150,7 +169,7 @@ export default function StepReview({ form, update, plan, photos, errors, member,
                     What you&apos;ll receive — {PRODUCT_NAME}, {plan.name}
                 </h2>
                 <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
-                    {PLAN_SCOPE[plan.id].map((s) => (
+                    {planScope(form, plan).map((s) => (
                         <li key={s.title}>
                             <span className="font-medium text-slate-900">{s.title}:</span> {s.body}
                         </li>
@@ -247,7 +266,16 @@ export default function StepReview({ form, update, plan, photos, errors, member,
                 <p className="mt-2 text-base font-medium text-slate-900" data-testid="review-plan-line">
                     {planLine(plan)}
                 </p>
-                {plan.price > 0 && paymentsDisabled ? (
+                {plan.price > 0 && photoRequired ? (
+                    <p
+                        id="photo-required-notice"
+                        role="status"
+                        className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        data-testid="review-photo-required"
+                    >
+                        {PAID_PHOTO_REQUIRED}
+                    </p>
+                ) : plan.price > 0 && paymentsDisabled ? (
                     <p
                         id="payments-disabled-notice"
                         role="status"

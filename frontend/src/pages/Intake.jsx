@@ -13,11 +13,15 @@ import StepReview from "../components/intake/StepReview";
 import { measurePhoto, withIssues } from "../lib/intake/photoChecks";
 import {
     DRAFT_KEY,
+    PAID_PHOTO_REQUIRED,
     PRODUCT_NAME,
     STEPS,
+    acceptedPhotos,
     buildLeadPayload,
     emptyForm,
     firstInvalidStep,
+    formForPlan,
+    paidPhotoMissing,
     parseDraft,
     photoLabel,
     priceLabel,
@@ -56,7 +60,7 @@ export default function Intake() {
     const { member, signup, login, refresh } = useAuth();
 
     const [initialDraft] = useState(readDraft);
-    const [form, setForm] = useState(() => initialDraft?.form || emptyForm());
+    const [form, setForm] = useState(() => formForPlan(initialDraft?.form || emptyForm(), plan));
     const [photos, setPhotos] = useState(() => initialDraft?.photos || []);
     const [step, setStep] = useState(() => initialDraft?.step || 0);
     const [showRestored, setShowRestored] = useState(() => draftHasAnswers(initialDraft));
@@ -73,6 +77,21 @@ export default function Intake() {
 
     const checked = useMemo(() => withIssues(photos), [photos]);
     const update = useCallback((patch) => setForm((f) => ({ ...f, ...patch })), []);
+    const noAcceptedPhotos = acceptedPhotos(checked).length === 0;
+
+    useEffect(() => {
+        setForm((f) => formForPlan(f, plan));
+    }, [plan]);
+
+    useEffect(() => {
+        // A paid plan reached past Photos without an accepted photo (plan switch
+        // or restored draft) goes back to Photos with the paid-plan message.
+        if (plan.price === 0 || step <= 1 || !noAcceptedPhotos) return;
+        stepChanged.current = true;
+        setReturnToReview(false);
+        setStep(1);
+        setErrors({ photos: PAID_PHOTO_REQUIRED });
+    }, [plan.price, step, noAcceptedPhotos]);
 
     useEffect(() => {
         try {
@@ -214,9 +233,16 @@ export default function Intake() {
     };
 
     const payDisabled = plan.price > 0 && paymentsDisabled;
+    const photoRequired = paidPhotoMissing(form, checked, plan);
 
     const submit = async () => {
         if (payDisabled) return;
+        if (photoRequired) {
+            setReturnToReview(true);
+            goTo(1);
+            requestAnimationFrame(() => showErrors({ photos: PAID_PHOTO_REQUIRED }));
+            return;
+        }
         const invalid = firstInvalidStep(ctx);
         if (invalid >= 0) {
             setReturnToReview(true);
@@ -459,6 +485,7 @@ export default function Intake() {
                                         planId={plan.id}
                                         onEdit={editFromReview}
                                         paymentsDisabled={payDisabled}
+                                        photoRequired={photoRequired}
                                     />
                                 )}
 
@@ -470,27 +497,38 @@ export default function Intake() {
                                     ) : (
                                         <span />
                                     )}
-                                    <button
-                                        type="submit"
-                                        disabled={
-                                            submitting ||
-                                            (isReview && payDisabled) ||
-                                            (step === 1 && (uploading || Boolean(pending)))
-                                        }
-                                        aria-describedby={isReview && payDisabled ? "payments-disabled-notice" : undefined}
-                                        className={`btn-primary justify-center ${submitting ? "cursor-wait opacity-60" : ""} ${
-                                            isReview && payDisabled ? "cursor-not-allowed opacity-50 saturate-0" : ""
-                                        }`}
-                                        data-testid={isReview ? "intake-submit" : "intake-next"}
-                                    >
-                                        {submitting
-                                            ? "Submitting…"
-                                            : isReview
-                                              ? submitLabel(plan)
-                                              : returnToReview
-                                                ? "Save and return to review"
-                                                : "Continue"}
-                                    </button>
+                                    {isReview && photoRequired ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => editFromReview(1)}
+                                            className="btn-primary justify-center"
+                                            data-testid="intake-add-photo"
+                                        >
+                                            Add a photo
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="submit"
+                                            disabled={
+                                                submitting ||
+                                                (isReview && payDisabled) ||
+                                                (step === 1 && (uploading || Boolean(pending)))
+                                            }
+                                            aria-describedby={isReview && payDisabled ? "payments-disabled-notice" : undefined}
+                                            className={`btn-primary justify-center ${submitting ? "cursor-wait opacity-60" : ""} ${
+                                                isReview && payDisabled ? "cursor-not-allowed opacity-50 saturate-0" : ""
+                                            }`}
+                                            data-testid={isReview ? "intake-submit" : "intake-next"}
+                                        >
+                                            {submitting
+                                                ? "Submitting…"
+                                                : isReview
+                                                  ? submitLabel(plan)
+                                                  : returnToReview
+                                                    ? "Save and return to review"
+                                                    : "Continue"}
+                                        </button>
+                                    )}
                                 </div>
                             </form>
                         </>
