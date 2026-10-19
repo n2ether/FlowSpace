@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from bson import ObjectId
 from gridfs.errors import NoFile
+from pymongo.errors import DuplicateKeyError
 import base64
 import io
 import os
@@ -540,7 +541,12 @@ async def _fulfill_paid_checkout(
     payment_status: str = "paid",
     stripe_status: str = "complete",
 ) -> None:
-    """Link a paid Stripe session to its lead and start PDF email automation."""
+    """Link a paid Stripe session to its lead and start PDF email automation.
+
+    Fulfillment runs at most once per session_id: the webhook, its retries and
+    the success-page poll all race to claim ``checkout_fulfillments`` (unique
+    on session_id) and only the winner queues automation.
+    """
     existing_tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
     await db.payment_transactions.update_one(
         {"session_id": session_id},
@@ -555,34 +561,91 @@ async def _fulfill_paid_checkout(
     if payment_status != "paid":
         return
 
-    lead = await _find_lead_for_checkout(
-        metadata=metadata,
-        customer_email=customer_email,
-        transaction_lead_id=(existing_tx or {}).get("lead_id"),
-    )
-    if not lead:
-        logging.warning(
-            "Paid checkout %s has no matching lead (email=%s metadata_lead_id=%s tx_lead_id=%s)",
-            session_id,
-            customer_email,
-            (metadata or {}).get("lead_id"),
-            (existing_tx or {}).get("lead_id"),
-        )
+    if not await _claim_fulfillment(session_id):
+        logging.info("Checkout %s already fulfilled — skipping", session_id)
         return
 
-    pkg = (metadata or {}).get("package_id") or lead.get("package_id") or ""
+    try:
+        lead = await _find_lead_for_checkout(
+            metadata=metadata,
+            customer_email=customer_email,
+            transaction_lead_id=(existing_tx or {}).get("lead_id"),
+        )
+        if not lead:
+            logging.warning(
+                "Paid checkout %s has no matching lead (email=%s metadata_lead_id=%s tx_lead_id=%s)",
+                session_id,
+                customer_email,
+                (metadata or {}).get("lead_id"),
+                (existing_tx or {}).get("lead_id"),
+            )
+            # Release so a later trigger can match the lead once it exists.
+            await db.checkout_fulfillments.delete_one({"session_id": session_id})
+            return
+
+        pkg = (metadata or {}).get("package_id") or lead.get("package_id") or ""
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"lead_id": lead["id"]}},
+        )
+        await db.checkout_fulfillments.update_one(
+            {"session_id": session_id},
+            {"$set": {"lead_id": lead["id"]}},
+        )
+        await _start_automation_for_lead(
+            lead,
+            background_tasks,
+            extra_fields={
+                "stripe_session_id": session_id,
+                "package_id": pkg,
+            },
+        )
+    except Exception:
+        await db.checkout_fulfillments.delete_one({"session_id": session_id})
+        raise
+
+
+async def _claim_fulfillment(session_id: str) -> bool:
+    try:
+        await db.checkout_fulfillments.insert_one(
+            {"session_id": session_id, "claimed_at": _iso(datetime.now(timezone.utc))}
+        )
+    except DuplicateKeyError:
+        return False
+    return True
+
+
+async def _record_stripe_event(event_id: str, event_type: str) -> bool:
+    """Persist a Stripe event id; False when it was already processed."""
+    try:
+        await db.stripe_events.insert_one(
+            {"event_id": event_id, "type": event_type, "received_at": _iso(datetime.now(timezone.utc))}
+        )
+    except DuplicateKeyError:
+        return False
+    return True
+
+
+async def _mark_checkout_unpaid(session_id: str, outcome: str) -> None:
+    """Record an expired or failed checkout. Never downgrades a paid transaction."""
     await db.payment_transactions.update_one(
-        {"session_id": session_id},
-        {"$set": {"lead_id": lead["id"]}},
-    )
-    await _start_automation_for_lead(
-        lead,
-        background_tasks,
-        extra_fields={
-            "stripe_session_id": session_id,
-            "package_id": pkg,
+        {"session_id": session_id, "payment_status": {"$ne": "paid"}},
+        {
+            "$set": {
+                "payment_status": outcome,
+                "status": outcome,
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
         },
     )
+
+
+async def ensure_payment_indexes(database) -> None:
+    try:
+        await database.stripe_events.create_index("event_id", unique=True)
+        await database.checkout_fulfillments.create_index("session_id", unique=True)
+    except Exception as e:
+        logging.warning("Could not create payment idempotency indexes: %s", e)
 
 
 async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
@@ -1671,6 +1734,13 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
 
 # ──────────────────────────── Stripe ─────────────────────────────
 PAYMENTS_DISABLED_MESSAGE = "Payments are disabled in this preview. No charge will be made."
+STRIPE_UNPAID_OUTCOMES = {
+    "checkout.session.expired": "expired",
+    "checkout.session.async_payment_failed": "failed",
+}
+STRIPE_HANDLED_EVENTS = frozenset(
+    {"checkout.session.completed", "checkout.session.async_payment_succeeded", *STRIPE_UNPAID_OUTCOMES}
+)
 
 
 def _stripe_mode(key: str) -> Optional[str]:
@@ -1703,16 +1773,20 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     if pkg["price"] == 0.0:
         raise HTTPException(status_code=400, detail="Free tier does not require checkout")
     lead_id = str((req.metadata or {}).get("lead_id") or "").strip()
-    if lead_id:
-        lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
-        if not lead:
-            raise HTTPException(status_code=404, detail="Project not found")
-        reason = chargeable_block_reason(lead, pkg)
-        if reason:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
-            )
+    if not lead_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "LEAD_REQUIRED", "message": "Finish your project details before payment."},
+        )
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Project not found")
+    reason = chargeable_block_reason(lead, pkg)
+    if reason:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
+        )
     if not STRIPE_API_KEY:
         raise HTTPException(
             status_code=503,
@@ -1733,6 +1807,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         metadata["email"] = str(req.email)
     if req.metadata:
         metadata.update({str(k): str(v) for k, v in req.metadata.items()})
+    metadata["lead_id"] = lead_id
     member = await optional_member(request)
     checkout_email = str(req.email) if req.email else None
     if member:
@@ -1769,7 +1844,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         amount=float(pkg["price"]),
         currency=pkg["currency"],
         email=checkout_email,
-        lead_id=(req.metadata or {}).get("lead_id") or metadata.get("lead_id"),
+        lead_id=lead_id,
         payment_status="initiated",
         status="open",
         metadata=metadata,
@@ -1842,10 +1917,15 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
 async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Handle Stripe webhooks.
-    On checkout.session.completed with payment_status=paid:
+    On checkout.session.completed (or async_payment_succeeded) with payment_status=paid:
       1. Mark transaction as paid
-      2. Link or create the lead
-      3. Fire automation pipeline in background
+      2. Link the lead
+      3. Fire automation pipeline in background (once per session)
+    On checkout.session.expired / async_payment_failed: mark the transaction
+    expired / failed; no automation.
+
+    Each event.id is recorded in ``stripe_events`` (unique) before handling, so
+    Stripe redeliveries are acknowledged without doing the work twice.
     """
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
@@ -1861,11 +1941,23 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
         logging.exception("Webhook verification failed")
         raise HTTPException(status_code=400, detail=str(e))
 
-    if event.type == "checkout.session.completed":
-        try:
-            sess = event.data.object
-            session_id = sess.id
-            payment_status = getattr(sess, "payment_status", "unknown")
+    event_type = getattr(event, "type", "")
+    if event_type not in STRIPE_HANDLED_EVENTS:
+        return {"received": True}
+
+    event_id = str(getattr(event, "id", "") or "")
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Event has no id")
+    if not await _record_stripe_event(event_id, event_type):
+        logging.info("Stripe event %s (%s) already processed — skipping", event_id, event_type)
+        return {"received": True, "duplicate": True}
+
+    try:
+        sess = event.data.object
+        session_id = sess.id
+        if event_type in STRIPE_UNPAID_OUTCOMES:
+            await _mark_checkout_unpaid(session_id, STRIPE_UNPAID_OUTCOMES[event_type])
+        else:
             metadata = _safe_metadata(sess)
             customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
             await _fulfill_paid_checkout(
@@ -1873,14 +1965,15 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 metadata=metadata,
                 customer_email=customer_email,
                 background_tasks=background_tasks,
-                payment_status=payment_status,
+                payment_status=getattr(sess, "payment_status", "unknown"),
                 stripe_status=getattr(sess, "status", "complete"),
             )
-        except Exception:
-            # Log the FULL traceback so it's visible in Railway logs, then
-            # re-raise as a clean 500 so Stripe knows to retry.
-            logging.exception("Webhook processing failed for checkout.session.completed")
-            raise HTTPException(status_code=500, detail="Internal error processing webhook")
+    except Exception:
+        # Forget the event so Stripe's retry is processed, log the FULL
+        # traceback for Railway, and return a clean 500 so Stripe retries.
+        await db.stripe_events.delete_one({"event_id": event_id})
+        logging.exception("Webhook processing failed for %s", event_type)
+        raise HTTPException(status_code=500, detail="Internal error processing webhook")
 
     return {"received": True}
 
@@ -1907,6 +2000,7 @@ logger = logging.getLogger(__name__)
 async def _startup():
     await seed_gallery_if_empty()
     await ensure_member_indexes(db)
+    await ensure_payment_indexes(db)
 
 
 @app.on_event("shutdown")
