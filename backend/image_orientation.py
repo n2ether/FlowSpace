@@ -18,6 +18,24 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+    HEIF_SUPPORTED = True
+except Exception:  # pragma: no cover - optional native wheel missing
+    HEIF_SUPPORTED = False
+    logger.warning("pillow-heif is not installed; HEIC/HEIF uploads cannot be decoded")
+
+HEIF_CONTENT_TYPES = frozenset({"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"})
+HEIF_EXTENSIONS = (".heic", ".heif")
+
+
+def is_heif_upload(content_type: Optional[str], filename: Optional[str]) -> bool:
+    """iOS and some browsers send HEIC as application/octet-stream; trust the extension too."""
+    ct = (content_type or "").lower().split(";")[0].strip()
+    return ct in HEIF_CONTENT_TYPES or str(filename or "").lower().endswith(HEIF_EXTENSIONS)
+
 EXIF_ORIENTATION_TAG = 274
 DEFAULT_JPEG_QUALITY = 90
 

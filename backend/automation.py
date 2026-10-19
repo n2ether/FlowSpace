@@ -23,7 +23,6 @@ import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
 from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
@@ -44,7 +43,8 @@ from image_orientation import (
 )
 from image_board import build_image_board
 from pdf_generator import build_pdf
-from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from pdf_images import assemble_pdf_images, choose_hero
+from photo_access import gridfs_key, store_photo
 from render_qa import RenderQAResult, review_organized_render
 from source_photos import (
     classify_upload,
@@ -65,13 +65,11 @@ async def _fetch_gridfs(fs_bucket, url: Optional[str]) -> tuple[Optional[bytes],
     if not url or "/api/uploads/photo/" not in str(url):
         return None, ""
     try:
-        photo_id = str(url).rsplit("/", 1)[-1]
-        try:
-            oid = ObjectId(photo_id)
-        except Exception:
+        key = gridfs_key(photo_id_from_url(url))
+        if key is None:
             logger.warning("[automation] Invalid GridFS photo id in %s", url)
             return None, ""
-        stream = await fs_bucket.open_download_stream(oid)
+        stream = await fs_bucket.open_download_stream(key)
         data = await stream.read()
         filename = str(getattr(stream, "filename", "") or "")
         return (data or None), filename
@@ -115,9 +113,10 @@ async def _persist_upright_original(
 
     lead_id = lead.get("id", "unknown")
     try:
-        file_id = await fs_bucket.upload_from_stream(
-            f"original_upright_{lead_id}_{index}.jpg",
-            as_gridfs_source(upright),
+        new_url = await store_photo(
+            fs_bucket,
+            filename=f"original_upright_{lead_id}_{index}.jpg",
+            data=upright,
             metadata={
                 "content_type": "image/jpeg",
                 "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -125,9 +124,9 @@ async def _persist_upright_original(
                 "lead_id": lead_id,
                 "exif_orientation": info.get("exif_orientation"),
                 "orientation_normalized": True,
+                **({"member_id": lead["member_id"]} if lead.get("member_id") else {}),
             },
         )
-        new_url = f"/api/uploads/photo/{file_id}"
         photos = list(lead.get("photos") or [])
         if 0 <= index < len(photos):
             photos[index] = _replace_photo_url(photos[index], new_url)
@@ -351,9 +350,10 @@ async def _store_bytes(
     **meta: Any,
 ) -> Optional[str]:
     try:
-        file_id = await fs_bucket.upload_from_stream(
-            filename,
-            as_gridfs_source(data),
+        return await store_photo(
+            fs_bucket,
+            filename=filename,
+            data=data,
             metadata={
                 "content_type": mime,
                 "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -362,7 +362,6 @@ async def _store_bytes(
                 **meta,
             },
         )
-        return f"/api/uploads/photo/{file_id}"
     except Exception as exc:
         logger.warning("[automation] GridFS upload failed for %s: %s", filename, exc)
         return None

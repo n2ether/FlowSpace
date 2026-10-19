@@ -3,7 +3,6 @@ from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
-from bson import ObjectId
 from gridfs.errors import NoFile
 from pymongo.errors import DuplicateKeyError
 import base64
@@ -27,7 +26,7 @@ from blueprint_consistency import internal_record, prepare_deliverable, project_
 from blueprint_presentation import build_presentation
 from design_plan_standards import is_released, package_version, version_tag
 from pdf_generator import build_pdf, customer_project_title, plan_title
-from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from pdf_images import assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
 from email_service import email_body_html, send_blueprint, send_contact_sheet, send_draft_package
 from source_photos import draft_send_block_reason, final_email_block_reason, mapping_is_own_source
@@ -36,7 +35,20 @@ from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view, refine_after_image
 from rug_refine import describe_rug, refine_one, resolve_refine_rug
 from automation import run_automation
-from image_orientation import UnreadableImage, normalize_photo_bytes, upright_bytes
+from image_orientation import UnreadableImage, is_heif_upload, normalize_photo_bytes, upright_bytes
+from admin_session import create_admin_token, password_matches, verify_admin_token
+from photo_access import (
+    PHOTO_URL_PREFIX,
+    canonicalize_photo_urls,
+    gridfs_key,
+    photo_id_from_url,
+    sign_photo_urls,
+    signed_photo_url,
+    store_photo,
+    upload_token,
+    verify_signature,
+    verify_upload_token,
+)
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
 from intake import IntakeError, build_fact_sheet, chargeable_block_reason, validate_intake
 from auth import (
@@ -331,8 +343,14 @@ def _hydrate(doc: dict, dt_fields: List[str]) -> dict:
     return doc
 
 
+def is_admin_token(token: Optional[str]) -> bool:
+    """A session token from /admin/login. The raw password is still accepted for
+    existing API scripts, but is no longer handed to the browser."""
+    return verify_admin_token(token) or password_matches(token, ADMIN_PASSWORD)
+
+
 async def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> bool:
-    if not x_admin_token or x_admin_token != ADMIN_PASSWORD:
+    if not is_admin_token(x_admin_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
@@ -652,14 +670,12 @@ async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional
     if not url:
         return None
     try:
-        if url.startswith("/api/uploads/photo/"):
-            photo_id = url.rsplit("/", 1)[-1]
-            try:
-                oid = ObjectId(photo_id)
-            except Exception:
+        if url.startswith(PHOTO_URL_PREFIX):
+            key = gridfs_key(photo_id_from_url(url))
+            if key is None:
                 return None
             try:
-                stream = await fs_bucket.open_download_stream(oid)
+                stream = await fs_bucket.open_download_stream(key)
             except NoFile:
                 return None
             return upright_bytes(await stream.read())
@@ -758,7 +774,7 @@ async def _member_plan_or_404(lead_id: str, member: Dict[str, Any]) -> Tuple[Dic
 async def my_space_plan(lead_id: str, member: Dict[str, Any] = Depends(require_member)):
     """Read-only plan for the owner. Never emails anyone or changes the lead status."""
     lead, d = await _member_plan_or_404(lead_id, member)
-    return public_plan(lead, d)
+    return sign_photo_urls(public_plan(lead, d))
 
 
 def check_lead_intake(data: Dict[str, Any]) -> None:
@@ -797,7 +813,7 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     """
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
-    check_lead_intake(payload.model_dump(exclude={"password"}))
+    check_lead_intake(canonicalize_photo_urls(payload.model_dump(exclude={"password"})))
 
     member = await _resolve_member_for_lead(payload, request, response)
     usage = await _usage_for(member["id"])
@@ -805,7 +821,7 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     if free and not usage["can_generate_free"]:
         raise HTTPException(status_code=403, detail=free_limit_error(usage["free_generations_used"]))
 
-    data = payload.model_dump(exclude={"password"})
+    data = canonicalize_photo_urls(payload.model_dump(exclude={"password"}))
     data["email"] = normalize_email(str(member.get("email") or data.get("email") or ""))
     if member.get("name") and not (data.get("name") or "").strip():
         data["name"] = member["name"]
@@ -818,21 +834,33 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     if free:
         await _start_automation_for_lead(_doc(lead), background_tasks)
 
-    return lead
+    return sign_photo_urls(_doc(lead))
 
 
 @api_router.get("/gallery", response_model=List[GalleryItem])
 async def list_gallery():
     await seed_gallery_if_empty()
     items = await db.gallery.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [_hydrate(it, ["created_at"]) for it in items]
+    return [_hydrate(sign_photo_urls(it), ["created_at"]) for it in items]
 
 
 # ──────────────────────────── Uploads (GridFS) ─────────────────────────────
+def _upload_filename(name: Optional[str]) -> str:
+    stem = Path(name or "upload").stem or "upload"
+    return f"{stem}.jpg"
+
+
 @api_router.post("/uploads/photo")
-async def upload_photo(file: UploadFile = File(...)):
+async def upload_photo(request: Request, file: UploadFile = File(...)):
+    """Store an upright JPEG under an unguessable id.
+
+    Anonymous intake can upload. The response carries a short-lived signed
+    ``url`` for the preview and an ``upload_token`` that lets the same browser
+    refresh that preview later; nobody else can read the photo.
+    """
     ct = (file.content_type or "").lower()
-    if not ct.startswith("image/"):
+    heif = is_heif_upload(ct, file.filename)
+    if not ct.startswith("image/") and not heif:
         raise HTTPException(status_code=400, detail="Only image files are allowed")
     contents = await file.read()
     if not contents:
@@ -844,22 +872,32 @@ async def upload_photo(file: UploadFile = File(...)):
         ct = orientation.get("content_type") or "image/jpeg"
     except UnreadableImage:
         raise HTTPException(status_code=400, detail="Could not read image")
-    file_id = await fs_bucket.upload_from_stream(
-        file.filename or "upload.jpg",
-        as_gridfs_source(contents),
-        metadata={
-            "content_type": ct,
-            "uploaded_at": _iso(datetime.now(timezone.utc)),
-            "orientation_normalized": True,
-            "exif_orientation": orientation.get("exif_orientation"),
-            "applied_exif": bool(orientation.get("applied")),
-            "width": orientation.get("width"),
-            "height": orientation.get("height"),
-        },
+    member = await optional_member(request)
+    metadata: Dict[str, Any] = {
+        "content_type": ct,
+        "uploaded_at": _iso(datetime.now(timezone.utc)),
+        "orientation_normalized": True,
+        "exif_orientation": orientation.get("exif_orientation"),
+        "applied_exif": bool(orientation.get("applied")),
+        "width": orientation.get("width"),
+        "height": orientation.get("height"),
+        "original_content_type": (file.content_type or "").lower(),
+        "converted_from_heif": heif,
+    }
+    if member:
+        metadata["member_id"] = member["id"]
+    stored_url = await store_photo(
+        fs_bucket,
+        filename=_upload_filename(file.filename),
+        data=contents,
+        metadata=metadata,
     )
+    photo_id = photo_id_from_url(stored_url)
     return {
-        "id": str(file_id),
-        "url": f"/api/uploads/photo/{file_id}",
+        "id": photo_id,
+        "url": signed_photo_url(stored_url),
+        "stored_url": stored_url,
+        "upload_token": upload_token(photo_id),
         "orientation": {
             "exif_orientation": orientation.get("exif_orientation"),
             "applied": bool(orientation.get("applied")),
@@ -870,37 +908,80 @@ async def upload_photo(file: UploadFile = File(...)):
     }
 
 
+class PhotoPreviewRequest(BaseModel):
+    upload_token: str
+
+
+@api_router.post("/uploads/photo/{photo_id}/preview")
+async def refresh_photo_preview(photo_id: str, payload: PhotoPreviewRequest):
+    """A fresh signed preview URL for the browser that uploaded this photo."""
+    if gridfs_key(photo_id) is None or not verify_upload_token(photo_id, payload.upload_token):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": photo_id, "url": signed_photo_url(f"{PHOTO_URL_PREFIX}{photo_id}")}
+
+
+async def _member_can_read_photo(request: Request, photo_id: str, metadata: Dict[str, Any]) -> bool:
+    member = await optional_member(request)
+    if not member or not member.get("id"):
+        return False
+    member_id = member["id"]
+    if metadata.get("member_id") == member_id:
+        return True
+    lead_id = metadata.get("lead_id")
+    if lead_id and await db.leads.find_one({"id": lead_id, "member_id": member_id}, {"_id": 0, "id": 1}):
+        return True
+    url = f"{PHOTO_URL_PREFIX}{photo_id}"
+    for query in ({"member_id": member_id, "photos": url}, {"member_id": member_id, "photos.url": url}):
+        if await db.leads.find_one(query, {"_id": 0, "id": 1}):
+            return True
+    return False
+
+
 @api_router.get("/uploads/photo/{photo_id}")
-async def get_photo(photo_id: str):
-    try:
-        oid = ObjectId(photo_id)
-    except Exception:
+async def get_photo(
+    photo_id: str,
+    request: Request,
+    exp: Optional[str] = None,
+    sig: Optional[str] = None,
+    x_admin_token: Optional[str] = Header(default=None),
+):
+    """Serve a photo to a signed URL, an admin, or the member who owns it. Never public."""
+    key = gridfs_key(photo_id)
+    if key is None:
         raise HTTPException(status_code=400, detail="Invalid id")
+    signed = verify_signature(photo_id, exp, sig)
     try:
-        stream = await fs_bucket.open_download_stream(oid)
+        stream = await fs_bucket.open_download_stream(key)
     except NoFile:
         raise HTTPException(status_code=404, detail="Not found")
+    metadata = dict(getattr(stream, "metadata", None) or {})
+    if not (signed or is_admin_token(x_admin_token) or await _member_can_read_photo(request, photo_id, metadata)):
+        # Same answer as a missing file so ids cannot be probed.
+        raise HTTPException(status_code=404, detail="Not found")
     data = await stream.read()
-    media = stream.metadata.get("content_type", "image/jpeg") if stream.metadata else "image/jpeg"
+    media = metadata.get("content_type", "image/jpeg")
     return Response(
         content=data,
         media_type=media,
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers={
+            "Cache-Control": "private, max-age=3600" if signed else "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
 # ──────────────────────────── Admin Routes ─────────────────────────────
 @api_router.post("/admin/login")
 async def admin_login(payload: AdminLoginRequest):
-    if payload.password != ADMIN_PASSWORD:
+    if not password_matches(payload.password, ADMIN_PASSWORD):
         raise HTTPException(status_code=401, detail="Invalid password")
-    return {"token": ADMIN_PASSWORD}
+    return {"token": create_admin_token(), "token_type": "admin_session"}
 
 
 @api_router.get("/admin/leads", response_model=List[Lead])
 async def admin_leads(_: bool = Depends(require_admin)):
     items = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    return [_hydrate(it, ["created_at"]) for it in items]
+    return [_hydrate(sign_photo_urls(it), ["created_at"]) for it in items]
 
 
 @api_router.post("/admin/leads/{lead_id}/retry-automation")
@@ -944,8 +1025,8 @@ async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Lead not found")
     d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
     if d:
-        d = _hydrate(d, ["updated_at"])
-    return {"lead": _hydrate(lead, ["created_at"]), "deliverable": d}
+        d = _hydrate(sign_photo_urls(d), ["updated_at"])
+    return {"lead": _hydrate(sign_photo_urls(lead), ["created_at"]), "deliverable": d}
 
 
 @api_router.put("/admin/leads/{lead_id}/deliverable", response_model=Deliverable)
@@ -957,9 +1038,9 @@ async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depen
     payload.updated_at = datetime.now(timezone.utc)
     if payload.blueprint_layers:
         payload.blueprint_layers = coerce_layers(payload.blueprint_layers)
-    doc = _doc(payload)
+    doc = canonicalize_photo_urls(_doc(payload))
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
-    return payload
+    return sign_photo_urls(doc)
 
 
 @api_router.post("/admin/leads/{lead_id}/deliverable/draft")
@@ -994,10 +1075,9 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
     first_photo = (lead.get("photos") or [None])[0]
     if first_photo:
         photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
-        if photo_url and "/api/uploads/photo/" in photo_url:
+        if photo_url and PHOTO_URL_PREFIX in photo_url:
             try:
-                photo_id = photo_url.rsplit("/", 1)[-1]
-                stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
+                stream = await fs_bucket.open_download_stream(gridfs_key(photo_id_from_url(photo_url)))
                 reference_photo_bytes = upright_bytes(await stream.read())
             except Exception:
                 reference_photo_bytes = None
@@ -1013,18 +1093,18 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
         logging.exception("AI image generation failed")
         raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
     ext = "jpg" if "jpeg" in (mime or "") else "png"
-    file_id = await fs_bucket.upload_from_stream(
-        f"ai_{slot}_{lead_id}.{ext}",
-        as_gridfs_source(png_bytes),
+    url = await store_photo(
+        fs_bucket,
+        filename=f"ai_{slot}_{lead_id}.{ext}",
+        data=png_bytes,
         metadata={"content_type": mime or "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "ai", "lead_id": lead_id, "slot": slot},
     )
-    url = f"/api/uploads/photo/{file_id}"
     await db.deliverables.update_one(
         {"lead_id": lead_id},
         {"$set": {f"{slot}_url": url, "lead_id": lead_id, "updated_at": _iso(datetime.now(timezone.utc))}},
         upsert=True,
     )
-    return {"slot": slot, "url": url}
+    return {"slot": slot, "url": signed_photo_url(url), "stored_url": url}
 
 
 async def _blueprint_render_inputs(lead_id: str, request: Request):
@@ -1144,7 +1224,7 @@ async def deliverable_presentation(lead_id: str, request: Request, _: bool = Dep
         elif isinstance(first_photo, dict):
             before_url = first_photo.get("url")
         media.append({"before_url": before_url, "after_url": d.get("front_view_url") or None})
-    return build_presentation(lead, d, images, lead_id=lead_id, media=media or None)
+    return sign_photo_urls(build_presentation(lead, d, images, lead_id=lead_id, media=media or None))
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
@@ -1409,9 +1489,10 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
         if outcome.replaced and outcome.after_bytes:
             mime = "image/png" if outcome.after_bytes.startswith(b"\x89PNG") else "image/jpeg"
             ext = "png" if mime == "image/png" else "jpg"
-            file_id = await fs_bucket.upload_from_stream(
-                f"ai_{after_label.lower()}_rug_{lead_id}.{ext}",
-                as_gridfs_source(outcome.after_bytes),
+            new_url = await store_photo(
+                fs_bucket,
+                filename=f"ai_{after_label.lower()}_rug_{lead_id}.{ext}",
+                data=outcome.after_bytes,
                 metadata={
                     "content_type": mime,
                     "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -1422,7 +1503,6 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
                     "refined_from": entry.get("after_url") or "",
                 },
             )
-            new_url = f"/api/uploads/photo/{file_id}"
             replaced_urls[str(entry.get("after_url") or "")] = new_url
             history = list(entry.get("after_history") or [])
             history.append(
@@ -1475,12 +1555,12 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
             customer_name=lead.get("name") or "",
             incomplete=str(d.get("package_status") or "") == "incomplete" or any(not p["after"] for p in pairs),
         )
-        sheet_id = await fs_bucket.upload_from_stream(
-            f"contact_sheet_{lead_id}.png",
-            as_gridfs_source(sheet),
+        update["contact_sheet_url"] = await store_photo(
+            fs_bucket,
+            filename=f"contact_sheet_{lead_id}.png",
+            data=sheet,
             metadata={"content_type": "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "rug_refine", "lead_id": lead_id, "slot": "contact_sheet"},
         )
-        update["contact_sheet_url"] = f"/api/uploads/photo/{sheet_id}"
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     return {
         "lead_id": lead_id,
@@ -1524,7 +1604,7 @@ async def refine_deliverable_afters(
         raise HTTPException(status_code=409, detail="No approved per-source afters to refine.")
     payload = payload or AfterRefineRequest()
     if wait:
-        return await _run_after_refine(lead_id, payload.rug, payload.labels)
+        return sign_photo_urls(await _run_after_refine(lead_id, payload.rug, payload.labels))
     await db.deliverables.update_one(
         {"lead_id": lead_id},
         {"$set": {"after_refine": {"status": "running", "started_at": _iso(datetime.now(timezone.utc))}}},
@@ -1538,7 +1618,7 @@ async def refine_deliverable_afters_status(lead_id: str, _: bool = Depends(requi
     d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Deliverable not found")
-    return {"lead_id": lead_id, "rug": d.get("rug"), **(d.get("after_refine") or {"status": "never_run"})}
+    return sign_photo_urls({"lead_id": lead_id, "rug": d.get("rug"), **(d.get("after_refine") or {"status": "never_run"})})
 
 
 def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:

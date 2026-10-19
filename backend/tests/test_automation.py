@@ -68,6 +68,15 @@ class _FakeFS:
         self.store[oid] = data if isinstance(data, bytes) else bytes(data)
         return oid
 
+    async def upload_from_stream_with_id(self, file_id, filename, source, metadata=None):
+        if self.fail_upload:
+            raise RuntimeError("gridfs unavailable")
+        data = source.read() if hasattr(source, "read") else source
+        self.uploads += 1
+        self.store[str(file_id)] = data if isinstance(data, bytes) else bytes(data)
+        self.metadata = getattr(self, "metadata", {})
+        self.metadata[str(file_id)] = metadata or {}
+
     async def open_download_stream(self, oid):
         key = str(oid)
         if key not in self.store:
