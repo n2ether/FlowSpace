@@ -12,7 +12,8 @@ def test_qa_prompt_flags_wall_repaint():
 
     low = QA_PROMPT.lower()
     assert "walls_repainted" in low
-    assert "light blue" in low or "blue-gray" in low
+    assert "light blue" not in low
+    assert "in either direction" in low
     assert "do not fail for clutter style, paint" not in low
 
 

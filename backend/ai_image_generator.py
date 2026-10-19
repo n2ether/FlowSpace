@@ -20,6 +20,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from typing import Any, Dict, Optional, Tuple
 
 from openai import AsyncOpenAI
@@ -84,18 +85,18 @@ def _with_space_rails(
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
 SOFT_GOODS_COLOR_FALLBACK = "neutral textiles that complement the existing wall color"
 
-# Shared rails for image edit, text-to-image, and QA retries.
+# Shared rails for image edit, text-to-image, and QA retries. Wall color comes
+# from each room's own source photo; never name a specific hue here.
 WALL_PRESERVE_RAILS = (
     "CRITICAL EDIT LOCK — WALL PAINT MUST MATCH THE REFERENCE PHOTO EXACTLY. "
-    "Copy the existing wall paint 1:1: same hue, same lightness — light blue / "
-    "cool gray-blue / light gray-blue if that is what the photo shows. "
-    "FORBIDDEN: warm taupe, beige, cream, sand, greige, terracotta, or earth-tone "
-    "wall makeovers. Do not repaint, re-tint, color-grade, white-balance, or restyle "
-    "the walls. Color preferences apply ONLY to textiles, pillows, baskets, rugs, "
-    "throws, and accessories — never to wall paint. "
+    "Copy the existing wall paint of this source photo 1:1: same hue, same lightness, "
+    "same warmth — whether the walls are warm, cool, neutral, white, or colored. "
+    "Do not repaint, re-tint, color-grade, white-balance, or restyle the walls, and "
+    "do not shift warm walls cooler or cool walls warmer. Color preferences apply ONLY "
+    "to textiles, pillows, baskets, rugs, throws, and accessories — never to wall paint. "
 )
 
-ORGANIZE_RAILS = (
+STRUCTURE_RAILS = (
     "HARD CONSTRAINT: Windows and room dimensions must stay ~95% accurate to the "
     "source photo — same window count, size, and placement, same wall lengths, "
     "same camera angle, same architecture. Do not add, remove, move, or invent "
@@ -109,23 +110,74 @@ ORGANIZE_RAILS = (
     "ceiling — never mounted on a wall. "
     "Gravity must be correct: floor at the bottom of the frame, ceiling at the top. "
     "Do not rotate the room or treat a wall as the ceiling. "
-    + WALL_PRESERVE_RAILS
 )
+
+ORGANIZE_RAILS = STRUCTURE_RAILS + WALL_PRESERVE_RAILS
 
 RETRY_RAILS = (
     "PREVIOUS RENDER FAILED QA. The last attempt covered a window/door, put a "
     "ceiling fixture on a wall / used wrong gravity, or changed the wall paint. "
     "Re-edit the source photo: keep every window fully visible, keep fans and lights "
-    "on the ceiling, floor at the bottom, and match the original light wall color "
-    "from the photo — light blue / cool gray-blue, not warm taupe or beige. "
+    "on the ceiling, floor at the bottom, and keep the original wall color exactly "
+    "as this source photo shows it. "
     "Do not repeat the failed layout."
 )
 
 WALL_RETRY_CONSTRAINT = (
-    "FAILED QA: walls were repainted. Keep the original light wall color from the "
-    "photo exactly — light blue / cool gray-blue, not warm taupe or beige. "
+    "FAILED QA: walls were repainted. Keep the original wall color from this source "
+    "photo exactly — same hue and warmth as the photo. "
     "Do not color-grade or restyle the walls. Color preferences are textiles only."
 )
+
+
+def requested_wall_color(
+    lead: Optional[Dict[str, Any]],
+    deliverable: Optional[Dict[str, Any]] = None,
+) -> str:
+    """The wall color the customer asked for, or "" when they did not ask to paint.
+
+    Prefers the plan's paint fields (the drafter only fills them on a request),
+    then falls back to the customer's own sentence that mentions paint.
+    """
+    from ai_drafter import PAINT_REQUEST_RE, customer_requested_paint, is_keep_existing_wall
+
+    if not customer_requested_paint(lead):
+        return ""
+    deliverable = deliverable or {}
+    if not is_keep_existing_wall(deliverable):
+        name = str(deliverable.get("wall_color_name") or "").strip()
+        hex_color = str(deliverable.get("wall_color_hex") or "").strip()
+        if name and hex_color:
+            return f"{name} ({hex_color})"
+        if name or hex_color:
+            return name or hex_color
+    for key in ("goals", "biggest_challenge", "bothers_other", "feeling_other", "daily_improvement", "notes", "must_stay"):
+        text = str((lead or {}).get(key) or "")
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+            if PAINT_REQUEST_RE.search(sentence):
+                return sentence.strip()[:200]
+    return "the wall color the customer described"
+
+
+def paint_request_rails(color: str) -> str:
+    return (
+        f"CUSTOMER PAINT REQUEST: the customer explicitly asked for new wall paint — {color}. "
+        "Repaint the walls in that requested color only, as an even, realistic painted finish. "
+        "Do not invent any other wall color. Color preferences for textiles and accessories "
+        "never change the walls. "
+    )
+
+
+def _wall_rails(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    """(rails, closing line) for this lead's walls."""
+    color = requested_wall_color(lead, deliverable)
+    if color:
+        return paint_request_rails(color), "Paint the walls only in the color the customer requested. "
+    return (
+        WALL_PRESERVE_RAILS,
+        "Do not change wall paint. The walls must look like the same painted surface as the input photo. ",
+    )
+
 
 SAME_CAMERA_CONSTRAINT = (
     "SAME CAMERA LOCK: edit this exact source photo only. Keep the same camera, crop, "
@@ -161,24 +213,29 @@ def _build_kontext_prompt(
     color_str = _soft_goods_colors(lead)
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "everyday items"
 
-    rails = ORGANIZE_RAILS
+    wall_rails, wall_close = _wall_rails(lead, deliverable)
+    rails = STRUCTURE_RAILS + wall_rails
     if stronger_rails:
         rails = rails + RETRY_RAILS
     extra = _with_space_rails(lead, extra_constraint, deliverable)
     if extra and not extra.endswith((".", " ")):
         extra = extra + " "
+    if wall_rails is WALL_PRESERVE_RAILS:
+        lock = (
+            "WALL PAINT LOCK: match this reference photo's exact wall paint — whatever "
+            "color the walls are in this photo, they stay that color. "
+        )
+    else:
+        lock = "WALL PAINT: change the walls only to the color the customer requested. "
 
     return (
         f"Edit this existing {space} photo while keeping the original composition. "
-        "WALL PAINT LOCK: match the reference photo's exact wall paint — light blue / "
-        "cool gray-blue / light gray-blue stays that color. Do not warm, taupe, beige, "
-        "or earth-tone the walls. "
+        f"{lock}"
         f"Change only furniture, storage, and loose items into a tidy {style_str} layout. "
         f"Soft-goods colors only (textiles, baskets, pillows — NEVER walls): {color_str}. "
         f"{nursery_storage_line(lead, storage_str)}"
         f"{rails}{extra}"
-        "Do not change wall paint. The walls must look like the same painted surface as "
-        "the input photo. Photorealistic, natural lighting, "
+        f"{wall_close}Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -203,15 +260,21 @@ def _build_text_to_image_prompt(
     feeling_str = ", ".join(_humanize(lead.get("desired_feeling") or [], FEELING)) or "calm and functional"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "general storage"
 
+    color = requested_wall_color(lead, deliverable)
+    if color:
+        walls = paint_request_rails(color)
+    else:
+        walls = (
+            "Do not feature a painted-wall makeover — keep existing wall color. "
+            "Use a plain, believable wall finish; apply color preferences only to "
+            "textiles and accessories, never walls. "
+        )
     rails = (
         "Do not invent unusual windows or exaggerated room dimensions. "
         "Never place shelves or storage over windows or doors. "
         "Keep ceiling fans, lights, and fixtures on the ceiling, never on a wall. "
         "Gravity correct: floor at the bottom, ceiling at the top. "
-        "Do not feature a painted-wall makeover — keep existing wall color. "
-        "Match existing wall paint exactly — light blue / cool gray-blue if that is "
-        "the room; apply color preferences only to textiles and accessories, never walls. "
-        "FORBIDDEN: warm taupe or beige wall makeovers. "
+        + walls
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
@@ -450,8 +513,9 @@ def _supporting_prompt(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any
     base = _build_edit_prompt(lead, deliverable)
     return (
         f"{base} {instruction} "
-        "This must stay a photo of the same organized room. Do not repaint the walls. "
-        "Do not add people, text, or watermarks."
+        "This must stay a photo of the same organized room. "
+        + ("" if requested_wall_color(lead, deliverable) else "Do not repaint the walls. ")
+        + "Do not add people, text, or watermarks."
     )
 
 
@@ -505,6 +569,7 @@ async def generate_supporting_views(
                 after_bytes=raw,
                 before_bytes=before or source,
                 attempt=attempt,
+                paint_request=requested_wall_color(lead, deliverable),
             )
             if qa.failed:
                 logger.warning(

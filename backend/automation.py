@@ -32,6 +32,7 @@ from ai_image_generator import (
     WALL_RETRY_CONSTRAINT,
     generate_front_view,
     generate_supporting_views,
+    requested_wall_color,
 )
 from contact_sheet import build_contact_sheet
 from email_service import send_blueprint  # kept so tests can patch it; this pipeline does not send
@@ -207,9 +208,9 @@ def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> 
     return original_bytes
 
 
-def _qa_retry_extra(qa: RenderQAResult) -> str:
+def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     bits: list[str] = []
-    if qa.walls_repainted:
+    if qa.walls_repainted and not paint_request:
         bits.append(WALL_RETRY_CONSTRAINT)
     bits.extend(qa.reasons[:3])
     return " ".join(bits)
@@ -234,6 +235,7 @@ async def _generate_organized_with_qa(
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
     qa = RenderQAResult(ok=True, skipped=True, error="not_run")
+    paint_request = requested_wall_color(lead, plan)
 
     try:
         organized_bytes, image_mime = await generate_front_view(
@@ -260,6 +262,7 @@ async def _generate_organized_with_qa(
         after_bytes=organized_bytes,
         before_bytes=original_bytes,
         attempt=1,
+        paint_request=paint_request,
     )
     if not qa.failed:
         return organized_bytes, image_mime, qa
@@ -272,7 +275,7 @@ async def _generate_organized_with_qa(
         qa.reasons,
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
-    extra = _qa_retry_extra(qa)
+    extra = _qa_retry_extra(qa, paint_request)
     try:
         organized_bytes, image_mime = await generate_front_view(
             lead=lead,
@@ -299,6 +302,7 @@ async def _generate_organized_with_qa(
         after_bytes=organized_bytes,
         before_bytes=retry_ref or original_bytes,
         attempt=2,
+        paint_request=paint_request,
     )
     if qa2.failed:
         logger.error(
