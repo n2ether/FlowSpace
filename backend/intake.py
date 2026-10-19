@@ -367,7 +367,7 @@ def fact_sheet_prompt(fact_sheet: Optional[Dict[str, Any]]) -> str:
     v = fs["visual"]
     if v["mode"] == "choose_style":
         lines.append(f"- Visual: style {v['style']}, palette {v['palette']} (textiles/accessories only; no repaint or furniture replacement implied).")
-    elif v["mode"] == "match_current":
+    elif v["mode"] == "match_current" and not fs.get("conceptual"):
         lines.append("- Visual: match the current space.")
     if fs.get("space_answers"):
         lines.append(f"- Use of the space: {fs['space_answers']}")

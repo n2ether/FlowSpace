@@ -220,6 +220,7 @@ class TestFactSheet:
         assert fs["conceptual"] is True
         assert fs["room_flow"]["mode"] == "conceptual"
         assert "CONCEPTUAL PLAN" in fact_sheet_prompt(fs)
+        assert "match the current space" not in fact_sheet_prompt(fs)
 
     def test_prompt_carries_ids_and_limits(self):
         prompt = fact_sheet_prompt(build_fact_sheet(self._lead(limits=["no_drilling", "other"], limit_other="rental")))
