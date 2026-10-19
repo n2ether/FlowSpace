@@ -140,3 +140,70 @@ def test_admin_retry_restarts_a_failed_review_lead(monkeypatch):
     assert started == ["failed-2", "legacy-2"]
     assert all(doc["status"] == "processing" for doc in fake.leads.docs)
     assert admin.status_code == 200
+
+
+class TestPaymentLabels:
+    @pytest.mark.parametrize(
+        "tx, label",
+        [
+            (None, "Awaiting payment"),
+            ({"payment_status": "initiated", "status": "open"}, "Awaiting payment"),
+            ({"payment_status": "unpaid", "status": "open"}, "Awaiting payment"),
+            ({"payment_status": "failed", "status": "failed"}, "Payment not completed"),
+            ({"payment_status": "expired", "status": "expired"}, "Checkout expired"),
+            ({"payment_status": "unpaid", "status": "expired"}, "Checkout expired"),
+            ({"payment_status": "paid", "status": "complete"}, "In progress"),
+        ],
+    )
+    def test_unpaid_paid_package_never_reads_in_progress(self, tx, label):
+        out = customer_status("new", paid_package=True, transaction=tx)
+        assert out["status_label"] == label
+
+    def test_free_and_processing_stay_in_progress(self):
+        assert customer_status("new")["status_label"] == "In progress"
+        assert customer_status("processing", paid_package=True)["status_label"] == "In progress"
+        assert customer_status("paid", paid_package=True)["status_label"] == "In progress"
+
+    def test_latest_transaction_prefers_paid_then_newest(self):
+        from members import latest_transactions
+
+        rows = [
+            {"lead_id": "a", "payment_status": "expired", "status": "expired", "created_at": "2026-10-01"},
+            {"lead_id": "a", "payment_status": "initiated", "status": "open", "created_at": "2026-10-02"},
+            {"lead_id": "b", "payment_status": "paid", "status": "complete", "created_at": "2026-10-01"},
+            {"lead_id": "b", "payment_status": "initiated", "status": "open", "created_at": "2026-10-03"},
+        ]
+        latest = latest_transactions(rows)
+        assert latest["a"]["payment_status"] == "initiated"
+        assert latest["b"]["payment_status"] == "paid"
+
+    def test_my_spaces_reports_payment_states(self, client):  # noqa: F811
+        c, db = client
+        ada = _signup(c).json()
+        mid = ada["member"]["id"]
+        db.leads.docs.extend(
+            [
+                _space_lead("unpaid", mid, status="new"),
+                _space_lead("declined", mid, status="new"),
+                _space_lead("expired", mid, status="new"),
+                _space_lead("paid", mid, status="processing"),
+                _space_lead("free", mid, status="new", package_id="free"),
+            ]
+        )
+        db.payment_transactions.docs.extend(
+            [
+                {"lead_id": "unpaid", "payment_status": "initiated", "status": "open", "created_at": "1"},
+                {"lead_id": "declined", "payment_status": "failed", "status": "failed", "created_at": "1"},
+                {"lead_id": "expired", "payment_status": "expired", "status": "expired", "created_at": "1"},
+                {"lead_id": "paid", "payment_status": "paid", "status": "complete", "created_at": "1"},
+            ]
+        )
+        r = c.get("/api/me/spaces", headers={"Authorization": f"Bearer {ada['token']}"})
+        labels = {s["id"]: s["status_label"] for s in r.json()["spaces"]}
+        assert labels == {
+            "unpaid": "Awaiting payment",
+            "declined": "Payment not completed",
+            "expired": "Checkout expired",
+            "paid": "In progress",
+            "free": "In progress",
+        }

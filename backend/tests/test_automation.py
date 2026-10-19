@@ -68,6 +68,15 @@ class _FakeFS:
         self.store[oid] = data if isinstance(data, bytes) else bytes(data)
         return oid
 
+    async def upload_from_stream_with_id(self, file_id, filename, source, metadata=None):
+        if self.fail_upload:
+            raise RuntimeError("gridfs unavailable")
+        data = source.read() if hasattr(source, "read") else source
+        self.uploads += 1
+        self.store[str(file_id)] = data if isinstance(data, bytes) else bytes(data)
+        self.metadata = getattr(self, "metadata", {})
+        self.metadata[str(file_id)] = metadata or {}
+
     async def open_download_stream(self, oid):
         key = str(oid)
         if key not in self.store:
@@ -357,9 +366,35 @@ def test_qa_retry_extra_includes_wall_preserve_constraint():
             reasons=["Walls went from light blue to taupe"],
         )
     )
-    assert "original light wall color from the photo" in extra.lower()
+    assert "original wall color from this source photo" in extra.lower()
     assert WALL_RETRY_CONSTRAINT in extra
     assert "taupe" in extra.lower()
+
+
+def test_qa_retry_extra_skips_wall_lock_when_customer_asked_for_paint():
+    from ai_image_generator import WALL_RETRY_CONSTRAINT
+    from automation import _qa_retry_extra
+    from render_qa import RenderQAResult
+
+    qa = RenderQAResult(ok=False, walls_repainted=True, reasons=["Walls are a different color"])
+    assert WALL_RETRY_CONSTRAINT not in _qa_retry_extra(qa, "soft sage green")
+
+
+def test_qa_receives_the_paint_request(monkeypatch):
+    original = _jpeg((200, 170, 140))  # warm walls
+    seen: list = []
+
+    def fake_review(**kwargs):
+        from render_qa import RenderQAResult
+
+        seen.append(kwargs.get("paint_request"))
+        return RenderQAResult(ok=True)
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review)
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    lead = _lead(with_photo=True)
+    _run(monkeypatch, generate=lambda **k: (original, "image/jpeg"), fs=fs, lead=lead, capture={})
+    assert seen and all(value == "" for value in seen)
 
 
 def test_automation_retries_once_after_wall_repaint_qa(monkeypatch):
@@ -400,7 +435,7 @@ def test_automation_retries_once_after_wall_repaint_qa(monkeypatch):
     assert len(calls) == 2
     assert calls[1].get("stronger_rails") is True
     extra = (calls[1].get("extra_constraint") or "").lower()
-    assert "original light wall color from the photo" in extra
+    assert "original wall color from this source photo" in extra
     assert captured["images"]["after"] == second
     qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
     assert qa.get("ok") is True

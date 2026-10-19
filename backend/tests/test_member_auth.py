@@ -171,10 +171,9 @@ def _match(doc, query):
                 return False
             if "$ne" in expected and actual == expected["$ne"]:
                 return False
-            if "$gt" in expected and not (actual is not None and actual > expected["$gt"]):
-                return False
-            if "$gte" in expected and not (actual is not None and actual >= expected["$gte"]):
-                return False
+            for op, cmp in (("$lt", lambda a, b: a < b), ("$lte", lambda a, b: a <= b), ("$gt", lambda a, b: a > b), ("$gte", lambda a, b: a >= b)):
+                if op in expected and (actual is None or not cmp(actual, expected[op])):
+                    return False
             if "$exists" in expected:
                 exists = key in doc
                 if bool(expected["$exists"]) != exists:
@@ -547,3 +546,84 @@ class TestMySpacePlan:
         db.deliverables.docs.clear()
         r = c.get("/api/me/spaces/lead-review-1/plan", headers={"Authorization": f"Bearer {ada['token']}"})
         assert r.status_code == 404
+
+
+class TestOwnerDraftWatermark:
+    def _owner(self, c, db):
+        ada = _signup(c, email="ada@example.com").json()
+        c.cookies.clear()
+        _seed_plan(db, ada["member"]["id"])
+        return {"Authorization": f"Bearer {ada['token']}"}
+
+    def test_review_board_is_watermarked_draft(self, client, no_email, monkeypatch):
+        import server
+
+        c, db = client
+        headers = self._owner(c, db)
+        calls = []
+        real = server.watermark_png
+        monkeypatch.setattr(server, "watermark_png", lambda png: calls.append("png") or real(png))
+        r = c.get("/api/me/spaces/lead-review-1/board", headers=headers)
+        assert r.status_code == 200
+        assert calls == ["png"]
+        assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_review_pdf_is_watermarked_draft(self, client, no_email):
+        import io
+
+        from pypdf import PdfReader
+
+        c, db = client
+        headers = self._owner(c, db)
+        r = c.get("/api/me/spaces/lead-review-1/pdf", headers=headers)
+        assert r.status_code == 200
+        pages = PdfReader(io.BytesIO(r.content)).pages
+        assert pages and all("DRAFT" in (p.extract_text() or "") for p in pages)
+
+    def test_final_package_is_not_watermarked(self, client, no_email, monkeypatch):
+        import io
+
+        from pypdf import PdfReader
+
+        import server
+
+        c, db = client
+        headers = self._owner(c, db)
+        db.deliverables.docs[0]["package_status"] = "final"
+        monkeypatch.setattr(server, "watermark_png", lambda _png: (_ for _ in ()).throw(AssertionError("no watermark")))
+        assert c.get("/api/me/spaces/lead-review-1/board", headers=headers).status_code == 200
+        pdf = c.get("/api/me/spaces/lead-review-1/pdf", headers=headers).content
+        text = "".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages)
+        assert "in review, not final" not in text
+
+    def test_watermark_png_changes_pixels_and_keeps_size(self):
+        import io
+
+        from PIL import Image
+
+        from draft_watermark import watermark_png
+
+        buf = io.BytesIO()
+        Image.new("RGB", (600, 400), (255, 255, 255)).save(buf, format="PNG")
+        out = Image.open(io.BytesIO(watermark_png(buf.getvalue())))
+        assert out.size == (600, 400)
+        assert out.convert("RGB").getextrema() != ((255, 255), (255, 255), (255, 255))
+
+
+def test_board_review_text_is_english_only():
+    import re
+
+    from design_plan_standards import version_label
+    from image_board import board_spec, customer_board_text
+
+    spec = board_spec(
+        {"id": "l1", "name": "Ada", "space_type": "bedroom"},
+        {"lead_id": "l1", "package_status": "review", "package_version": 2},
+        {},
+    )
+    text = customer_board_text(spec)
+    assert version_label(2) in text
+    assert "Version 2 for your review" in text
+    for word in ("Versão", "para sua", "análise", "Revisão", "Rascunho"):
+        assert word not in text
+    assert not re.search(r"[ãõçâêô]", text)

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PHOTO_ACCEPT } from "../lib/photoFiles";
 import { useNavigate, useParams } from "react-router-dom";
 import {
     ArrowLeft,
@@ -152,7 +153,7 @@ const ImageUrlField = ({ label, value, onChange, token, testId, onAiGenerate, ai
                             Upload image
                             <input
                                 type="file"
-                                accept="image/*"
+                                accept={PHOTO_ACCEPT}
                                 className="hidden"
                                 onChange={(e) => handleUpload(e.target.files?.[0])}
                                 data-testid={`${testId}-file`}

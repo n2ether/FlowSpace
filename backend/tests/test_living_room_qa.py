@@ -1,6 +1,7 @@
 """QA fixes for the living-room package: invented sizes, mid-sentence cuts, and the window-wall overlap."""
 import io
 
+import pytest
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
@@ -24,6 +25,15 @@ ENTRY = (
 )
 CHANGE = "Add a soft textile layer for warmth and tie the seating to the wood already in the room."
 DINING = "The table and chairs — meals and conversation with calm, cohesive art overhead."
+
+
+@pytest.fixture(autouse=True)
+def _no_living_room_record(monkeypatch):
+    """These checks run on the drafted zones, not on the living room's Room Flow record."""
+    import room_flow
+
+    real = room_flow.load_record
+    monkeypatch.setattr(room_flow, "load_record", lambda lead_id: None if lead_id == LEAD["id"] else real(lead_id))
 
 
 def _deliverable():

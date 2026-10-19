@@ -5,6 +5,7 @@ import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 import { usePhotoUploadQueue } from "../lib/usePhotoUploadQueue";
+import { UNSUPPORTED_PHOTO_MESSAGE } from "../lib/photoFiles";
 import { ErrorSummary } from "../components/intake/fields";
 import StepSpace from "../components/intake/StepSpace";
 import StepPhotos from "../components/intake/StepPhotos";
@@ -62,6 +63,8 @@ export default function Intake() {
     const [initialDraft] = useState(readDraft);
     const [form, setForm] = useState(() => formForPlan(initialDraft?.form || emptyForm(), plan));
     const [photos, setPhotos] = useState(() => initialDraft?.photos || []);
+    const photosRef = useRef(photos);
+    photosRef.current = photos;
     const [step, setStep] = useState(() => initialDraft?.step || 0);
     const [showRestored, setShowRestored] = useState(() => draftHasAnswers(initialDraft));
     const [errors, setErrors] = useState({});
@@ -155,7 +158,15 @@ export default function Intake() {
                 throw new Error(msg);
             }
             const data = await res.json();
-            const next = { id: data.id, url: data.url, label: "", shot: "wide", metrics, acknowledged: false };
+            const next = {
+                id: data.id,
+                url: data.url,
+                upload_token: data.upload_token,
+                label: "",
+                shot: "wide",
+                metrics,
+                acknowledged: false,
+            };
             setPhotos((prev) => {
                 if (replaceIndex !== null && replaceIndex < prev.length) {
                     const copy = [...prev];
@@ -177,8 +188,32 @@ export default function Intake() {
         }
     }, []);
 
+    const rejectFile = useCallback((file) => {
+        const message = `${file?.name || "That file"} isn't a photo we can use. ${UNSUPPORTED_PHOTO_MESSAGE}`;
+        setPhotoStatus(message);
+        setErrors((e) => ({ ...e, photos: message }));
+    }, []);
+
+    // Preview URLs are signed for about an hour. A draft restored later asks for a
+    // fresh one with the upload token only this browser holds.
+    const refreshedPreviews = useRef(new Set());
+    const refreshPreview = useCallback(async (index) => {
+        const photo = photosRef.current[index];
+        if (!photo?.id || !photo.upload_token || refreshedPreviews.current.has(photo.id)) return;
+        refreshedPreviews.current.add(photo.id);
+        try {
+            const res = await api.post(`/uploads/photo/${photo.id}/preview`, { upload_token: photo.upload_token });
+            const url = res?.data?.url;
+            if (!url) return;
+            setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, url } : p)));
+        } catch {
+            /* keep the broken preview; the stored photo is unaffected */
+        }
+    }, []);
+
     const { uploading, pending, handleFiles, rotatePending, confirmPending } = usePhotoUploadQueue({
         uploadFile,
+        onReject: rejectFile,
         remainingSlots: plan.maxPhotos - photos.length,
     });
 
@@ -461,6 +496,7 @@ export default function Intake() {
                                         onPhotoChange={(index, patch) =>
                                             setPhotos((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)))
                                         }
+                                        onPreviewError={refreshPreview}
                                         rotatePending={rotatePending}
                                         confirmPending={confirmPending}
                                     />

@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
+import { isHeifFile, isSupportedPhotoFile } from "./photoFiles";
 import { bakeRotation, inspectPhotoFile } from "./photoOrientation";
 
-export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
+export function usePhotoUploadQueue({ uploadFile, remainingSlots, onReject }) {
     const [uploading, setUploading] = useState(false);
     const [pending, setPending] = useState(null);
     const [queue, setQueue] = useState([]);
@@ -23,6 +24,17 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
                 return;
             }
             const [file, ...rest] = files;
+            if (!isSupportedPhotoFile(file)) {
+                if (onReject) onReject(file);
+                await processQueue(rest);
+                return;
+            }
+            if (isHeifFile(file)) {
+                // Most browsers cannot decode HEIC; the backend converts and uprights it.
+                await uploadFile(file);
+                await processQueue(rest);
+                return;
+            }
             try {
                 const inspection = await inspectPhotoFile(file);
                 if (!inspection.needsNudge) {
@@ -40,7 +52,7 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
                 await processQueue(rest);
             }
         },
-        [uploadBaked, uploadFile],
+        [uploadBaked, uploadFile, onReject],
     );
 
     const handleFiles = useCallback(

@@ -17,8 +17,8 @@ def _assert_wall_preserve_rails(prompt: str) -> None:
     assert "never" in low and "wall" in low
     assert "textile" in low
     assert "do not change wall paint" in low or "keep existing wall color" in low
-    assert "cool gray-blue" in low or "light blue" in low
-    assert "taupe" in low
+    assert "blue" not in low
+    assert "taupe" not in low
 
 
 def test_kontext_prompt_keeps_windows_and_skips_paint():
@@ -60,8 +60,8 @@ def test_kontext_prompt_applies_color_prefs_only_to_soft_goods():
     assert "earth" in low
     assert "never walls" in low
     assert "textile" in low
-    assert "light blue" in low or "cool gray-blue" in low or "gray-blue" in low
-    assert "taupe" in low  # called out as a wall color we must not shift toward
+    assert "blue" not in low
+    assert "taupe" not in low
     assert "warm neutrals with soft sage accents" not in low
     # color_prefs must not be framed as a room/wall palette
     assert "earth tones textiles and accessories." not in low
@@ -94,7 +94,8 @@ def test_kontext_wall_retry_constraint_is_loud():
         stronger_rails=True,
         extra_constraint=WALL_RETRY_CONSTRAINT,
     ).lower()
-    assert "original light wall color from the photo" in prompt
+    assert "original wall color from this source photo" in prompt
+    assert "blue" not in prompt
     assert "textiles" in prompt
     assert "never walls" in prompt or "never to walls" in prompt
 
@@ -245,3 +246,88 @@ def test_drafter_system_prompt_includes_window_and_fixture_rails():
     assert "do not invent optional" in prompt or "warm taupe" in prompt
     assert "six-drawer" in prompt
     assert "one kit total" in prompt
+
+
+WARM_LEAD = {
+    "space_type": "bedroom",
+    "style_prefs": ["warm"],
+    "color_prefs": ["earth"],
+    "goals": "A calmer bedroom with room for books",
+}
+
+
+def test_warm_walled_lead_prompt_has_no_hardcoded_wall_color():
+    from ai_image_generator import RETRY_RAILS, _supporting_prompt
+
+    prompts = [
+        _build_kontext_prompt(WARM_LEAD),
+        _build_kontext_prompt(WARM_LEAD, stronger_rails=True, extra_constraint=WALL_RETRY_CONSTRAINT),
+        _build_text_to_image_prompt(WARM_LEAD),
+        _supporting_prompt(WARM_LEAD, {}, "Closer view of the dresser."),
+        WALL_PRESERVE_RAILS,
+        RETRY_RAILS,
+        WALL_RETRY_CONSTRAINT,
+    ]
+    for prompt in prompts:
+        low = prompt.lower()
+        assert "blue" not in low
+        assert "gray-blue" not in low
+        # Warm walls are valid; the rails must not forbid warm hues outright.
+        assert "forbidden: warm" not in low
+        assert "taupe" not in low and "beige" not in low
+
+
+def test_no_paint_lead_preserves_the_source_photo_wall_color():
+    prompt = _build_kontext_prompt({"space_type": "closet"}).lower()
+    assert "blue" not in prompt
+    assert "this source photo" in prompt
+    assert "whether the walls are warm, cool, neutral" in prompt
+    assert "do not change wall paint" in prompt
+
+
+def test_paint_request_uses_the_customers_color():
+    from ai_image_generator import requested_wall_color
+
+    lead = {"space_type": "bedroom", "goals": "Please paint the walls a soft sage green."}
+    assert requested_wall_color(lead) == "Please paint the walls a soft sage green."
+    prompt = _build_kontext_prompt(lead).lower()
+    assert "customer paint request" in prompt
+    assert "soft sage green" in prompt
+    assert "do not change wall paint" not in prompt
+    assert "wall paint lock" not in prompt
+    text = _build_text_to_image_prompt(lead).lower()
+    assert "soft sage green" in text
+
+
+def test_paint_request_prefers_the_plan_paint_fields():
+    from ai_image_generator import requested_wall_color
+
+    lead = {"space_type": "bedroom", "goals": "I want to repaint"}
+    plan = {"wall_color_name": "Sea Salt", "wall_color_hex": "#cfd7d3"}
+    assert requested_wall_color(lead, plan) == "Sea Salt (#cfd7d3)"
+    assert "sea salt" in _build_kontext_prompt(lead, plan).lower()
+    # Without a request the plan's paint fields never reach the prompt.
+    assert requested_wall_color({"space_type": "bedroom"}, plan) == ""
+
+
+def test_qa_prompt_does_not_bias_against_warm_walls():
+    from render_qa import QA_PROMPT, qa_prompt
+
+    low = QA_PROMPT.lower()
+    assert "light blue" not in low and "blue-gray became" not in low
+    assert "in either direction" in low
+    assert "warm, cool, neutral" in low
+    assert qa_prompt() == QA_PROMPT
+    asked = qa_prompt("terracotta").lower()
+    assert "terracotta" in asked and "expected and correct" in asked
+
+
+def test_keep_furniture_rail_and_wall_rules_coexist():
+    keep = {"space_type": "living_room", "must_stay": "Sectional, TV console, playpen"}
+    prompt = _build_kontext_prompt(keep).lower()
+    assert "every existing furniture piece" in prompt and "do not add new furniture" in prompt
+    assert "playpen" in prompt
+    assert "wall paint lock" in prompt and "blue" not in prompt
+    painted = _build_kontext_prompt({**keep, "goals": "Please paint the walls a soft sage green."}).lower()
+    assert "do not add new furniture" in painted
+    assert "customer paint request" in painted and "soft sage green" in painted

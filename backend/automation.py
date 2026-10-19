@@ -23,7 +23,6 @@ import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
 from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
@@ -32,6 +31,7 @@ from ai_image_generator import (
     WALL_RETRY_CONSTRAINT,
     generate_front_view,
     generate_supporting_views,
+    requested_wall_color,
 )
 from contact_sheet import build_contact_sheet
 from email_service import send_blueprint  # kept so tests can patch it; this pipeline does not send
@@ -43,8 +43,10 @@ from image_orientation import (
 )
 from image_board import build_image_board
 from pdf_generator import build_pdf
-from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from pdf_images import assemble_pdf_images, choose_hero
+from photo_access import gridfs_key, store_photo
 from render_qa import RenderQAResult, review_organized_render
+from render_recovery import heartbeat_loop, touch_render_heartbeat
 from source_photos import (
     classify_upload,
     photo_filename,
@@ -64,13 +66,11 @@ async def _fetch_gridfs(fs_bucket, url: Optional[str]) -> tuple[Optional[bytes],
     if not url or "/api/uploads/photo/" not in str(url):
         return None, ""
     try:
-        photo_id = str(url).rsplit("/", 1)[-1]
-        try:
-            oid = ObjectId(photo_id)
-        except Exception:
+        key = gridfs_key(photo_id_from_url(url))
+        if key is None:
             logger.warning("[automation] Invalid GridFS photo id in %s", url)
             return None, ""
-        stream = await fs_bucket.open_download_stream(oid)
+        stream = await fs_bucket.open_download_stream(key)
         data = await stream.read()
         filename = str(getattr(stream, "filename", "") or "")
         return (data or None), filename
@@ -114,9 +114,10 @@ async def _persist_upright_original(
 
     lead_id = lead.get("id", "unknown")
     try:
-        file_id = await fs_bucket.upload_from_stream(
-            f"original_upright_{lead_id}_{index}.jpg",
-            as_gridfs_source(upright),
+        new_url = await store_photo(
+            fs_bucket,
+            filename=f"original_upright_{lead_id}_{index}.jpg",
+            data=upright,
             metadata={
                 "content_type": "image/jpeg",
                 "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -124,9 +125,9 @@ async def _persist_upright_original(
                 "lead_id": lead_id,
                 "exif_orientation": info.get("exif_orientation"),
                 "orientation_normalized": True,
+                **({"member_id": lead["member_id"]} if lead.get("member_id") else {}),
             },
         )
-        new_url = f"/api/uploads/photo/{file_id}"
         photos = list(lead.get("photos") or [])
         if 0 <= index < len(photos):
             photos[index] = _replace_photo_url(photos[index], new_url)
@@ -207,9 +208,9 @@ def _qa_retry_reference(original_bytes: Optional[bytes], qa: RenderQAResult) -> 
     return original_bytes
 
 
-def _qa_retry_extra(qa: RenderQAResult) -> str:
+def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     bits: list[str] = []
-    if qa.walls_repainted:
+    if qa.walls_repainted and not paint_request:
         bits.append(WALL_RETRY_CONSTRAINT)
     bits.extend(qa.reasons[:3])
     return " ".join(bits)
@@ -234,6 +235,7 @@ async def _generate_organized_with_qa(
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
     qa = RenderQAResult(ok=True, skipped=True, error="not_run")
+    paint_request = requested_wall_color(lead, plan)
 
     try:
         organized_bytes, image_mime = await generate_front_view(
@@ -260,6 +262,7 @@ async def _generate_organized_with_qa(
         after_bytes=organized_bytes,
         before_bytes=original_bytes,
         attempt=1,
+        paint_request=paint_request,
     )
     if not qa.failed:
         return organized_bytes, image_mime, qa
@@ -272,7 +275,7 @@ async def _generate_organized_with_qa(
         qa.reasons,
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
-    extra = _qa_retry_extra(qa)
+    extra = _qa_retry_extra(qa, paint_request)
     try:
         organized_bytes, image_mime = await generate_front_view(
             lead=lead,
@@ -299,6 +302,7 @@ async def _generate_organized_with_qa(
         after_bytes=organized_bytes,
         before_bytes=retry_ref or original_bytes,
         attempt=2,
+        paint_request=paint_request,
     )
     if qa2.failed:
         logger.error(
@@ -347,9 +351,10 @@ async def _store_bytes(
     **meta: Any,
 ) -> Optional[str]:
     try:
-        file_id = await fs_bucket.upload_from_stream(
-            filename,
-            as_gridfs_source(data),
+        return await store_photo(
+            fs_bucket,
+            filename=filename,
+            data=data,
             metadata={
                 "content_type": mime,
                 "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -358,7 +363,6 @@ async def _store_bytes(
                 **meta,
             },
         )
-        return f"/api/uploads/photo/{file_id}"
     except Exception as exc:
         logger.warning("[automation] GridFS upload failed for %s: %s", filename, exc)
         return None
@@ -441,9 +445,21 @@ async def run_automation(
     db,
     fs_bucket,
 ) -> bool:
-    """Run the pipeline, capping concurrent renders at RENDER_CONCURRENCY."""
-    async with _render_semaphore():
-        return await _run_automation(lead=lead, db=db, fs_bucket=fs_bucket)
+    """Run the pipeline, capping concurrent renders at RENDER_CONCURRENCY.
+
+    The heartbeat runs while the lead waits for a slot too, so a long queue is
+    not mistaken for a render orphaned by a restart.
+    """
+    ticker = asyncio.create_task(heartbeat_loop(db, lead.get("id")))
+    try:
+        async with _render_semaphore():
+            return await _run_automation(lead=lead, db=db, fs_bucket=fs_bucket)
+    finally:
+        ticker.cancel()
+        try:
+            await ticker
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _run_automation(
@@ -467,7 +483,14 @@ async def _run_automation(
 
     await db.leads.update_one(
         {"id": lead_id},
-        {"$set": {"status": "processing", "automation_failed": False, "updated_at": _iso(datetime.now(timezone.utc))}},
+        {
+            "$set": {
+                "status": "processing",
+                "automation_failed": False,
+                "render_heartbeat_at": _iso(datetime.now(timezone.utc)),
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
+        },
     )
 
     try:
@@ -476,6 +499,7 @@ async def _run_automation(
         room = [photo for photo in loaded if photo.get("kind") == "room"]
         non_room = [photo for photo in loaded if photo.get("kind") != "room"]
         draft_bytes = next((photo.get("bytes") for photo in room if photo.get("bytes")), None)
+        await touch_render_heartbeat(db, lead_id)
         if room:
             logger.info(
                 "[automation] %d required room photo(s), %d non-room upload(s)",
@@ -501,6 +525,7 @@ async def _run_automation(
             upsert=True,
         )
         logger.info("[automation] Plan drafted and saved")
+        await touch_render_heartbeat(db, lead_id)
 
         # Old view_* / after URLs must not survive into this run.
         await _clear_stale_render_slots(db, lead_id)
@@ -555,6 +580,7 @@ async def _run_automation(
                         source_photo_id=src.get("photo_id") or "",
                     )
                 approved = bool(after_bytes and after_url)
+                await touch_render_heartbeat(db, lead_id)
                 if after_bytes and not after_url:
                     logger.warning(
                         "[automation] %s render could not be stored; source stays incomplete",
@@ -781,6 +807,7 @@ async def _run_automation(
             "y" if images.get("view_3") else "n",
         )
 
+        await touch_render_heartbeat(db, lead_id)
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
         pdf_bytes = await asyncio.to_thread(
             build_pdf, lead=lead, deliverable=deliverable_doc, images=images
