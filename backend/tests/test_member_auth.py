@@ -60,8 +60,9 @@ class FakeCursor:
 
 
 class FakeCollection:
-    def __init__(self):
+    def __init__(self, unique=None):
         self.docs = []
+        self.unique = unique
 
     async def find_one(self, query, projection=None):
         for doc in self.docs:
@@ -70,6 +71,10 @@ class FakeCollection:
         return None
 
     async def insert_one(self, doc):
+        if self.unique and any(d.get(self.unique) == doc.get(self.unique) for d in self.docs):
+            from pymongo.errors import DuplicateKeyError
+
+            raise DuplicateKeyError(f"duplicate {self.unique}")
         self.docs.append(dict(doc))
         return FakeResult(inserted_id=doc.get("id"))
 
@@ -118,6 +123,8 @@ class FakeDB:
         self.deliverables = FakeCollection()
         self.gallery = FakeCollection()
         self.payment_transactions = FakeCollection()
+        self.stripe_events = FakeCollection(unique="event_id")
+        self.checkout_fulfillments = FakeCollection(unique="session_id")
 
 
 def _project(doc, projection):
@@ -159,6 +166,8 @@ def _match(doc, query):
             if "$in" in expected and actual not in expected["$in"]:
                 return False
             if "$nin" in expected and actual in expected["$nin"]:
+                return False
+            if "$ne" in expected and actual == expected["$ne"]:
                 return False
             if "$exists" in expected:
                 exists = key in doc

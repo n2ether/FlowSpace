@@ -12,13 +12,15 @@ import {
     PALETTES,
     SHOP_COUNTRIES,
     STYLES,
-    VISUAL_MODES,
     climateMentioned,
     contradictions,
+    isConceptual,
     measurementReasons,
     measurementsNeeded,
     shoppingLocationNeeded,
     spaceQuestion,
+    visualMode,
+    visualModeOptions,
 } from "../../lib/intake/model";
 
 function SpaceQuestion({ form, update, errors }) {
@@ -219,6 +221,7 @@ function Contradictions({ form, onResolve, error }) {
 
 export default function StepNeeds({ form, update, plan, errors, onResolve }) {
     const choose = form.visual_mode === "choose_style";
+    const conceptual = isConceptual(form, plan);
     return (
         <div className="space-y-7">
             <ChoiceGroup
@@ -234,7 +237,11 @@ export default function StepNeeds({ form, update, plan, errors, onResolve }) {
                 <TextField
                     id="keep_items"
                     label="Which items need to stay?"
-                    hint="A short list is fine. You can point to a photo, e.g. “the white dresser in Photo 1”."
+                    hint={
+                        conceptual
+                            ? "A short list is fine, e.g. “a white six-drawer dresser”."
+                            : "A short list is fine. You can point to a photo, e.g. “the white dresser in Photo 1”."
+                    }
                     multiline
                     rows={2}
                     value={form.keep_items}
@@ -372,9 +379,13 @@ export default function StepNeeds({ form, update, plan, errors, onResolve }) {
                         <ChoiceGroup
                             id="visual_mode"
                             legend="Visual direction"
-                            hint="By default we keep your existing items and walls. A palette never means repainting or replacing furniture unless you ask."
-                            options={VISUAL_MODES}
-                            value={form.visual_mode}
+                            hint={
+                                conceptual
+                                    ? "Your plan uses inspiration for this type of space. A palette never means repainting or replacing furniture unless you ask."
+                                    : "By default we keep your existing items and walls. A palette never means repainting or replacing furniture unless you ask."
+                            }
+                            options={visualModeOptions(form, plan)}
+                            value={visualMode(form, plan)}
                             onChange={(v) => update({ visual_mode: v })}
                             columns=""
                         />

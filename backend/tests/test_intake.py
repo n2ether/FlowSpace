@@ -220,6 +220,7 @@ class TestFactSheet:
         assert fs["conceptual"] is True
         assert fs["room_flow"]["mode"] == "conceptual"
         assert "CONCEPTUAL PLAN" in fact_sheet_prompt(fs)
+        assert "match the current space" not in fact_sheet_prompt(fs)
 
     def test_prompt_carries_ids_and_limits(self):
         prompt = fact_sheet_prompt(build_fact_sheet(self._lead(limits=["no_drilling", "other"], limit_other="rental")))
@@ -351,14 +352,99 @@ class TestLeadApi:
         assert r.json() == {"enabled": True, "mode": "test", "message": None}
         assert "sk_test_dummy" not in r.text
 
+    def test_checkout_without_lead_id_is_rejected(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+
+        def no_stripe(**kwargs):
+            raise AssertionError("Stripe must not be called without a lead")
+
+        monkeypatch.setattr(server.stripe_sdk.checkout.Session, "create", no_stripe)
+        for body in (
+            {"package_id": "plus", "origin_url": "http://localhost:3000"},
+            {"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "  "}},
+            {"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"source": "x"}},
+        ):
+            r = c.post("/api/checkout/session", json=body, headers=headers)
+            assert r.status_code == 400, r.text
+            assert r.json()["detail"]["code"] == "LEAD_REQUIRED"
+        assert fake.payment_transactions.docs == []
+
+    def test_checkout_refuses_conceptual_lead_on_paid_plan(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+        fake.leads.docs.append(
+            {
+                "id": "switched-1",
+                "package_id": "plus",
+                "photos": [P1],
+                "intake": _intake(photo_mode="conceptual"),
+            }
+        )
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "switched-1"}},
+            headers=headers,
+        )
+        assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "PHOTO_REQUIRED"
+
+    def test_checkout_refuses_closeups_only(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+        fake.leads.docs.append(
+            {"id": "closeup-1", "package_id": "plus", "photos": [P1], "intake": _intake(photos=[{"url": P1, "shot": "detail"}])}
+        )
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "closeup-1"}},
+            headers=headers,
+        )
+        assert r.status_code == 409
+
+    def test_checkout_with_valid_lead_records_lead_id(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+        seen = {}
+
+        class _Session:
+            id = "cs_test_1"
+            url = "https://checkout.stripe.test/cs_test_1"
+
+        def fake_create(**kwargs):
+            seen.update(kwargs)
+            return _Session()
+
+        monkeypatch.setattr(server.stripe_sdk.checkout.Session, "create", fake_create)
+        fake.leads.docs.append({"id": "ok-1", "package_id": "plus", "photos": [P1], "intake": _intake()})
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "ok-1"}},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        assert seen["metadata"]["lead_id"] == "ok-1"
+        tx = fake.payment_transactions.docs[-1]
+        assert tx["session_id"] == "cs_test_1"
+        assert tx["lead_id"] == "ok-1"
+
     def test_checkout_without_key_is_neutral_payments_disabled(self, api_client, monkeypatch):
-        c, _fake, headers = api_client
+        c, fake, headers = api_client
         import server
 
         monkeypatch.setattr(server, "STRIPE_API_KEY", "")
+        fake.leads.docs.append({"id": "ok-2", "package_id": "plus", "photos": [P1], "intake": _intake()})
         r = c.post(
             "/api/checkout/session",
-            json={"package_id": "plus", "origin_url": "http://localhost:3000"},
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "ok-2"}},
             headers=headers,
         )
         assert r.status_code == 503

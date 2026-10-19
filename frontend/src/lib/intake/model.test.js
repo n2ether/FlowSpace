@@ -1,13 +1,20 @@
 import {
+    PAID_PHOTO_REQUIRED,
     PLANS,
+    PLAN_SCOPE,
     buildLeadPayload,
     contradictions,
     coverageLimitations,
     emptyForm,
     firstInvalidStep,
+    formForPlan,
     measurementsNeeded,
+    paidPhotoMissing,
     parseDraft,
     planLine,
+    planScope,
+    visualMode,
+    visualModeOptions,
     resolveContradiction,
     resolvePlan,
     roomFlowMode,
@@ -221,5 +228,52 @@ describe("draft persistence", () => {
     it("ignores corrupt or old drafts", () => {
         expect(parseDraft("{nope")).toBeNull();
         expect(parseDraft(JSON.stringify({ version: "old", form: {} }))).toBeNull();
+    });
+});
+
+describe("plan switching", () => {
+    const conceptualForm = () => readyForm({ photo_mode: "conceptual", conceptual_ack: true, coverage: "" });
+
+    it("forces photos and clears the conceptual acknowledgement on paid plans", () => {
+        const f = formForPlan(conceptualForm(), PLANS.plus);
+        expect(f.photo_mode).toBe("photos");
+        expect(f.conceptual_ack).toBe(false);
+    });
+
+    it("leaves Free conceptual answers alone", () => {
+        const f = conceptualForm();
+        expect(formForPlan(f, PLANS.free)).toBe(f);
+    });
+
+    it("hides payment until a paid plan has an accepted wide photo", () => {
+        const f = readyForm();
+        expect(paidPhotoMissing(f, [], PLANS.plus)).toBe(true);
+        expect(paidPhotoMissing(f, [wide(1, { shot: "detail" })], PLANS.plus)).toBe(true);
+        expect(paidPhotoMissing(f, [wide(1)], PLANS.plus)).toBe(false);
+        expect(paidPhotoMissing(f, [], PLANS.free)).toBe(false);
+    });
+
+    it("uses the shared paid-plan photo message", () => {
+        expect(validatePhotos(readyForm(), [], PLANS.premium).photos).toBe(PAID_PHOTO_REQUIRED);
+    });
+});
+
+describe("conceptual copy", () => {
+    const conceptual = readyForm({ photo_mode: "conceptual", conceptual_ack: true, coverage: "" });
+
+    it("never promises the customer's photos in a conceptual scope", () => {
+        const text = planScope(conceptual, PLANS.free)
+            .map((s) => s.body)
+            .join(" ");
+        expect(text).not.toMatch(/your photos/i);
+        expect(planScope(readyForm(), PLANS.free)).toBe(PLAN_SCOPE.free);
+        expect(planScope(conceptual, PLANS.plus)).toBe(PLAN_SCOPE.plus);
+    });
+
+    it("drops “Match my current space” when there is no photo", () => {
+        expect(visualModeOptions(conceptual, PLANS.free).map((m) => m.id)).not.toContain("match_current");
+        expect(visualMode(conceptual, PLANS.free)).toBe("suggest");
+        expect(buildLeadPayload(conceptual, [], PLANS.free, null).intake.visual.mode).toBe("suggest");
+        expect(visualMode(readyForm(), PLANS.plus)).toBe("match_current");
     });
 });

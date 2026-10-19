@@ -33,6 +33,22 @@ export const PLAN_SCOPE = {
     ],
 };
 
+// Conceptual plans are Free-only and never use the customer's photos.
+export const CONCEPTUAL_PLAN_SCOPE = [
+    { title: "Design Plan", body: "An inspiration-based starter plan: functional zones and first steps for this type of space." },
+    { title: "Room Flow", body: "A conceptual zone diagram for this type of space, not based on your room." },
+    { title: "Companion Guide", body: "First practical steps, with few shopping details." },
+];
+
+export const CONCEPTUAL_PHOTOS_LINE = "Inspiration-based plan; no photos used";
+
+export function planScope(form, plan) {
+    return isConceptual(form, plan) ? CONCEPTUAL_PLAN_SCOPE : PLAN_SCOPE[plan.id] || PLAN_SCOPE.free;
+}
+
+export const PAID_PHOTO_REQUIRED =
+    "Add one clear, wide photo to continue. We don't charge for a personalized plan without a usable photo of your space.";
+
 export const STEPS = [
     { id: "space", title: "Space & goal", heading: "Let's start with your space." },
     { id: "photos", title: "Photos", heading: "Show us the space as it is today." },
@@ -286,6 +302,30 @@ export function hasVisualEvidence(form, photos) {
     return form.photo_mode === "photos" && hasUsableWideView(photos);
 }
 
+// Paid plans are always photo-based: a draft started on Free as conceptual
+// must not carry its conceptual choice into a paid plan.
+export function formForPlan(form, plan) {
+    if (plan.price > 0 && (form.photo_mode !== "photos" || form.conceptual_ack)) {
+        return { ...form, photo_mode: "photos", conceptual_ack: false };
+    }
+    return form;
+}
+
+// True while a paid plan has no accepted wide photo; the pay CTA stays hidden.
+export function paidPhotoMissing(form, photos, plan) {
+    return plan.price > 0 && !hasVisualEvidence(form, photos);
+}
+
+export function visualModeOptions(form, plan) {
+    return isConceptual(form, plan) ? VISUAL_MODES.filter((m) => m.id !== "match_current") : VISUAL_MODES;
+}
+
+// With no photos there is no current space to match; fall back to a suggestion.
+export function visualMode(form, plan) {
+    const mode = form.visual_mode || "match_current";
+    return isConceptual(form, plan) && mode === "match_current" ? "suggest" : mode;
+}
+
 // ── Conditional logic ───────────────────────────────────
 
 export function wantsLayoutChange(form) {
@@ -472,10 +512,7 @@ export function validatePhotos(form, photos, plan, { pending = false } = {}) {
         return e;
     }
     if (photos.length === 0) {
-        e.photos =
-            plan.price > 0
-                ? "Add one clear, wide photo to continue. We don't charge for a personalized plan without a usable photo of your space."
-                : "Add one clear, wide photo, or choose a conceptual plan below.";
+        e.photos = plan.price > 0 ? PAID_PHOTO_REQUIRED : "Add one clear, wide photo, or choose a conceptual plan below.";
         return e;
     }
     if (!hasUsableWideView(photos)) {
@@ -636,7 +673,7 @@ export function buildIntake(form, photos, plan) {
         change_avoid: form.change_avoid.trim(),
         budget: form.budget,
         visual: {
-            mode: form.visual_mode || "match_current",
+            mode: visualMode(form, plan),
             style: form.visual_mode === "choose_style" ? form.style : "",
             palette: form.visual_mode === "choose_style" ? form.palette : "",
         },
