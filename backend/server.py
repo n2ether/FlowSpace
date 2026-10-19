@@ -66,6 +66,7 @@ from members import (
     ensure_member_indexes,
     free_limit_error,
     is_free_package,
+    latest_transactions,
     new_member_doc,
     public_member,
     public_plan,
@@ -764,8 +765,23 @@ async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
             {"lead_id": {"$in": lead_ids}}, {"_id": 0}
         ).to_list(500)
     by_lead = {d.get("lead_id"): d for d in deliverables}
+    transactions = []
+    if lead_ids:
+        transactions = await db.payment_transactions.find(
+            {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "payment_status": 1, "status": 1, "created_at": 1}
+        ).to_list(2000)
+    tx_by_lead = latest_transactions(transactions)
+    spaces = [
+        public_space(
+            lead,
+            by_lead.get(lead.get("id")),
+            transaction=tx_by_lead.get(lead.get("id")),
+            packages=PACKAGES,
+        )
+        for lead in leads
+    ]
     return {
-        "spaces": [public_space(lead, by_lead.get(lead.get("id"))) for lead in leads],
+        "spaces": sign_photo_urls(spaces),
         "usage": await _usage_for(member["id"]),
     }
 

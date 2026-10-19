@@ -67,4 +67,24 @@ describe("My Spaces", () => {
         expect(spaceTitle({ space_type: "other" })).toBe("Other space");
         expect(spaceTitle({ space_type: "laundry_room" })).toBe("Laundry room");
     });
+
+    it("shows unpaid, failed and expired checkouts with payment labels, not In progress", async () => {
+        renderAccount([
+            { id: "p1", space_type: "closet", status: "awaiting_payment", status_label: "Awaiting payment", package_id: "plus" },
+            {
+                id: "p2",
+                space_type: "garage",
+                status: "payment_not_completed",
+                status_label: "Payment not completed",
+                package_id: "plus",
+            },
+            { id: "p3", space_type: "pantry", status: "checkout_expired", status_label: "Checkout expired", package_id: "premium" },
+            { id: "p4", space_type: "bedroom", status: "in_progress", status_label: "In progress", package_id: "plus" },
+        ]);
+        expect(await screen.findByTestId("space-status-p1")).toHaveTextContent("Awaiting payment");
+        expect(screen.getByTestId("space-status-p2")).toHaveTextContent("Payment not completed");
+        expect(screen.getByTestId("space-status-p3")).toHaveTextContent("Checkout expired");
+        expect(screen.getByTestId("space-status-p4")).toHaveTextContent("In progress");
+        expect(customerStatus({ status: "checkout_expired" }).label).toBe("Checkout expired");
+    });
 });
