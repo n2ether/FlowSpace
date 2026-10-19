@@ -114,11 +114,11 @@ def package_version(deliverable: Optional[Dict[str, Any]]) -> int:
 
 
 def version_label(version: int) -> str:
-    """Internal review chrome. The same Portuguese sentence for every version.
+    """Review chrome painted on the board, Room Flow and PDF footer until release.
 
-    Customer copy stays English. File names use :func:`version_tag` instead.
+    Customer-facing, so English only. File names use :func:`version_tag` instead.
     """
-    return f"Versão {int(version)} para sua análise"
+    return f"Version {int(version)} for your review"
 
 
 def version_tag(version: int) -> str:

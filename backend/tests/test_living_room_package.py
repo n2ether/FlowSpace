@@ -113,14 +113,14 @@ def _board_text(monkeypatch, lead, deliverable, images=None):
 
 def test_version_labels_and_next_release_stay_held():
     assert package_version({}) == 1
-    assert version_label(1) == "Versão 1 para sua análise"
-    assert version_label(2) == "Versão 2 para sua análise"
-    assert version_label(3) == "Versão 3 para sua análise"
+    assert version_label(1) == "Version 1 for your review"
+    assert version_label(2) == "Version 2 for your review"
+    assert version_label(3) == "Version 3 for your review"
     assert "V3" not in version_label(3)
     held = next_release({"package_status": "review"})
     assert held == {
         "package_version": 2,
-        "version_label": "Versão 2 para sua análise",
+        "version_label": "Version 2 for your review",
         "package_status": "review",
         "design_plan_approved": False,
         "emailed": False,
@@ -128,7 +128,7 @@ def test_version_labels_and_next_release_stay_held():
     # A final package from before sent_for_review existed counts as already emailed.
     bumped = next_release({"package_status": "final", "package_version": 2, "design_plan_approved": True})
     assert bumped["package_version"] == 3
-    assert bumped["version_label"] == "Versão 3 para sua análise"
+    assert bumped["version_label"] == "Version 3 for your review"
     assert bumped["sent_for_review"] == 2
     assert bumped["package_status"] == "review"
     assert bumped["design_plan_approved"] is False
@@ -140,19 +140,19 @@ def test_version_counts_only_copies_sent_for_review():
     """Regenerating an unsent copy keeps its number. This lead has not been sent V2."""
     unsent = next_release({"package_status": "review", "package_version": 2})
     assert unsent["package_version"] == 2
-    assert unsent["version_label"] == "Versão 2 para sua análise"
+    assert unsent["version_label"] == "Version 2 for your review"
     assert "sent_for_review" not in unsent
-    # A mistaken bump to 3, with nothing emailed, collapses back to Versão 2.
+    # A mistaken bump to 3, with nothing emailed, collapses back to Version 2.
     collapsed = next_release({"package_status": "review", "package_version": 3})
     assert collapsed["package_version"] == 2
-    assert collapsed["version_label"] == "Versão 2 para sua análise"
+    assert collapsed["version_label"] == "Version 2 for your review"
     sent = next_release({"package_status": "review", "package_version": 2, "sent_for_review": 2})
     assert sent["package_version"] == 3
-    assert sent["version_label"] == "Versão 3 para sua análise"
+    assert sent["version_label"] == "Version 3 for your review"
     assert sent["sent_for_review"] == 2
     kept = next_release({"package_status": "review", "package_version": 3, "sent_for_review": 2})
     assert kept["package_version"] == 3
-    assert kept["version_label"] == "Versão 3 para sua análise"
+    assert kept["version_label"] == "Version 3 for your review"
     assert kept["emailed"] is False
 
 
@@ -229,7 +229,7 @@ def test_shared_steps_what_stays_title_and_subtitle():
     )
     spec = zone_map_spec(lead, deliverable, {})
     assert spec["subtitle"] == "A calmer flow through the living, dining, and entry areas."
-    assert spec["version_label"] == "Versão 2 para sua análise"
+    assert spec["version_label"] == "Version 2 for your review"
     assert WHAT_STAYS_TEXT in zone_map_text(spec)
     assert whole_title(deliverable["strategy"][0], max_words=6) == "Create a drop zone"
     moves = board_spec(lead, deliverable, {})["moves"]
@@ -245,7 +245,7 @@ def test_three_pieces_share_the_held_version_and_fill_their_pages(monkeypatch):
         ]
     }
     spec = board_spec(lead, deliverable, images)
-    assert spec["review_note"][-1] == "Versão 2 para sua análise"
+    assert spec["review_note"][-1] == "Version 2 for your review"
     assert spec["what_stays"] == WHAT_STAYS_TEXT
     assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02"]
     assert spec["released"] is False
@@ -253,7 +253,7 @@ def test_three_pieces_share_the_held_version_and_fill_their_pages(monkeypatch):
     pdf = " ".join(_pdf_text(lead, deliverable, images).split())
     flow = zone_map_text(zone_map_spec(lead, deliverable, images))
     for surface in (board, pdf, flow):
-        assert "Versão 2 para sua análise" in surface
+        assert "Version 2 for your review" in surface
         assert find_time_sensitive(surface) == []
         assert "The FlowSpace Design Team" not in surface
     assert "FlowSpace Design System" in pdf
@@ -312,7 +312,7 @@ def test_regenerate_endpoint_bumps_version_and_does_not_email(monkeypatch):
     result = asyncio.run(server.regenerate_package(LEAD_ID, True))
     assert result["emailed"] is False
     assert result["package_version"] == 2
-    assert result["version_label"] == "Versão 2 para sua análise"
+    assert result["version_label"] == "Version 2 for your review"
     assert result["package_status"] == "review"
     assert result["pieces"]["board"].endswith("/deliverable/board")
     assert result["pieces"]["zone_map"].endswith("/deliverable/zone-map")
@@ -327,10 +327,10 @@ def test_regenerate_endpoint_bumps_version_and_does_not_email(monkeypatch):
     assert lead["email_sent"] is False
     assert lead["status"] == "review"
     assert lead["package_status"] != "final"
-    # Nothing has been emailed, so a second regenerate keeps Versão 2.
+    # Nothing has been emailed, so a second regenerate keeps Version 2.
     again = asyncio.run(server.regenerate_package(LEAD_ID, True))
     assert again["package_version"] == 2
-    assert again["version_label"] == "Versão 2 para sua análise"
+    assert again["version_label"] == "Version 2 for your review"
     assert db.deliverables.docs[LEAD_ID]["package_version"] == 2
     assert "sent_for_review" not in db.deliverables.docs[LEAD_ID]
 
@@ -373,7 +373,7 @@ def test_regenerate_keeps_versao_2_until_a_copy_is_sent(monkeypatch):
 
     result = asyncio.run(server.regenerate_package(LEAD_ID, True))
     assert result["package_version"] == 2
-    assert result["version_label"] == "Versão 2 para sua análise"
+    assert result["version_label"] == "Version 2 for your review"
     assert result["emailed"] is False
     assert db.deliverables.docs[LEAD_ID]["package_version"] == 2
     assert "sent_for_review" not in db.deliverables.docs[LEAD_ID]
@@ -382,11 +382,11 @@ def test_regenerate_keeps_versao_2_until_a_copy_is_sent(monkeypatch):
     db.deliverables.docs[LEAD_ID]["package_version"] = 2
     after_send = asyncio.run(server.regenerate_package(LEAD_ID, True))
     assert after_send["package_version"] == 3
-    assert after_send["version_label"] == "Versão 3 para sua análise"
+    assert after_send["version_label"] == "Version 3 for your review"
     assert db.deliverables.docs[LEAD_ID]["sent_for_review"] == 2
     stayed = asyncio.run(server.regenerate_package(LEAD_ID, True))
     assert stayed["package_version"] == 3
-    assert stayed["version_label"] == "Versão 3 para sua análise"
+    assert stayed["version_label"] == "Version 3 for your review"
 
 
 def test_send_records_the_emailed_version_without_bumping_it(monkeypatch):

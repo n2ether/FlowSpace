@@ -385,7 +385,7 @@ def next_release(deliverable: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     The version counts copies sent to the customer for review, not regenerations.
     The original unlabeled package is version 1. Regenerating before anything has
-    been emailed prepares Versão 2, and further regenerations of that unsent copy
+    been emailed prepares Version 2, and further regenerations of that unsent copy
     keep 2 — including a copy whose stored number was bumped by mistake. A package
     already marked final, with no ``sent_for_review``, counts as sent at its
     current version. After a successful send, the next regeneration starts the

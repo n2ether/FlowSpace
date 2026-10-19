@@ -292,7 +292,7 @@ class Deliverable(BaseModel):
     # copy has been emailed for review (see sent_for_review).
     package_version: Optional[int] = None
     # Highest package_version successfully emailed by send-draft or send-final.
-    # Missing means nothing has been sent, so regenerate keeps preparing Versão 2.
+    # Missing means nothing has been sent, so regenerate keeps preparing Version 2.
     sent_for_review: Optional[int] = None
     # Reviewer sign-off on the Design Plan. Until set, every surface reads DRAFT / REVIEW.
     design_plan_approved: bool = False
