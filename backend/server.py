@@ -86,6 +86,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 STRIPE_API_KEY      = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+DEV_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
 ADMIN_PASSWORD      = os.environ.get("ADMIN_PASSWORD", "flowspace2025")
 
 PACKAGES: Dict[str, Dict[str, Any]] = {
@@ -512,12 +513,18 @@ async def _find_lead_for_checkout(
     metadata: Optional[Dict[str, Any]] = None,
     customer_email: Optional[str] = None,
     transaction_lead_id: Optional[str] = None,
+    include_email: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Resolve the customer lead for a paid Stripe session. Prefer lead_id over email."""
+    """Resolve the customer lead for a paid Stripe session by lead_id.
+
+    ``include_email`` adds the email fallback, used only to explain a miss in
+    the logs: an email match alone never fulfills a checkout.
+    """
     for reason, query in checkout_lead_lookups(
         metadata=metadata,
         customer_email=customer_email,
         transaction_lead_id=transaction_lead_id,
+        include_email=include_email,
     ):
         lead = await db.leads.find_one(query, {"_id": 0})
         if lead:
@@ -602,14 +609,30 @@ async def _fulfill_paid_checkout(
             transaction_lead_id=(existing_tx or {}).get("lead_id"),
         )
         if not lead:
-            logging.warning(
-                "Paid checkout %s has no matching lead (email=%s metadata_lead_id=%s tx_lead_id=%s)",
-                session_id,
-                customer_email,
-                (metadata or {}).get("lead_id"),
-                (existing_tx or {}).get("lead_id"),
+            email_match = await _find_lead_for_checkout(
+                metadata={"email": (metadata or {}).get("email")} if (metadata or {}).get("email") else {},
+                customer_email=customer_email,
+                include_email=True,
             )
-            # Release so a later trigger can match the lead once it exists.
+            if email_match:
+                logging.warning(
+                    "Paid checkout %s matched lead %s by email only; not starting automation. "
+                    "Link the lead_id on the transaction and retry from the admin.",
+                    session_id,
+                    email_match.get("id"),
+                )
+                await db.payment_transactions.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"lead_match": "email_only", "email_match_lead_id": email_match.get("id")}},
+                )
+            else:
+                logging.warning(
+                    "Paid checkout %s has no matching lead (metadata_lead_id=%s tx_lead_id=%s)",
+                    session_id,
+                    (metadata or {}).get("lead_id"),
+                    (existing_tx or {}).get("lead_id"),
+                )
+            # Release so a later trigger can match the lead once its id is linked.
             await db.checkout_fulfillments.delete_one({"session_id": session_id})
             return
 
@@ -1888,6 +1911,11 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Project not found")
+    member = await optional_member(request)
+    owner_id = str(lead.get("member_id") or "")
+    if owner_id and (not member or member.get("id") != owner_id):
+        # Same answer as a missing lead: do not confirm someone else's project exists.
+        raise HTTPException(status_code=404, detail="Project not found")
     reason = chargeable_block_reason(lead, pkg)
     if reason:
         raise HTTPException(
@@ -1913,9 +1941,10 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     if req.email:
         metadata["email"] = str(req.email)
     if req.metadata:
-        metadata.update({str(k): str(v) for k, v in req.metadata.items()})
+        metadata.update(
+            {str(k): str(v) for k, v in req.metadata.items() if str(k) not in {"member_id", "lead_id"}}
+        )
     metadata["lead_id"] = lead_id
-    member = await optional_member(request)
     checkout_email = str(req.email) if req.email else None
     if member:
         metadata["member_id"] = member["id"]
@@ -1960,6 +1989,20 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     return {"url": session.url, "session_id": session.id}
 
 
+def _public_checkout_status(*, payment_status: Any, status: Any, amount_total: Any, currency: Any) -> Dict[str, Any]:
+    """Anonymous success-page poll: payment fields only. No email, lead_id or member_id."""
+    try:
+        amount = int(amount_total or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    return {
+        "payment_status": str(payment_status or "unknown"),
+        "status": str(status or "unknown"),
+        "amount_total": amount,
+        "currency": str(currency or "usd"),
+    }
+
+
 @api_router.get("/checkout/status/{session_id}")
 async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
     existing = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
@@ -1978,13 +2021,12 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
             payment_status="paid",
             stripe_status=existing.get("status", "complete"),
         )
-        return {
-            "payment_status": "paid",
-            "status": existing.get("status", "complete"),
-            "amount_total": int(float(existing.get("amount", 0)) * 100),
-            "currency": existing.get("currency", "usd"),
-            "metadata": meta,
-        }
+        return _public_checkout_status(
+            payment_status="paid",
+            status=existing.get("status", "complete"),
+            amount_total=int(float(existing.get("amount", 0)) * 100),
+            currency=existing.get("currency", "usd"),
+        )
 
     stripe_sdk.api_key = STRIPE_API_KEY
     try:
@@ -2011,13 +2053,21 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
             payment_status=new_payment_status,
             stripe_status=new_status,
         )
-    return {
-        "payment_status": new_payment_status,
-        "status": new_status,
-        "amount_total": amount_total,
-        "currency": currency,
-        "metadata": metadata,
-    }
+    return _public_checkout_status(
+        payment_status=new_payment_status,
+        status=new_status,
+        amount_total=amount_total,
+        currency=currency,
+    )
+
+
+def _is_dev_environment() -> bool:
+    return (os.environ.get("ENVIRONMENT") or "").strip().lower() in DEV_ENVIRONMENTS
+
+
+def _allow_stripe_test_events() -> bool:
+    """Preview sets ALLOW_STRIPE_TEST_EVENTS=1. Production must not."""
+    return (os.environ.get("ALLOW_STRIPE_TEST_EVENTS") or "").strip() == "1"
 
 
 @api_router.post("/webhook/stripe")
@@ -2037,16 +2087,25 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
 
+    if not STRIPE_WEBHOOK_SECRET and not _is_dev_environment():
+        # Fail closed: without a signing secret any caller could forge a paid event.
+        logging.error("Stripe webhook rejected: STRIPE_WEBHOOK_SECRET is not set outside development")
+        raise HTTPException(status_code=503, detail="Webhook signing is not configured")
+
     try:
         if STRIPE_WEBHOOK_SECRET:
             event = stripe_sdk.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
         else:
-            # Dev mode — trust all events
+            # ENVIRONMENT=development only — trust unsigned events.
             import json
             event = stripe_sdk.Event.construct_from(json.loads(body), stripe_sdk.api_key)
     except Exception as e:
         logging.exception("Webhook verification failed")
         raise HTTPException(status_code=400, detail=str(e))
+
+    if not getattr(event, "livemode", False) and not _allow_stripe_test_events():
+        logging.info("Ignoring Stripe test-mode event %s", getattr(event, "id", ""))
+        return {"received": True, "ignored": "test_mode"}
 
     event_type = getattr(event, "type", "")
     if event_type not in STRIPE_HANDLED_EVENTS:

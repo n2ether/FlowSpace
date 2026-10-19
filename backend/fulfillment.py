@@ -21,6 +21,7 @@ def checkout_lead_lookups(
     metadata: Optional[Dict[str, Any]] = None,
     customer_email: Optional[str] = None,
     transaction_lead_id: Optional[str] = None,
+    include_email: bool = True,
 ) -> List[Tuple[str, Dict[str, Any]]]:
     """
     Return Mongo queries in priority order for the lead that belongs to a payment.
@@ -29,6 +30,7 @@ def checkout_lead_lookups(
       1. lead_id stored on the payment_transactions row (set at checkout create)
       2. lead_id / leadId in Stripe session metadata (sent by the intake form)
       3. Case-insensitive email match on a lead that has not finished delivery
+         (only when ``include_email``; an email match alone must not fulfill)
     """
     metadata = metadata or {}
     lookups: List[Tuple[str, Dict[str, Any]]] = []
@@ -42,7 +44,7 @@ def checkout_lead_lookups(
         lookups.append(("metadata.lead_id", {"id": meta_id}))
 
     email = (customer_email or str(metadata.get("email") or "")).strip()
-    if email:
+    if email and include_email:
         lookups.append(
             (
                 "email",
@@ -53,6 +55,9 @@ def checkout_lead_lookups(
             )
         )
     return lookups
+
+
+ID_LOOKUP_REASONS = frozenset({"transaction.lead_id", "metadata.lead_id"})
 
 
 def should_auto_start_automation(status: Optional[str]) -> bool:
