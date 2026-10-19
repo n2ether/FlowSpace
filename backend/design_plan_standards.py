@@ -294,10 +294,20 @@ SHOPPING_DECORATIVE = "Optional decorative"
 TAX_SHIPPING_NOTE = "before tax and shipping"
 LINK_TESTED = "Tested product link"
 LINK_REFERENCE = "Reference search"
-LINK_KIND_NOTE = (
-    "Tested product links open the exact product page we checked. "
-    "Reference searches open a labeled retailer search to compare options."
-)
+LINK_TESTED_NOTE = "Tested product links open the exact product page we checked."
+LINK_REFERENCE_NOTE = "Reference searches open a labeled retailer search to compare options."
+LINK_KIND_NOTE = f"{LINK_TESTED_NOTE} {LINK_REFERENCE_NOTE}"
+
+
+def link_kind_note(kinds) -> str:
+    """Explain only the link kinds the guide actually prints; never claim a tested link that isn't there."""
+    kinds = {str(k) for k in kinds or ()}
+    parts = []
+    if "tested" in kinds:
+        parts.append(LINK_TESTED_NOTE)
+    if "reference" in kinds:
+        parts.append(LINK_REFERENCE_NOTE)
+    return " ".join(parts)
 
 SELF_PACED_RESET_TITLE = "Self-paced reset"
 SELF_PACED_RESET = (
