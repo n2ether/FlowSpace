@@ -738,9 +738,10 @@ export function serializeDraft({ form, photos, step }) {
         form: safeForm,
         photos: photos
             .filter((p) => p.url)
-            .map(({ id, url, label, shot, metrics, acknowledged }) => ({
+            .map(({ id, url, upload_token, label, shot, metrics, acknowledged }) => ({
                 id,
                 url,
+                upload_token,
                 label,
                 shot,
                 metrics,

@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import { PHOTO_ACCEPT } from "../../lib/photoFiles";
 import { Link } from "react-router-dom";
 import PhotoOrientationNudge from "../PhotoOrientationNudge";
 import { ChoiceGroup, ErrorText, TextField } from "./fields";
@@ -14,7 +15,7 @@ import {
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || "";
 
-function PhotoCard({ photo, index, onChange, onReplace, onRemove, disabled }) {
+function PhotoCard({ photo, index, onChange, onReplace, onRemove, onPreviewError, disabled }) {
     const replaceRef = useRef(null);
     const label = photoLabel(index);
     const blocks = blockingIssues(photo);
@@ -37,6 +38,7 @@ function PhotoCard({ photo, index, onChange, onReplace, onRemove, disabled }) {
                         src={`${BACKEND}${photo.url}`}
                         alt={`${label}${photo.label ? ` — ${photo.label}` : ""}`}
                         className="h-full w-full object-cover"
+                        onError={() => onPreviewError?.(index)}
                     />
                 </div>
                 <div className="min-w-0 flex-1 space-y-3">
@@ -100,7 +102,7 @@ function PhotoCard({ photo, index, onChange, onReplace, onRemove, disabled }) {
                         <input
                             ref={replaceRef}
                             type="file"
-                            accept="image/*"
+                            accept={PHOTO_ACCEPT}
                             className="sr-only"
                             tabIndex={-1}
                             aria-hidden="true"
@@ -140,6 +142,7 @@ export default function StepPhotos({
     onReplace,
     onRemove,
     onPhotoChange,
+    onPreviewError,
     rotatePending,
     confirmPending,
 }) {
@@ -182,6 +185,7 @@ export default function StepPhotos({
                                 onChange={(patch) => onPhotoChange(i, patch)}
                                 onReplace={onReplace}
                                 onRemove={onRemove}
+                                onPreviewError={onPreviewError}
                             />
                         ))}
                     </ol>
@@ -201,7 +205,7 @@ export default function StepPhotos({
                             <input
                                 id="photo-input"
                                 type="file"
-                                accept="image/*"
+                                accept={PHOTO_ACCEPT}
                                 multiple
                                 className="sr-only"
                                 disabled={busy}

@@ -1,9 +1,13 @@
 """Make `backend/` importable when pytest is launched from the repo root."""
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# The startup stale-render sweep would act on fake leads; tests drive it directly.
+os.environ.setdefault("RENDER_RECOVERY_SWEEP", "0")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:

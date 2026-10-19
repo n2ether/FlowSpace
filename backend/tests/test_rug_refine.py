@@ -159,6 +159,10 @@ class _FakeBucket:
         self.files[str(oid)] = {"filename": filename, "data": data, "metadata": metadata or {}}
         return oid
 
+    async def upload_from_stream_with_id(self, file_id, filename, source, metadata=None):
+        data = source.read() if hasattr(source, "read") else bytes(source)
+        self.files[str(file_id)] = {"filename": filename, "data": data, "metadata": metadata or {}}
+
 
 def _deliverable():
     entries = []
@@ -268,7 +272,10 @@ def test_refine_replaces_passing_afters_and_keeps_every_mapping(api):
 
     # AFTER_01 is edited alone; every other view gets AFTER_01's refined rug as its reference.
     assert edits[0]["reference"] is None
-    first_refined = bucket.files[body["views"][0]["after_url"].rsplit("/", 1)[-1]]["data"]
+    from photo_access import photo_id_from_url
+
+    assert "sig=" in body["views"][0]["after_url"]
+    first_refined = bucket.files[photo_id_from_url(body["views"][0]["after_url"])]["data"]
     assert all(call["reference"] == first_refined for call in edits[1:])
     assert all("warm cream with a soft gray border" in call["prompt"] for call in edits)
 

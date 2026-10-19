@@ -1713,6 +1713,9 @@ class _GuideDoc(BaseDocTemplate):
     """Records how far down each page the content reaches, for the page-fill check."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # reportlab opens every page with Helvetica unless told otherwise, which leaves
+        # an unembedded base-14 font reference in the file.
+        kwargs.setdefault("initialFontName", _font("FSSans"))
         super().__init__(*args, **kwargs)
         self.page_fill: Dict[int, float] = {}
 
@@ -1826,10 +1829,11 @@ def _shopping_table(items: List[Dict[str, Any]], width: float) -> Table:
 
 def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
     """Functional lines, then optional decorative lines, each with its link kind."""
-    from design_plan_standards import LINK_KIND_NOTE
+    from design_plan_standards import link_kind_note
 
     s = _styles()
     flows: List[Any] = []
+    kinds = set()
     for group in facts.get("groups") or []:
         rows = [row for row in group.get("items") or [] if isinstance(row, dict)]
         if not rows:
@@ -1844,6 +1848,8 @@ def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
             url = str(link.get("url") or "").strip()
             link_label = str(link.get("label") or "").strip()
             kind = str(link.get("kind_label") or "").strip()
+            if url and link.get("kind"):
+                kinds.add(str(link["kind"]))
             title = f"<b>{_esc(name)}</b>"
             if url and link_label:
                 title = (
@@ -1862,8 +1868,8 @@ def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
             )
     if not flows:
         flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
-    else:
-        flows.append(Paragraph(_esc(LINK_KIND_NOTE), s["shopNote"]))
+    elif link_kind_note(kinds):
+        flows.append(Paragraph(_esc(link_kind_note(kinds)), s["shopNote"]))
     return flows
 
 

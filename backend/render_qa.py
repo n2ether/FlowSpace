@@ -31,7 +31,7 @@ Return ONLY JSON (no markdown):
   "ok": true or false,
   "windows_covered": true if shelves, cabinets, racks, or storage cover, block, or sit over a window or door that should stay visible,
   "gravity_wrong": true if the room is sideways/upside-down OR a ceiling fan, light, vent, or fixture is on a wall instead of the ceiling,
-  "walls_repainted": true if AFTER walls are a clearly different paint color than BEFORE (e.g. light blue / blue-gray became taupe, beige, cream, or warm earth). Ignore small lighting or white-balance shifts. Fail on an obvious wall-color makeover,
+  "walls_repainted": true if AFTER walls are a clearly different paint color than BEFORE, in either direction (warm became cool, cool became warm, or a new hue). Warm, cool, neutral, and colored walls are all correct when they match BEFORE. Ignore small lighting or white-balance shifts. Fail on an obvious wall-color makeover,
   "reasons": ["short facts"],
   "suggested_rotate_degrees": 0, 90, 180, or 270
 }
@@ -43,6 +43,19 @@ Mark ok=false if windows_covered OR gravity_wrong OR walls_repainted.
 Do not fail for clutter style or minor furniture taste.
 Be conservative: only fail on clear window-covering, gravity/fixture errors, or an obvious wall repaint.
 """
+
+
+PAINT_REQUEST_QA_NOTE = (
+    "The customer explicitly asked for new wall paint: {color}. A wall color change "
+    "toward that requested color is expected and correct. Set walls_repainted=true only "
+    "if the AFTER walls are a clearly different color from what the customer requested."
+)
+
+
+def qa_prompt(paint_request: str = "") -> str:
+    if paint_request:
+        return QA_PROMPT + "\n" + PAINT_REQUEST_QA_NOTE.format(color=paint_request) + "\n"
+    return QA_PROMPT
 
 
 @dataclass
@@ -133,8 +146,13 @@ def review_organized_render(
     after_bytes: bytes,
     before_bytes: Optional[bytes] = None,
     attempt: int = 1,
+    paint_request: str = "",
 ) -> RenderQAResult:
-    """Synchronous cheap vision check. Never raises — skip/ok on infra failure."""
+    """Synchronous cheap vision check. Never raises — skip/ok on infra failure.
+
+    ``paint_request`` is the wall color the customer asked for; when set, a wall
+    change toward that color is not a QA failure.
+    """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.info("[render_qa] skipped — ANTHROPIC_API_KEY not configured")
@@ -149,7 +167,7 @@ def review_organized_render(
             content.append(_image_block(jpeg_for_vision(before_bytes, max_side=768)))
             content.append({"type": "text", "text": "BEFORE (customer photo, gravity-corrected)."})
         content.append(_image_block(after_jpeg))
-        content.append({"type": "text", "text": "AFTER (organized render).\n\n" + QA_PROMPT})
+        content.append({"type": "text", "text": "AFTER (organized render).\n\n" + qa_prompt(paint_request)})
 
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(

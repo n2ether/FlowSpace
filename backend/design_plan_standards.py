@@ -114,11 +114,11 @@ def package_version(deliverable: Optional[Dict[str, Any]]) -> int:
 
 
 def version_label(version: int) -> str:
-    """Internal review chrome. The same Portuguese sentence for every version.
+    """Review chrome painted on the board, Room Flow and PDF footer until release.
 
-    Customer copy stays English. File names use :func:`version_tag` instead.
+    Customer-facing, so English only. File names use :func:`version_tag` instead.
     """
-    return f"Versão {int(version)} para sua análise"
+    return f"Version {int(version)} for your review"
 
 
 def version_tag(version: int) -> str:
@@ -179,6 +179,10 @@ WHY_IT_WORKS_BODY = (
 DEFAULT_SUBTITLE = "A calmer flow for the room you already have"
 
 SHOPPING_DISCLAIMER = "Representative examples for reference; prices and availability may vary."
+# Board caption for every room but the nursery (which keeps its approved v5 line).
+BOARD_SHOPPING_CAPTION = (
+    "Representative examples for reference. Full shopping detail, links, and extra costs are in the Companion Guide."
+)
 SNAPSHOT_TOTAL_LABEL = "Illustrative reference total"
 SNAPSHOT_MAX_ITEMS = 5
 KEPT_LABEL = "Kept as-is"
@@ -290,10 +294,20 @@ SHOPPING_DECORATIVE = "Optional decorative"
 TAX_SHIPPING_NOTE = "before tax and shipping"
 LINK_TESTED = "Tested product link"
 LINK_REFERENCE = "Reference search"
-LINK_KIND_NOTE = (
-    "Tested product links open the exact product page we checked. "
-    "Reference searches open a labeled retailer search to compare options."
-)
+LINK_TESTED_NOTE = "Tested product links open the exact product page we checked."
+LINK_REFERENCE_NOTE = "Reference searches open a labeled retailer search to compare options."
+LINK_KIND_NOTE = f"{LINK_TESTED_NOTE} {LINK_REFERENCE_NOTE}"
+
+
+def link_kind_note(kinds) -> str:
+    """Explain only the link kinds the guide actually prints; never claim a tested link that isn't there."""
+    kinds = {str(k) for k in kinds or ()}
+    parts = []
+    if "tested" in kinds:
+        parts.append(LINK_TESTED_NOTE)
+    if "reference" in kinds:
+        parts.append(LINK_REFERENCE_NOTE)
+    return " ".join(parts)
 
 SELF_PACED_RESET_TITLE = "Self-paced reset"
 SELF_PACED_RESET = (

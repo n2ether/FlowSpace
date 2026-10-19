@@ -74,6 +74,23 @@ IN_REVIEW = (
     "Our beta team reviews every plan before it's sent.",
 )
 DELIVERED = ("delivered", "Delivered", "Design Plan emailed to you.")
+AWAITING_PAYMENT = (
+    "awaiting_payment",
+    "Awaiting payment",
+    "Finish checkout to start your Design Plan.",
+)
+PAYMENT_NOT_COMPLETED = (
+    "payment_not_completed",
+    "Payment not completed",
+    "Your payment didn't go through. Start checkout again to continue.",
+)
+CHECKOUT_EXPIRED = (
+    "checkout_expired",
+    "Checkout expired",
+    "Your checkout timed out before payment. Start checkout again to continue.",
+)
+# Lead statuses that still wait on Stripe for a paid package.
+PRE_PAYMENT_STATUSES = frozenset({"new"})
 CUSTOMER_STATUS = {
     "new": IN_PROGRESS,
     "paid": IN_PROGRESS,
@@ -99,15 +116,75 @@ def space_title(lead: Dict[str, Any]) -> str:
     return space_type.replace("_", " ").capitalize() or "Your space"
 
 
-def customer_status(status: Optional[str]) -> Dict[str, str]:
-    code, label, note = CUSTOMER_STATUS.get(str(status or "new").strip().lower(), IN_REVIEW)
+def payment_state(transaction: Optional[Dict[str, Any]]) -> str:
+    """Collapse a payment_transactions row into paid / failed / expired / awaiting."""
+    if not transaction:
+        return "awaiting"
+    payment = str(transaction.get("payment_status") or "").strip().lower()
+    stripe_status = str(transaction.get("status") or "").strip().lower()
+    if payment in {"paid", "no_payment_required"}:
+        return "paid"
+    if payment == "expired" or stripe_status == "expired":
+        return "expired"
+    if payment in {"failed", "canceled", "cancelled", "declined"}:
+        return "failed"
+    return "awaiting"
+
+
+def customer_status(
+    status: Optional[str],
+    *,
+    paid_package: bool = False,
+    transaction: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """Customer-facing label. Only paid or processing work reads "In progress"."""
+    raw = str(status or "new").strip().lower()
+    entry = CUSTOMER_STATUS.get(raw, IN_REVIEW)
+    if paid_package and raw in PRE_PAYMENT_STATUSES:
+        state = payment_state(transaction)
+        entry = {
+            "paid": IN_PROGRESS,
+            "expired": CHECKOUT_EXPIRED,
+            "failed": PAYMENT_NOT_COMPLETED,
+        }.get(state, AWAITING_PAYMENT)
+    code, label, note = entry
     return {"status": code, "status_label": label, "status_note": note}
 
 
-def public_space(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def latest_transactions(transactions: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Newest payment row per lead_id; a paid row always wins over a later retry."""
+    by_lead: Dict[str, Dict[str, Any]] = {}
+    for tx in transactions or []:
+        lead_id = tx.get("lead_id")
+        if not lead_id:
+            continue
+        current = by_lead.get(lead_id)
+        if current is None:
+            by_lead[lead_id] = tx
+            continue
+        if payment_state(current) == "paid":
+            continue
+        if payment_state(tx) == "paid" or str(tx.get("created_at") or "") >= str(current.get("created_at") or ""):
+            by_lead[lead_id] = tx
+    return by_lead
+
+
+def public_space(
+    lead: Dict[str, Any],
+    deliverable: Optional[Dict[str, Any]] = None,
+    *,
+    transaction: Optional[Dict[str, Any]] = None,
+    packages: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     out = {k: lead.get(k) for k in SPACE_PUBLIC_FIELDS}
     out["title"] = space_title(lead)
-    out.update(customer_status(lead.get("status")))
+    out.update(
+        customer_status(
+            lead.get("status"),
+            paid_package=not is_free_package(lead.get("package_id"), packages),
+            transaction=transaction,
+        )
+    )
     if deliverable:
         out["deliverable"] = {
             "has_plan": True,
@@ -156,7 +233,7 @@ def public_plan(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, 
     return {
         "lead_id": lead.get("id"),
         "title": space_title(lead),
-        **customer_status(lead.get("status")),
+        **customer_status(lead.get("status"), paid_package=not is_free_package(lead.get("package_id"))),
         "approved": bool(deliverable.get("design_plan_approved")),
         "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
         "strategy": _clean_list(deliverable.get("strategy")),

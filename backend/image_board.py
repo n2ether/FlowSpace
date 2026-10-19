@@ -36,6 +36,7 @@ from blueprint_consistency import (
 )
 from copy_shape import complete_clip, heading, shorten_whole, whole_title
 from design_plan_standards import (
+    BOARD_SHOPPING_CAPTION,
     BOARD_WORDS,
     BRAND_NAME,
     BRAND_TINTS,
@@ -1031,6 +1032,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         "what_stays": facts["what_stays"],
         "products": products,
         "snapshot": _snapshot(products, total),
+        "shop_note": BOARD_SHOPPING_CAPTION if facts["general"] else SHOPPING_DISCLAIMER,
         "roadmap": _roadmap(doc, lead),
         "why": {"headline": WHY_IT_WORKS_HEADLINE, "body": WHY_IT_WORKS_BODY},
         "zones": _zone_labels(doc),
@@ -1130,7 +1132,7 @@ def _zone_card_h(pen: _Pen, card: Dict[str, str], width: float) -> float:
 
 
 def _shop_card_h(pen: _Pen, spec: Dict[str, Any], width: float) -> float:
-    note = pen.fit(SHOPPING_DISCLAIMER, "regular", 16, width - 48, 2)
+    note = pen.fit(spec.get("shop_note") or SHOPPING_DISCLAIMER, "regular", 16, width - 48, 2)
     items = spec["snapshot"]["items"]
     more = pen.fit(spec["snapshot"]["more_line"], "regular", 15, width - 48 - 36 - 140, 2)
     extra = pen.fit(spec.get("total_note") or "", "regular", 15, width - 48 - 36 - 140, 2)
@@ -1456,7 +1458,7 @@ def _draw_shop(pen: _Pen, spec: Dict[str, Any], box) -> None:
     x0, y0, x1, y1 = box
     _section_label(pen, x0 + 24, y0 + 20, "04")
     y = y0 + 20 + _label_h() + 8
-    for line in pen.fit(SHOPPING_DISCLAIMER, "regular", 16, x1 - x0 - 48, 2):
+    for line in pen.fit(spec.get("shop_note") or SHOPPING_DISCLAIMER, "regular", 16, x1 - x0 - 48, 2):
         pen.text(x0 + 24, y, line, "regular", 16, MUTED)
         y += 23
     y += 10
@@ -1615,7 +1617,7 @@ def customer_board_text(spec: Dict[str, Any]) -> str:
     for card in spec.get("zone_cards") or []:
         parts += [card["number"], card["title"], card.get("object", "").upper(), card["job"]]
     if snapshot.get("items"):
-        parts += [SHOPPING_DISCLAIMER, SNAPSHOT_TOTAL_LABEL.upper(), snapshot.get("more_line") or "", spec.get("total_note") or "", str(snapshot.get("total") or "")]
+        parts += [spec.get("shop_note") or SHOPPING_DISCLAIMER, SNAPSHOT_TOTAL_LABEL.upper(), snapshot.get("more_line") or "", spec.get("total_note") or "", str(snapshot.get("total") or "")]
         for row in snapshot["items"]:
             parts += [str(row.get("short") or ""), str(row.get("price") or "")]
     for swatch in spec.get("palette") or []:

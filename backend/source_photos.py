@@ -47,9 +47,9 @@ def photo_url(photo: Any) -> Optional[str]:
 
 
 def photo_id_from_url(url: Optional[str]) -> str:
-    if not url or "/api/uploads/photo/" not in str(url):
-        return ""
-    return str(url).rstrip("/").rsplit("/", 1)[-1]
+    from photo_access import photo_id_from_url as _photo_id
+
+    return _photo_id(url)
 
 
 def photo_filename(photo: Any) -> str:

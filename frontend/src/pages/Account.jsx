@@ -22,6 +22,21 @@ const SPACE_LABELS = {
 const IN_PROGRESS = { key: "in_progress", label: "In progress", note: "We're preparing your Design Plan." };
 const IN_REVIEW = { key: "in_review", label: "In review", note: "Our beta team reviews every plan before it's sent." };
 const DELIVERED = { key: "delivered", label: "Delivered", note: "Design Plan emailed to you." };
+const AWAITING_PAYMENT = {
+    key: "awaiting_payment",
+    label: "Awaiting payment",
+    note: "Finish checkout to start your Design Plan.",
+};
+const PAYMENT_NOT_COMPLETED = {
+    key: "payment_not_completed",
+    label: "Payment not completed",
+    note: "Your payment didn't go through. Start checkout again to continue.",
+};
+const CHECKOUT_EXPIRED = {
+    key: "checkout_expired",
+    label: "Checkout expired",
+    note: "Your checkout timed out before payment. Start checkout again to continue.",
+};
 
 // Raw lead statuses (and legacy "error") never reach the customer.
 const CUSTOMER_STATUS = {
@@ -35,12 +50,18 @@ const CUSTOMER_STATUS = {
     error: IN_REVIEW,
     in_review: IN_REVIEW,
     delivered: DELIVERED,
+    awaiting_payment: AWAITING_PAYMENT,
+    payment_not_completed: PAYMENT_NOT_COMPLETED,
+    checkout_expired: CHECKOUT_EXPIRED,
 };
 
 const STATUS_STYLES = {
     in_progress: "bg-sky-50 text-sky-800",
     in_review: "bg-slate-100 text-slate-700",
     delivered: "bg-emerald-50 text-emerald-800",
+    awaiting_payment: "bg-amber-50 text-amber-800",
+    payment_not_completed: "bg-red-50 text-red-800",
+    checkout_expired: "bg-amber-50 text-amber-800",
 };
 
 export function spaceTitle(space) {
@@ -51,7 +72,12 @@ export function spaceTitle(space) {
 }
 
 export function customerStatus(space) {
-    return CUSTOMER_STATUS[(space.status || "new").toLowerCase()] || IN_REVIEW;
+    const known = CUSTOMER_STATUS[(space.status || "new").toLowerCase()] || IN_REVIEW;
+    // The backend owns the label (it knows the payment state); the table is a fallback.
+    if (space.status_label) {
+        return { key: known.key, label: space.status_label, note: space.status_note || known.note };
+    }
+    return known;
 }
 
 function photoSrc(url) {
