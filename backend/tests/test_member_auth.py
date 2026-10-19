@@ -125,6 +125,8 @@ class FakeDB:
         self.payment_transactions = FakeCollection()
         self.stripe_events = FakeCollection(unique="event_id")
         self.checkout_fulfillments = FakeCollection(unique="session_id")
+        self.password_resets = FakeCollection(unique="token_hash")
+        self.password_reset_requests = FakeCollection()
 
 
 def _project(doc, projection):
@@ -168,6 +170,10 @@ def _match(doc, query):
             if "$nin" in expected and actual in expected["$nin"]:
                 return False
             if "$ne" in expected and actual == expected["$ne"]:
+                return False
+            if "$gt" in expected and not (actual is not None and actual > expected["$gt"]):
+                return False
+            if "$gte" in expected and not (actual is not None and actual >= expected["$gte"]):
                 return False
             if "$exists" in expected:
                 exists = key in doc

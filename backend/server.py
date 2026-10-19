@@ -29,7 +29,14 @@ from design_plan_standards import is_released, package_version, version_tag
 from pdf_generator import build_pdf, customer_project_title, plan_title
 from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
-from email_service import email_body_html, send_blueprint, send_contact_sheet, send_draft_package
+from email_service import (
+    email_body_html,
+    public_app_url,
+    send_blueprint,
+    send_contact_sheet,
+    send_draft_package,
+    send_password_reset,
+)
 from source_photos import draft_send_block_reason, final_email_block_reason, mapping_is_own_source
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
@@ -45,6 +52,7 @@ from auth import (
     create_token,
     decode_token,
     extract_token,
+    hash_password,
     normalize_email,
     validate_password,
     verify_password,
@@ -59,6 +67,18 @@ from members import (
     public_plan,
     public_space,
     usage_for_member,
+)
+from password_reset import (
+    GENERIC_RESET_MESSAGE,
+    INVALID_TOKEN_MESSAGE,
+    RESET_TOKEN_TTL_MINUTES,
+    client_ip,
+    consume_reset_token,
+    ensure_reset_indexes,
+    issue_reset_token,
+    rate_limited,
+    reset_url,
+    retire_member_tokens,
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -181,6 +201,15 @@ class MemberSignup(BaseModel):
 
 class MemberLogin(BaseModel):
     email: EmailStr
+    password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
     password: str
 
 
@@ -373,6 +402,10 @@ async def optional_member(request: Request) -> Optional[Dict[str, Any]]:
     if not payload or not payload.get("sub"):
         return None
     member = await db.members.find_one({"id": payload["sub"]}, {"_id": 0})
+    changed_at = (member or {}).get("password_changed_at")
+    if member and changed_at and int(payload.get("iat") or 0) < int(changed_at):
+        # Sessions issued before a password reset no longer count.
+        return None
     return member
 
 
@@ -709,6 +742,54 @@ async def member_login(payload: MemberLogin, response: Response):
     token = create_token(member["id"], member["email"])
     _set_session_cookie(response, token)
     return await _auth_payload(member, token, claimed)
+
+
+async def _email_reset_link(email: str, link: str) -> None:
+    ok, err = await send_password_reset(to_email=email, reset_link=link, ttl_minutes=RESET_TOKEN_TTL_MINUTES)
+    if not ok:
+        logging.warning("Password reset email not sent: %s", err)
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest, request: Request, background_tasks: BackgroundTasks):
+    """Same response whether or not the email has an account, so it can't be used to probe for members."""
+    email_n = normalize_email(str(payload.email))
+    ip = client_ip(request.headers, request.client.host if request.client else None)
+    if await rate_limited(db, email_n, ip):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "RATE_LIMITED",
+                "message": "Too many reset requests. Please wait an hour and try again.",
+            },
+        )
+    member = await db.members.find_one({"email": email_n}, {"_id": 0})
+    if member:
+        token = await issue_reset_token(db, member)
+        # Sent after the response so timing doesn't reveal whether the account exists.
+        background_tasks.add_task(_email_reset_link, member["email"], reset_url(public_app_url(), token))
+    return {"ok": True, "message": GENERIC_RESET_MESSAGE}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordRequest, response: Response):
+    pw_err = validate_password(payload.password)
+    if pw_err:
+        raise HTTPException(status_code=400, detail={"code": "WEAK_PASSWORD", "message": pw_err})
+    member_id = await consume_reset_token(db, (payload.token or "").strip())
+    member = await db.members.find_one({"id": member_id}, {"_id": 0}) if member_id else None
+    if not member:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_RESET_TOKEN", "message": INVALID_TOKEN_MESSAGE})
+    changed_at = int(datetime.now(timezone.utc).timestamp())
+    await db.members.update_one(
+        {"id": member["id"]},
+        {"$set": {"password_hash": hash_password(payload.password), "password_changed_at": changed_at}},
+    )
+    await retire_member_tokens(db, member["id"])
+    member["password_changed_at"] = changed_at
+    token = create_token(member["id"], member["email"])
+    _set_session_cookie(response, token)
+    return await _auth_payload(member, token)
 
 
 @api_router.post("/auth/logout")
@@ -2000,6 +2081,7 @@ logger = logging.getLogger(__name__)
 async def _startup():
     await seed_gallery_if_empty()
     await ensure_member_indexes(db)
+    await ensure_reset_indexes(db)
     await ensure_payment_indexes(db)
 
 
