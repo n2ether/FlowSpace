@@ -47,3 +47,17 @@ describe("Canceled checkout", () => {
         expect(scrolledTo).toEqual([]);
     });
 });
+
+describe("Landing claims", () => {
+    it("has no rating badge or homes-organized count", () => {
+        renderLanding("/");
+        expect(screen.queryByTestId("hero-rating")).not.toBeInTheDocument();
+        expect(document.body).not.toHaveTextContent(/4\.9|500\+|homes organized/);
+    });
+
+    it("makes no speed or priority promises", () => {
+        renderLanding("/");
+        expect(screen.getByRole("heading", { name: "Simple. Guided. Made for your space." })).toBeInTheDocument();
+        expect(document.body).not.toHaveTextContent(/Simple\. Fast|priority|24.48|\bhours?\b|— fast/i);
+    });
+});
