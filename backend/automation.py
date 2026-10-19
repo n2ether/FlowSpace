@@ -46,6 +46,7 @@ from pdf_generator import build_pdf
 from pdf_images import assemble_pdf_images, choose_hero
 from photo_access import gridfs_key, store_photo
 from render_qa import RenderQAResult, review_organized_render
+from render_recovery import heartbeat_loop, touch_render_heartbeat
 from source_photos import (
     classify_upload,
     photo_filename,
@@ -444,9 +445,21 @@ async def run_automation(
     db,
     fs_bucket,
 ) -> bool:
-    """Run the pipeline, capping concurrent renders at RENDER_CONCURRENCY."""
-    async with _render_semaphore():
-        return await _run_automation(lead=lead, db=db, fs_bucket=fs_bucket)
+    """Run the pipeline, capping concurrent renders at RENDER_CONCURRENCY.
+
+    The heartbeat runs while the lead waits for a slot too, so a long queue is
+    not mistaken for a render orphaned by a restart.
+    """
+    ticker = asyncio.create_task(heartbeat_loop(db, lead.get("id")))
+    try:
+        async with _render_semaphore():
+            return await _run_automation(lead=lead, db=db, fs_bucket=fs_bucket)
+    finally:
+        ticker.cancel()
+        try:
+            await ticker
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _run_automation(
@@ -470,7 +483,14 @@ async def _run_automation(
 
     await db.leads.update_one(
         {"id": lead_id},
-        {"$set": {"status": "processing", "automation_failed": False, "updated_at": _iso(datetime.now(timezone.utc))}},
+        {
+            "$set": {
+                "status": "processing",
+                "automation_failed": False,
+                "render_heartbeat_at": _iso(datetime.now(timezone.utc)),
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
+        },
     )
 
     try:
@@ -479,6 +499,7 @@ async def _run_automation(
         room = [photo for photo in loaded if photo.get("kind") == "room"]
         non_room = [photo for photo in loaded if photo.get("kind") != "room"]
         draft_bytes = next((photo.get("bytes") for photo in room if photo.get("bytes")), None)
+        await touch_render_heartbeat(db, lead_id)
         if room:
             logger.info(
                 "[automation] %d required room photo(s), %d non-room upload(s)",
@@ -504,6 +525,7 @@ async def _run_automation(
             upsert=True,
         )
         logger.info("[automation] Plan drafted and saved")
+        await touch_render_heartbeat(db, lead_id)
 
         # Old view_* / after URLs must not survive into this run.
         await _clear_stale_render_slots(db, lead_id)
@@ -558,6 +580,7 @@ async def _run_automation(
                         source_photo_id=src.get("photo_id") or "",
                     )
                 approved = bool(after_bytes and after_url)
+                await touch_render_heartbeat(db, lead_id)
                 if after_bytes and not after_url:
                     logger.warning(
                         "[automation] %s render could not be stored; source stays incomplete",
@@ -784,6 +807,7 @@ async def _run_automation(
             "y" if images.get("view_3") else "n",
         )
 
+        await touch_render_heartbeat(db, lead_id)
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
         pdf_bytes = await asyncio.to_thread(
             build_pdf, lead=lead, deliverable=deliverable_doc, images=images

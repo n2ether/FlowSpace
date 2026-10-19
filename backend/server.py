@@ -35,6 +35,7 @@ from ai_drafter import draft_deliverable
 from ai_image_generator import generate_front_view, refine_after_image
 from rug_refine import describe_rug, refine_one, resolve_refine_rug
 from automation import run_automation
+from render_recovery import sweep_forever
 from image_orientation import UnreadableImage, is_heif_upload, normalize_photo_bytes, upright_bytes
 from admin_session import create_admin_token, password_matches, verify_admin_token
 from photo_access import (
@@ -533,9 +534,21 @@ async def _find_lead_for_checkout(
     return None
 
 
+_RECOVERY_TASKS: set = set()
+
+
+def _schedule_automation(background_tasks: Optional[BackgroundTasks], lead: Dict[str, Any]) -> None:
+    if background_tasks is not None:
+        background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+        return
+    task = asyncio.create_task(run_automation(lead=lead, db=db, fs_bucket=fs_bucket))
+    _RECOVERY_TASKS.add(task)
+    task.add_done_callback(_RECOVERY_TASKS.discard)
+
+
 async def _start_automation_for_lead(
     lead: Dict[str, Any],
-    background_tasks: BackgroundTasks,
+    background_tasks: Optional[BackgroundTasks],
     extra_fields: Optional[Dict[str, Any]] = None,
     *,
     force: bool = False,
@@ -543,7 +556,9 @@ async def _start_automation_for_lead(
     """
     Claim the lead and queue the Claude → OpenAI image → board + PDF → Resend pipeline.
 
-    Skips if the lead is already processing/delivered unless force=True (admin retry).
+    Skips if the lead is already processing/delivered unless force=True (admin retry
+    and restart recovery). Without ``background_tasks`` (startup sweep) the run is
+    scheduled on the event loop; either way it waits on RENDER_CONCURRENCY.
     """
     extra_fields = extra_fields or {}
     lead_id = lead.get("id")
@@ -558,13 +573,13 @@ async def _start_automation_for_lead(
         query["status"] = {"$nin": ["processing", "delivered", "review", "incomplete"]}
     res = await db.leads.update_one(
         query,
-        {"$set": {**extra_fields, "status": "processing", "updated_at": now}},
+        {"$set": {**extra_fields, "status": "processing", "render_heartbeat_at": now, "updated_at": now}},
     )
     if res.matched_count == 0:
         logging.info("Skipping automation for lead %s — already in flight or delivered", lead_id)
         return False
     queued = {**lead, **extra_fields, "status": "processing"}
-    background_tasks.add_task(run_automation, lead=queued, db=db, fs_bucket=fs_bucket)
+    _schedule_automation(background_tasks, queued)
     logging.info("Automation queued for lead %s", lead_id)
     return True
 
@@ -1040,7 +1055,13 @@ async def retry_automation(lead_id: str, background_tasks: BackgroundTasks, _: b
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    await _start_automation_for_lead(lead, background_tasks, force=True)
+    # A person decided to retry: give restart recovery its full budget again.
+    await _start_automation_for_lead(
+        lead,
+        background_tasks,
+        extra_fields={"render_recoveries": 0, "render_recovery_status": None},
+        force=True,
+    )
     return {"message": "Automation started", "lead_id": lead_id}
 
 
@@ -2162,13 +2183,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _requeue_stale_render(lead: Dict[str, Any]) -> None:
+    """Restart recovery uses the admin retry path (force) behind the render semaphore."""
+    await _start_automation_for_lead(lead, None, force=True)
+
+
+_SWEEP_TASK: Dict[str, Optional[asyncio.Task]] = {"task": None}
+
+
+def _recovery_sweep_enabled() -> bool:
+    return (os.environ.get("RENDER_RECOVERY_SWEEP") or "1").strip() != "0"
+
+
 @app.on_event("startup")
 async def _startup():
     await seed_gallery_if_empty()
     await ensure_member_indexes(db)
     await ensure_payment_indexes(db)
+    if _recovery_sweep_enabled():
+        _SWEEP_TASK["task"] = asyncio.create_task(sweep_forever(db, _requeue_stale_render))
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    task = _SWEEP_TASK.get("task")
+    if task:
+        task.cancel()
     client.close()

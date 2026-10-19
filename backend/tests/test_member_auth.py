@@ -169,6 +169,9 @@ def _match(doc, query):
                 return False
             if "$ne" in expected and actual == expected["$ne"]:
                 return False
+            for op, cmp in (("$lt", lambda a, b: a < b), ("$lte", lambda a, b: a <= b), ("$gt", lambda a, b: a > b), ("$gte", lambda a, b: a >= b)):
+                if op in expected and (actual is None or not cmp(actual, expected[op])):
+                    return False
             if "$exists" in expected:
                 exists = key in doc
                 if bool(expected["$exists"]) != exists:
