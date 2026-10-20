@@ -141,3 +141,39 @@ def test_admin_edit_keeps_per_item_measure_tags(monkeypatch):
     assert "measure_first" not in saved["Ceramic dish"]
     returned = {item["name"]: item for item in r.json()["shopping_list"]}
     assert returned["Frame set"]["measure_first"] is True
+
+
+def test_zone_anchor_keeps_tv_upper_case():
+    from image_board import _sentence_case, _zone_cards
+
+    assert _sentence_case("TV CONSOLE + SECTIONAL") == "TV console + sectional"
+    assert _sentence_case("BENCH + MIRROR") == "Bench + mirror"
+    flow = resolve_room_flow(LEAD, {})
+    cards = _zone_cards(LEAD, {}, flow)
+    assert cards[0]["object"].startswith("TV console")
+    assert not any("Tv " in card["object"] for card in cards)
+
+
+def test_draft_header_line_sits_clear_of_the_logo():
+    import io
+
+    from pypdf import PdfReader
+
+    from draft_watermark import watermark_pdf
+    from pdf_generator import build_pdf
+    from tests.test_living_room_package import _deliverable, _lead
+
+    pdf = watermark_pdf(build_pdf(lead=_lead(), deliverable=_deliverable(), images={}))
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    width = float(page.mediabox.width)
+    spots = []
+
+    def visit(text, cm, tm, font, size):
+        if "in review, not final" in text:
+            spots.append(cm[4] + tm[4])
+
+    page.extract_text(visitor_text=visit)
+    assert spots, "header line missing"
+    # The logo and wordmark end ~100pt from the left edge; the line starts well past them.
+    assert all(x > 120 for x in spots), spots
+    assert all(x < width - 120 for x in spots), spots

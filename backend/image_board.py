@@ -693,6 +693,17 @@ def _subtitle(deliverable: Dict[str, Any], draw: Any = None) -> str:
     return sentence or "A calmer refresh of the room you already have."
 
 
+# Short all-caps words that stay upper case when a map label becomes a sentence ("TV console").
+_KEEP_UPPER = {"TV", "AC", "DVD", "LED", "USB"}
+
+
+def _sentence_case(text: str) -> str:
+    """Sentence case for a map label such as "TV CONSOLE + SECTIONAL", keeping acronyms like TV."""
+    words = [word if word.upper() in _KEEP_UPPER else word.lower() for word in text.split(" ")]
+    out = " ".join(words)
+    return out[:1].upper() + out[1:]
+
+
 def _zone_cards(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any]) -> List[Dict[str, str]]:
     """One card per zone: number, title, the piece that anchors it, and its one job."""
     from space_rails import is_nursery_space
@@ -715,7 +726,7 @@ def _zone_cards(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any])
     for index, zone in enumerate(zones):
         zid = str(zone.get("id") or "")
         labels = [_clean(item.get("label")) for item in furniture if str(item.get("zone") or "") == zid and _clean(item.get("label"))]
-        obj = " + ".join(labels[:2]).capitalize() if labels else ""
+        obj = _sentence_case(" + ".join(labels[:2])) if labels else ""
         title = _clean(zone.get("title")) or f"Zone {index + 1}"
         job = complete_clip(_clean(zone.get("job")) or f"One clear home for {title.lower()}.", BOARD_WORDS["zone_job"])
         cards.append(
