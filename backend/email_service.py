@@ -33,6 +33,7 @@ from design_plan_standards import (
     TAGLINE,
 )
 from image_orientation import upright_jpeg_bytes
+from package_files import assert_single_companion, package_file_set, package_filename, project_stem
 from pdf_generator import plan_title, space_label
 
 logger = logging.getLogger(__name__)
@@ -217,21 +218,14 @@ VIEW_JPEG_STEPS: Tuple[Tuple[Optional[int], int], ...] = (
 
 
 def attachment_slug(title: str) -> str:
-    """``Nicholas's Nursery`` -> ``Nicholas-Nursery``. Never a lead id or a pipeline code."""
-    text = re.sub(r"['’]s\b", "", title or "")
-    words = re.findall(r"[A-Za-z0-9]+", text)
-    return "-".join(words) or "Design-Plan"
+    """``Nicholas's Nursery`` -> ``Nicholas_Nursery``. Never a lead id or a pipeline code."""
+    return project_stem(title)
 
 
-def display_filename(title: str, kind: str) -> str:
-    """``Nicholas's Nursery`` + ``Design Plan`` -> ``Nicholas's Nursery — Design Plan.png``.
-
-    Apostrophes and the em dash stay (Resend encodes non-ASCII filenames);
-    only characters no filesystem accepts are removed.
-    """
-    text = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", title or "")
-    text = re.sub(r"\s+", " ", text).strip() or "FlowSpace"
-    return f"{text} — {kind}.png"
+def display_filename(title: str, kind: str, ext: str = "png", *, draft: bool = False) -> str:
+    """``Living Room`` + ``Design Plan`` -> ``FlowSpace_Living_Room_Design_Plan.png``."""
+    piece = {"Design Plan": "design_plan", "Room Flow": "room_flow", "Companion Guide": "companion_guide"}.get(kind, kind)
+    return package_filename(title, piece, ext, draft=draft)
 
 
 def _attachment(filename: str, data: bytes, content_type: str, content_id: str = "") -> dict:
@@ -245,9 +239,9 @@ def _attachment(filename: str, data: bytes, content_type: str, content_id: str =
     return att
 
 
-def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[Tuple[str, bytes]]:
-    out: List[Tuple[str, bytes]] = []
-    for index, visual in enumerate(visuals or []):
+def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[bytes]:
+    out: List[bytes] = []
+    for visual in visuals or []:
         if not isinstance(visual, dict):
             continue
         raw = visual.get("bytes") or visual.get("png") or visual.get("content")
@@ -258,8 +252,7 @@ def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[Tuple[str, by
                 continue
         if not isinstance(raw, (bytes, bytearray)) or not raw:
             continue
-        label = "-".join(re.findall(r"[A-Za-z0-9]+", str(visual.get("label") or ""))) or f"View-{index + 1}"
-        out.append((label, bytes(raw)))
+        out.append(bytes(raw))
     return out
 
 
@@ -279,32 +272,35 @@ def package_attachments(
     draft: bool = False,
     budget: Optional[int] = None,
 ) -> List[dict]:
-    """Board and zone map (PNG, full size), view photos (JPEG), then the companion PDF.
+    """Design Plan and Room Flow (PNG and PDF), view photos (JPEG), then exactly one Companion Guide.
 
-    The board and zone map go out twice: once inline (``content_id``) so the
-    body shows them, and once as a plain attachment so mobile Gmail and Apple
-    Mail list a downloadable tile. Mail clients do not list inline parts.
+    The board and Room Flow PNGs go out twice: once inline (``content_id``) so
+    the body shows them, and once as a plain attachment so mobile Gmail and
+    Apple Mail list a downloadable tile. Mail clients do not list inline parts.
+    Names come from ``package_files``.
 
     View photos are the only part that bends to the size budget: quality and
     long edge step down, and as a last resort they are left out (they are
     still in the email body and the PDF). Size never fails a send.
     """
     budget = EMAIL_SIZE_BUDGET if budget is None else budget
-    slug = attachment_slug(title)
-    suffix = "-DRAFT" if draft else ""
-    inline: List[dict] = []
-    files: List[dict] = []
-    if board_bytes:
-        pngs = [(DESIGN_PLAN_NAME, board_bytes, "blueprint-preview")]
-        if zone_map_bytes:
-            pngs.append(("Room Flow", zone_map_bytes, "room-flow"))
-        for kind, data, cid in pngs:
-            name = display_filename(title, kind)
-            inline.append(_attachment(name, data, "image/png", cid))
-            files.append(_attachment(name, data, "image/png"))
+    rows = package_file_set(
+        title=title,
+        board_png=board_bytes,
+        zone_map_png=zone_map_bytes if board_bytes else None,
+        companion_pdf=pdf_bytes,
+        draft=draft,
+    )
+    cids = {"design_plan": "blueprint-preview", "room_flow": "room-flow"}
+    inline = [
+        _attachment(row["filename"], row["data"], row["content_type"], cids[row["piece"]])
+        for row in rows
+        if row["content_type"] == "image/png"
+    ]
+    files = [_attachment(row["filename"], row["data"], row["content_type"]) for row in rows if row["piece"] != "companion_guide"]
+    pdf = next(_attachment(row["filename"], row["data"], row["content_type"]) for row in rows if row["piece"] == "companion_guide")
     head = inline + files
-    pdf = _attachment(f"{slug}-Companion{suffix}.pdf", pdf_bytes, "application/pdf")
-    base = head + [pdf]
+    base = assert_single_companion(head + [pdf])
     sources = _view_sources(extra_visuals)
     if not sources:
         return base
@@ -312,10 +308,10 @@ def package_attachments(
     size = encoded_message_size(html, base)
     for step, (max_edge, quality) in enumerate(VIEW_JPEG_STEPS):
         views = []
-        for label, raw in sources:
+        for index, raw in enumerate(sources, start=1):
             jpeg = upright_jpeg_bytes(raw, quality=quality, max_edge=max_edge)
             if jpeg:
-                views.append(_attachment(f"{label}.jpg", jpeg, "image/jpeg"))
+                views.append(_attachment(package_filename(title, "view", "jpg", index=index, draft=draft), jpeg, "image/jpeg"))
         attachments = head + views + [pdf]
         size = encoded_message_size(html, attachments)
         if size <= budget:
@@ -326,13 +322,13 @@ def package_attachments(
                     quality,
                     size / 1e6,
                 )
-            return attachments
+            return assert_single_companion(attachments)
 
     size = encoded_message_size(html, base)
     logger.warning(
         "Email size budget: dropped %d view photo attachments (%s); they stay in the body and the PDF (%.1f MB encoded)",
         len(sources),
-        ", ".join(f"{label}.jpg" for label, _raw in sources),
+        ", ".join(package_filename(title, "view", "jpg", index=i, draft=draft) for i in range(1, len(sources) + 1)),
         size / 1e6,
     )
     if size > budget:
