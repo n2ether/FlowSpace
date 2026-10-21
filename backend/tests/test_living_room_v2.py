@@ -15,7 +15,7 @@ def test_record_draws_the_real_fixed_points():
     assert flow["window"]["wall"] == flow["door"]["wall"] == 0  # front door shares the window wall
     assert [z["title"] for z in flow["zones"]] == ["Living", "Dining", "Entry Path", "Play"]
     labels = {item["label"] for item in flow["furniture"]}
-    assert {"TV CONSOLE", "SECTIONAL", "DINING TABLE", "PLAYPEN"} <= labels
+    assert {"TV CONSOLE", "SECTIONAL + CHAISE", "DINING TABLE", "PLAYPEN"} <= labels
     assert record_view_names(LEAD) == ["Whole area", "TV and dining", "Couch and front door"]
     assert resolve_room_flow(LEAD, {})["zones"][3]["title"] == "Play"
 

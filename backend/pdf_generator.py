@@ -1844,7 +1844,7 @@ def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
             name = str(row.get("name") or "Organizer")
             qty_label = str(row.get("qty"))
             price_label = _money(float(row.get("unit_price") or 0)) if row.get("unit_price") else "Typical"
-            sub_label = str(row.get("price") or "—")
+            sub_label = str(row.get("price") or "—") + (" · estimated price" if row.get("price_estimate") else "")
             url = str(link.get("url") or "").strip()
             link_label = str(link.get("label") or "").strip()
             kind = str(link.get("kind_label") or "").strip()
@@ -1870,6 +1870,8 @@ def _grouped_shopping_blocks(facts: Dict[str, Any]) -> List[Any]:
         flows.append(Paragraph("Shopping list will follow your plan.", s["guideBody"]))
     elif link_kind_note(kinds):
         flows.append(Paragraph(_esc(link_kind_note(kinds)), s["shopNote"]))
+    if flows and facts.get("estimate_note"):
+        flows.append(Paragraph(_esc(str(facts["estimate_note"])), s["shopNote"]))
     return flows
 
 
@@ -2113,6 +2115,21 @@ def _module_flowables(module: str, sections: Dict[str, Any], s: Dict[str, Paragr
 
 
 # ──────────────────────────── Build ─────────────────────────────
+def _shown_additions(lead: Dict[str, Any], deliverable: Dict[str, Any], pair: Dict[str, Any]) -> List[str]:
+    """Planned additions the vision check saw in this view, named the way the plan names them."""
+    from package_items import _matches, planned_additions
+
+    seen = [str(x) for x in pair.get("visible_additions") or []]
+    if not seen:
+        return []
+    names = []
+    for addition in planned_additions(lead, deliverable):
+        if _matches(addition, seen):
+            name = addition["name"]
+            names.append(name[:1].lower() + name[1:] if not name[:2].isupper() else name)
+    return names[:5]
+
+
 def build_pdf(
     *,
     lead: Dict[str, Any],
@@ -2269,6 +2286,9 @@ def _render_companion(
                     "A missing angle is not replaced by another photo or by a crop."
                 )
             block.append(Paragraph(reference, s["guideBody"]))
+            shown = _shown_additions(lead, deliverable, pair) if ready else []
+            if shown:
+                block.append(Paragraph(_esc("Added in this view: " + ", ".join(shown) + "."), s["guideBody"]))
             if any_missing and index == 0:
                 block.append(
                     Paragraph(

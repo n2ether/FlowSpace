@@ -195,7 +195,7 @@ def test_shopping_total_splits_priority_and_link_kind():
     facts = package_facts(lead, deliverable)
     assert facts["total"] == 243
     assert facts["total_line"] == TOTAL
-    assert facts["total_note"] == "Includes the $12 catch-all · Before tax and shipping"
+    assert facts["total_note"] == "Includes the $12 catch-all · Before tax and shipping · est. = estimated price"
     functional = [row["name"] for row in facts["functional"]]
     decorative = [row["name"] for row in facts["decorative"]]
     assert "Entry catch-all tray" in functional
@@ -421,6 +421,11 @@ def test_send_records_the_emailed_version_without_bumping_it(monkeypatch):
     monkeypatch.setattr(server, "final_email_block_reason", lambda _d: None)
     monkeypatch.setattr(server, "send_draft_package", _sent)
     monkeypatch.setattr(server, "send_blueprint", _sent)
+
+    async def _consistent(*_args, **_kwargs):
+        return {"ok": True, "issues": [], "blocking": 0}
+
+    monkeypatch.setattr(server, "_consistency", _consistent)
 
     class _Request:
         query_params = {}

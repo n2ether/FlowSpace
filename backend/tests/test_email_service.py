@@ -175,10 +175,10 @@ def test_sends_image_board_and_companion(monkeypatch):
     attachments = calls[0]["attachments"]
     assert len(attachments) == 3
     assert [a["content_type"] for a in attachments] == ["image/png", "image/png", "application/pdf"]
-    assert attachments[0]["filename"] == attachments[1]["filename"] == "Kids' room Organization Plan — Design Plan.png"
+    assert attachments[0]["filename"] == attachments[1]["filename"] == "FlowSpace_Kids_room_Organization_Plan_Design_Plan.png"
     assert attachments[0].get("content_id") == "blueprint-preview"
     assert "content_id" not in attachments[1]
-    assert attachments[2]["filename"] == "Kids-room-Organization-Plan-Companion.pdf"
+    assert attachments[2]["filename"] == "FlowSpace_Kids_room_Organization_Plan_Companion_Guide.pdf"
     html = calls[0]["html"].lower()
     assert "cid:blueprint-preview" in html
     assert html.find("blueprint") < html.find("companion")
@@ -229,7 +229,7 @@ def test_send_draft_package_not_final(monkeypatch):
     assert "is ready" not in payload["html"].lower()
     assert len(payload["attachments"]) == 3
     assert [a.get("content_id") for a in payload["attachments"]] == ["blueprint-preview", None, None]
-    assert payload["attachments"][1]["filename"].endswith(" — Design Plan.png")
+    assert payload["attachments"][1]["filename"].endswith("_Design_Plan_DRAFT.png")
     assert "DRAFT" in payload["attachments"][2]["filename"]
     html = payload["html"]
     low = html.lower()
@@ -332,25 +332,23 @@ def test_send_attaches_the_zone_map_beside_the_board(monkeypatch):
     assert sent is True
     attachments = calls[0]["attachments"]
     assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow", None, None, None]
-    assert attachments[3]["filename"].endswith(" — Room Flow.png")
+    assert attachments[3]["filename"].endswith("_Room_Flow_DRAFT.png")
     assert base64.b64decode(attachments[3]["content"]) == b"ZONEMAP"
     assert "cid:room-flow" in calls[0]["html"]
 
 
-BLUEPRINT_NAME = "Nicholas's Nursery — Design Plan.png"
-ROOM_FLOW_NAME = "Nicholas's Nursery — Room Flow.png"
-
-
 def _assert_visual_files(attachments, *, draft: bool):
-    suffix = "-DRAFT" if draft else ""
+    suffix = "_DRAFT" if draft else ""
+    blueprint = f"FlowSpace_Nicholas_Nursery_Design_Plan{suffix}.png"
+    room_flow = f"FlowSpace_Nicholas_Nursery_Room_Flow{suffix}.png"
     assert [a["filename"] for a in attachments] == [
-        BLUEPRINT_NAME,
-        ROOM_FLOW_NAME,
-        BLUEPRINT_NAME,
-        ROOM_FLOW_NAME,
-        "Organized-1.jpg",
-        "Organized-2.jpg",
-        f"Nicholas-Nursery-Companion{suffix}.pdf",
+        blueprint,
+        room_flow,
+        blueprint,
+        room_flow,
+        f"FlowSpace_Nicholas_Nursery_View_01{suffix}.jpg",
+        f"FlowSpace_Nicholas_Nursery_View_02{suffix}.jpg",
+        f"FlowSpace_Nicholas_Nursery_Companion_Guide{suffix}.pdf",
     ]
     assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow"] + [None] * 5
     assert attachments[0]["content"] == attachments[2]["content"]
@@ -432,13 +430,14 @@ def test_send_final_attaches_full_size_views_and_greets_by_first_name(monkeypatc
     assert "Nicholas's Nursery" in customer["subject"]
 
 
-def test_display_filenames_keep_the_apostrophe_and_em_dash():
+def test_display_filenames_follow_the_package_pattern():
     assert BLUEPRINT_COPY == "Your Design Plan is shown below and attached as a full-size image."
     assert ROOM_FLOW_COPY == "The Room Flow map is its own page, shown below and attached as a separate full-size image."
-    assert display_filename("Nicholas's Nursery", "Design Plan") == "Nicholas's Nursery — Design Plan.png"
-    assert display_filename("Nicholas's Nursery", "Room Flow") == "Nicholas's Nursery — Room Flow.png"
-    assert display_filename('A/B: "Den"?', "Design Plan") == "AB Den — Design Plan.png"
-    assert display_filename("", "Room Flow") == "FlowSpace — Room Flow.png"
+    assert display_filename("Nicholas's Nursery", "Design Plan") == "FlowSpace_Nicholas_Nursery_Design_Plan.png"
+    assert display_filename("Nicholas's Nursery", "Room Flow") == "FlowSpace_Nicholas_Nursery_Room_Flow.png"
+    assert display_filename("Living Room", "Design Plan", "pdf") == "FlowSpace_Living_Room_Design_Plan.pdf"
+    assert display_filename('A/B: "Den"?', "Design Plan") == "FlowSpace_A_B_Den_Design_Plan.png"
+    assert display_filename("", "Room Flow") == "FlowSpace_Project_Room_Flow.png"
 
 
 def test_room_flow_block_carries_the_outline_sentence():

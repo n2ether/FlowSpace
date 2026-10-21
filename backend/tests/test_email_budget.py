@@ -50,9 +50,18 @@ def _png(size=(64, 48)) -> bytes:
     return buf.getvalue()
 
 
-PNG_NAMES = ["Nicholas's Nursery — Design Plan.png", "Nicholas's Nursery — Room Flow.png"]
+PNG_NAMES = ["FlowSpace_Nicholas_Nursery_Design_Plan.png", "FlowSpace_Nicholas_Nursery_Room_Flow.png"]
+# Plain attachments: each board as PNG and PDF.
+FILE_NAMES = [
+    "FlowSpace_Nicholas_Nursery_Design_Plan.png",
+    "FlowSpace_Nicholas_Nursery_Design_Plan.pdf",
+    "FlowSpace_Nicholas_Nursery_Room_Flow.png",
+    "FlowSpace_Nicholas_Nursery_Room_Flow.pdf",
+]
+VIEW_NAMES = ["FlowSpace_Nicholas_Nursery_View_01.jpg", "FlowSpace_Nicholas_Nursery_View_02.jpg"]
+GUIDE = "FlowSpace_Nicholas_Nursery_Companion_Guide.pdf"
 PHOTOS = [_photo(seed=i) for i in range(2)]
-VISUALS = [{"label": "Organized-1", "bytes": PHOTOS[0]}, {"label": "Organized-2", "bytes": PHOTOS[1]}]
+VISUALS = [{"label": "View-1", "bytes": PHOTOS[0]}, {"label": "View-2", "bytes": PHOTOS[1]}]
 
 
 def _package(budget, **kwargs):
@@ -77,22 +86,16 @@ def _sizes(attachments):
 
 
 def test_slug_is_readable_and_has_no_codes():
-    assert attachment_slug(TITLE) == "Nicholas-Nursery"
-    assert attachment_slug("Nicholas’s Nursery") == "Nicholas-Nursery"
-    assert attachment_slug("") == "Design-Plan"
+    assert attachment_slug(TITLE) == "Nicholas_Nursery"
+    assert attachment_slug("Nicholas’s Nursery") == "Nicholas_Nursery"
+    assert attachment_slug("") == "Project"
 
 
 def test_views_keep_full_resolution_when_they_fit(caplog):
     with caplog.at_level(logging.WARNING, logger="email_service"):
         attachments = _package(10**9)
-    assert [a["filename"] for a in attachments] == [
-        *PNG_NAMES,
-        *PNG_NAMES,
-        "Organized-1.jpg",
-        "Organized-2.jpg",
-        "Nicholas-Nursery-Companion.pdf",
-    ]
-    assert _sizes(attachments) == {"Organized-1.jpg": (3200, 2400), "Organized-2.jpg": (3200, 2400)}
+    assert [a["filename"] for a in attachments] == [*PNG_NAMES, *FILE_NAMES, *VIEW_NAMES, GUIDE]
+    assert _sizes(attachments) == {VIEW_NAMES[0]: (3200, 2400), VIEW_NAMES[1]: (3200, 2400)}
     assert "size budget" not in caplog.text
 
 
@@ -102,7 +105,7 @@ def test_views_step_down_only_when_the_budget_requires_it(caplog):
         attachments = _package(full - 1)
     assert encoded_message_size("<html>body</html>", attachments) <= full - 1
     sizes = _sizes(attachments)
-    assert set(sizes) == {"Organized-1.jpg", "Organized-2.jpg"}
+    assert set(sizes) == set(VIEW_NAMES)
     assert all(max(size) <= 2400 for size in sizes.values())
     assert "stepped down" in caplog.text
     boards = [a for a in attachments if a["filename"] == PNG_NAMES[0]]
@@ -112,12 +115,8 @@ def test_views_step_down_only_when_the_budget_requires_it(caplog):
 def test_views_are_dropped_last_and_the_send_still_goes(caplog):
     with caplog.at_level(logging.WARNING, logger="email_service"):
         attachments = _package(10)
-    assert [a["filename"] for a in attachments] == [
-        *PNG_NAMES,
-        *PNG_NAMES,
-        "Nicholas-Nursery-Companion.pdf",
-    ]
-    assert "dropped 2 view photo attachments (Organized-1.jpg, Organized-2.jpg)" in caplog.text
+    assert [a["filename"] for a in attachments] == [*PNG_NAMES, *FILE_NAMES, GUIDE]
+    assert f"dropped 2 view photo attachments ({VIEW_NAMES[0]}, {VIEW_NAMES[1]})" in caplog.text
     assert "sending anyway" in caplog.text
 
 
@@ -131,7 +130,7 @@ def test_budget_counts_both_copies_of_the_board_and_room_flow():
     png_size = sum(len(a["content"]) for a in pngs)
     assert png_size == 2 * (len(base64.b64encode(board)) + len(base64.b64encode(zone_map)))
     assert encoded_message_size("", attachments) <= email_service.EMAIL_SIZE_BUDGET
-    assert _sizes(attachments) == {"Organized-1.jpg": (3200, 2400), "Organized-2.jpg": (3200, 2400)}
+    assert _sizes(attachments) == {VIEW_NAMES[0]: (3200, 2400), VIEW_NAMES[1]: (3200, 2400)}
 
 
 def _capture(monkeypatch):
@@ -163,7 +162,8 @@ def test_both_sends_apply_the_budget_instead_of_failing(monkeypatch):
         names = [a["filename"] for a in payload["attachments"]]
         assert not any(name.endswith(".jpg") for name in names)
         assert names[-1].endswith(".pdf")
-        assert names[:4] == PNG_NAMES * 2
+        assert names[:2] == [n.replace(".png", "_DRAFT.png") for n in PNG_NAMES] or names[:2] == PNG_NAMES
+        assert sum(1 for name in names if "Companion_Guide" in name) == 1
         assert "cid:blueprint-preview" in payload["html"] and "cid:room-flow" in payload["html"]
 
 
@@ -210,6 +210,11 @@ def _stub_server(monkeypatch, images, *, board, zone_map, build_pdf=lambda **_kw
     monkeypatch.setattr(server, "draft_send_block_reason", lambda _d: None)
     monkeypatch.setattr(server, "final_email_block_reason", lambda _d: None)
     monkeypatch.setattr(server, "outline_caption", lambda _lead, _d: NOTE)
+
+    async def consistent(*_args, **_kwargs):
+        return {"ok": True, "issues": [], "blocking": 0}
+
+    monkeypatch.setattr(server, "_consistency", consistent)
 
     class _Collection:
         async def update_one(self, *_args, **_kwargs):
@@ -261,7 +266,7 @@ def test_send_draft_and_send_final_attach_organized_photos_but_not_befores(monke
     server = _stub_server(monkeypatch, {"source_pairs": pairs}, board=board, zone_map=zone_map, build_pdf=build_pdf)
     calls = _capture(monkeypatch)
 
-    assert [v["label"] for v in server._client_facing_visuals({"source_pairs": pairs})] == ["Organized-1", "Organized-2"]
+    assert [v["label"] for v in server._client_facing_visuals({"source_pairs": pairs})] == ["View-1", "View-2"]
 
     asyncio.run(server.send_draft_package_endpoint(LEAD["id"], _Request(), to=None, _=True))
     asyncio.run(server.send_final_package(LEAD["id"], _Request(), _=True))
@@ -269,18 +274,26 @@ def test_send_draft_and_send_final_attach_organized_photos_but_not_befores(monke
 
     title = server._customer_title(LEAD, {"lead_id": LEAD["id"], "project_title": TITLE})
     slug = attachment_slug(title)
-    png_names = [display_filename(title, "Design Plan"), display_filename(title, "Room Flow")]
-    for payload, suffix in ((draft, "-DRAFT"), (final, "")):
+    for payload, draft_copy in ((draft, True), (final, False)):
+        suffix = "_DRAFT" if draft_copy else ""
+        dp = display_filename(title, "Design Plan", draft=draft_copy)
+        rf = display_filename(title, "Room Flow", draft=draft_copy)
         attachments = payload["attachments"]
         assert [a["filename"] for a in attachments] == [
-            *png_names,
-            *png_names,
-            "Organized-1.jpg",
-            "Organized-2.jpg",
-            f"{slug}-Companion{suffix}.pdf",
+            dp,
+            rf,
+            dp,
+            dp.replace(".png", ".pdf"),
+            rf,
+            rf.replace(".png", ".pdf"),
+            f"FlowSpace_{slug}_View_01{suffix}.jpg",
+            f"FlowSpace_{slug}_View_02{suffix}.jpg",
+            f"FlowSpace_{slug}_Companion_Guide{suffix}.pdf",
         ]
-        assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow"] + [None] * 5
-        for inline, file, png in ((attachments[0], attachments[2], board), (attachments[1], attachments[3], zone_map)):
+        assert [a.get("content_id") for a in attachments] == ["blueprint-preview", "room-flow"] + [None] * 7
+        for pdf_copy in (attachments[3], attachments[5]):
+            assert base64.b64decode(pdf_copy["content"]).startswith(b"%PDF")
+        for inline, file, png in ((attachments[0], attachments[2], board), (attachments[1], attachments[4], zone_map)):
             assert base64.b64decode(inline["content"]) == base64.b64decode(file["content"]) == png
             assert "content_id" not in file
         assert base64.b64decode(attachments[-1]["content"]) == PDF
