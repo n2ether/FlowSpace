@@ -363,8 +363,8 @@ def nursery_storage_line(lead: Dict[str, Any] | None, storage_str: str) -> str:
             "Do not add baskets in place of drawers, and do not add large open cubbies. "
         )
     return (
-        f"Add tidy storage for {storage_str}: matching baskets, "
-        "labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
+        f"Tidy storage for {storage_str}: labeled bins, baskets, and streamlined shelving only where the plan lists them. "
+        "Clear clutter from the floor and surfaces. "
         "Baskets sit on the floor beside furniture or inside shelving, never on a seat, a bed, "
         "or a shoe bench's shoe area. "
     )

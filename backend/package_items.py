@@ -488,7 +488,7 @@ WARN = "warn"
 _REMOVE_RE = re.compile(r"\b(?:replace|replacing|remove|removing|swap|swapping|get rid of|take down|retire|discard)\b", re.I)
 _NON_ENGLISH_RE = re.compile(
     r"\b(?:vers[ãa]o|revis[ãa]o|para\s+sua|sala\s+de|cozinha|tapete|quadro|mesa\s+de|não|você|"
-    r"versi[óo]n|para\s+su|cocina|alfombra|usted)\b",
+    r"versión|para\s+su|cocina|alfombra|usted)\b",
     re.I,
 )
 

@@ -68,8 +68,14 @@ def _with_space_rails(
     lead: Dict[str, Any],
     extra_constraint: str,
     deliverable: Optional[Dict[str, Any]] = None,
+    *,
+    photo_edit: bool = True,
 ) -> str:
-    """Append kids-room rails. Keep this call if the image provider changes."""
+    """Append kids-room rails and the shared item list. Keep this call if the image provider changes.
+
+    A text-to-image render (no customer photo) has no fixed pieces to lock, so
+    it only gets the basket rule from the shared list.
+    """
     from package_items import additions_rails, basket_rails, fixed_items_rails
     from space_rails import image_prompt_rails, rug_prompt_rails
 
@@ -86,9 +92,9 @@ def _with_space_rails(
         image_prompt_rails(lead, deliverable),
         rug_prompt_rails(lead, deliverable),
         must_line,
-        fixed_items_rails(lead, deliverable),
+        fixed_items_rails(lead, deliverable) if photo_edit else "",
         basket_rails(lead),
-        additions_rails(lead, deliverable),
+        additions_rails(lead, deliverable) if photo_edit else "",
         (extra_constraint or "").strip(),
     ]
     return " ".join(part for part in parts if part)
@@ -242,7 +248,8 @@ def _build_kontext_prompt(
     if stronger_rails:
         rails = rails + RETRY_RAILS
     extra = _with_space_rails(lead, extra_constraint, deliverable)
-    if extra and not extra.endswith((".", " ")):
+    if extra and not extra.endswith(" "):
+        extra = extra if extra.endswith(".") else extra + "."
         extra = extra + " "
     if wall_rails is WALL_PRESERVE_RAILS:
         lock = (
@@ -302,8 +309,9 @@ def _build_text_to_image_prompt(
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = _with_space_rails(lead, extra_constraint, deliverable)
-    if extra and not extra.endswith((".", " ")):
+    extra = _with_space_rails(lead, extra_constraint, deliverable, photo_edit=False)
+    if extra and not extra.endswith(" "):
+        extra = extra if extra.endswith(".") else extra + "."
         extra = extra + " "
     storage_line = nursery_storage_line(lead, storage_str)
     if storage_line.startswith("Tidy only"):
