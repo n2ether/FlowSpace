@@ -909,3 +909,61 @@ def test_board_endpoint_serves_a_pdf_on_request(monkeypatch):
     assert 'filename="FlowSpace_Living_Room_Design_Plan.pdf"' in pdf.headers["content-disposition"]
     png = asyncio.run(server.render_deliverable_board(LIVING_ID, None, _=True))
     assert 'filename="FlowSpace_Living_Room_Design_Plan.png"' in png.headers["content-disposition"]
+
+
+def test_draft_send_is_never_blocked_by_missing_links_and_flags_them(monkeypatch):
+    """Review sends go out with "est." prices; missing direct links are reported, not enforced."""
+    import server
+
+    lead = {"id": LIVING_ID, "name": "Camila Sales", "email": "c@example.com", "space_type": "living_room"}
+    deliverable = {
+        "lead_id": LIVING_ID,
+        "package_version": 2,
+        "shopping_list": [{"name": "Round jute area rug", "qty": 1, "price": 150}],
+    }
+
+    class _Coll:
+        async def update_one(self, *_a, **_k):
+            return None
+
+    class _DB:
+        leads = _Coll()
+        deliverables = _Coll()
+
+    async def inputs(_lead_id, _request):
+        return lead, deliverable, {}
+
+    sends = []
+
+    async def sent(**kwargs):
+        sends.append(kwargs)
+        return True, None
+
+    monkeypatch.setattr(server, "db", _DB())
+    monkeypatch.setattr(server, "_blueprint_render_inputs", inputs)
+    monkeypatch.setattr(server, "build_image_board", lambda **_kw: _png())
+    monkeypatch.setattr(server, "build_zone_map", lambda **_kw: _png())
+    monkeypatch.setattr(server, "draft_send_block_reason", lambda _d: None)
+    monkeypatch.setattr(server, "send_draft_package", sent)
+
+    class _Request:
+        query_params: dict = {}
+
+    out = asyncio.run(server.send_draft_package_endpoint(LIVING_ID, _Request(), to=None, _=True))
+    assert out["sent"] is True and out["final"] is False and len(sends) == 1
+    links = [i for i in out["consistency"]["issues"] if i["code"] == "product_link_not_direct"]
+    assert links and out["consistency"]["blocks_final"] >= 1
+
+    from image_board import board_spec
+
+    assert board_spec(lead, deliverable, {})["snapshot"]["items"][0]["price"] == "$150 est."
+
+    # The same package is refused as a FINAL send.
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(server, "final_email_block_reason", lambda _d: None)
+    monkeypatch.setattr(server, "send_blueprint", sent)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(server.send_final_package(LIVING_ID, _Request(), _=True))
+    assert err.value.status_code == 409 and "tested direct product link" in err.value.detail
+    assert len(sends) == 1

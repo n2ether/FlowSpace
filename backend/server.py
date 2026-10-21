@@ -1961,6 +1961,12 @@ async def send_draft_package_endpoint(
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images)
+    # A review send is never blocked by the consistency check (missing links included); it only reports.
+    try:
+        report = await _consistency(lead, deliverable, images, pdf_bytes)
+    except Exception as exc:
+        logging.warning("Consistency check failed for draft send %s: %s", lead_id, exc)
+        report = {"ok": False, "issues": [], "blocking": 0, "error": str(exc)}
     recipient = (to or lead.get("email") or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
     cc_raw = (request.query_params.get("cc") or "").strip()
     cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
@@ -1990,6 +1996,11 @@ async def send_draft_package_endpoint(
         "sent_for_review": sent_version,
         "to": recipient,
         "cc": cc_emails,
+        "consistency": {
+            "ok": bool(report.get("ok")),
+            "blocks_final": int(report.get("blocking") or 0),
+            "issues": report.get("issues") or [],
+        },
     }
 
 
