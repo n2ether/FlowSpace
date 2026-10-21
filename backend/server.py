@@ -2136,6 +2136,9 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
     if release.get("sent_for_review"):
         update["sent_for_review"] = release["sent_for_review"]
     update.pop("emailed", None)
+    from package_items import consistency_report
+
+    update["consistency"] = await asyncio.to_thread(consistency_report, lead, update)
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     await db.leads.update_one(
         {"id": lead_id},
@@ -2155,10 +2158,14 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
         "version_label": release["version_label"],
         "package_status": release["package_status"],
         "emailed": False,
+        "consistency": {"ok": update["consistency"]["ok"], "blocking": update["consistency"]["blocking"]},
         "pieces": {
             "board": f"{base}/board",
+            "board_pdf": f"{base}/board?format=pdf",
             "zone_map": f"{base}/zone-map",
+            "zone_map_pdf": f"{base}/zone-map?format=pdf",
             "pdf": f"{base}/pdf",
+            "consistency": f"{base}/consistency",
         },
     }
 
