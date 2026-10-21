@@ -70,14 +70,15 @@ def _with_space_rails(
     deliverable: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Append kids-room rails. Keep this call if the image provider changes."""
+    from package_items import additions_rails, basket_rails, fixed_items_rails
     from space_rails import image_prompt_rails, rug_prompt_rails
 
     must_stay = str((lead or {}).get("must_stay") or "").strip()
     must_line = (
         f"MUST KEEP from the photo: {must_stay}. Every existing furniture piece and large object "
         "(including any playpen or baby gear) stays in its place and in frame. Do not add new "
-        "furniture such as consoles, shelves, cabinets, or tables; only tidy loose items and add "
-        "small accessories."
+        "furniture such as consoles, shelves, cabinets, or tables; only tidy loose items, add the "
+        "planned additions, and add small accessories."
         if must_stay
         else ""
     )
@@ -85,6 +86,9 @@ def _with_space_rails(
         image_prompt_rails(lead, deliverable),
         rug_prompt_rails(lead, deliverable),
         must_line,
+        fixed_items_rails(lead, deliverable),
+        basket_rails(lead),
+        additions_rails(lead, deliverable),
         (extra_constraint or "").strip(),
     ]
     return " ".join(part for part in parts if part)
@@ -185,6 +189,19 @@ def _wall_rails(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> 
         "Do not change wall paint. The walls must look like the same painted surface as the input photo. ",
     )
 
+
+BASKET_RETRY_CONSTRAINT = (
+    "FAILED QA: a basket sat on a seat, a bed, or a shoe bench. Move every basket to the floor beside "
+    "furniture or into shelving. Seats stay free and shoes stay reachable."
+)
+
+# Sent with the second image of an edit: an approved after of the same room from another angle.
+CONSISTENCY_REFERENCE_CONSTRAINT = (
+    "SECOND IMAGE = REFERENCE ONLY: it is the already approved organized view of this same room from a "
+    "different angle. Do not copy its camera or framing. Match it for every fixed furniture piece, the rug, "
+    "the artwork, and every planned addition that is also visible in this photo: same structure, doors, "
+    "drawers, shelves, color, material, size, and position."
+)
 
 SAME_CAMERA_CONSTRAINT = (
     "SAME CAMERA LOCK: edit this exact source photo only. Keep the same camera, crop, "
@@ -422,9 +439,13 @@ async def generate_front_view(
     reference_photo_bytes: Optional[bytes] = None,
     stronger_rails: bool = False,
     extra_constraint: str = "",
+    consistency_reference: Optional[bytes] = None,
 ) -> Tuple[bytes, str]:
     """
     Generate a room rendering.
+
+    ``consistency_reference`` is an approved after of the same room from another
+    angle; it is attached as a second image so fixed pieces match across views.
 
     If ``reference_photo_bytes`` is provided (the customer's actual uploaded photo),
     uses the OpenAI Images edit API on that exact photo — preserving the real room.
@@ -452,7 +473,12 @@ async def generate_front_view(
                 extra_constraint=extra_constraint,
             )
             logger.info("OpenAI image edit prompt: %s", prompt[:200])
-            image_bytes, mime = await _edit_image(client, prompt, reference_photo_bytes)
+            reference = (
+                (await asyncio.to_thread(upright_bytes, consistency_reference)) or consistency_reference
+                if consistency_reference
+                else None
+            )
+            image_bytes, mime = await _edit_image(client, prompt, reference_photo_bytes, reference)
         else:
             prompt = _build_text_to_image_prompt(
                 lead,

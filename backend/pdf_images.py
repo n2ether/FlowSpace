@@ -149,6 +149,7 @@ def coerce_source_pairs(src: Any) -> List[Dict[str, Any]]:
                 "status": str(item.get("status") or ""),
                 "before": coerce_image_bytes(item.get("before")),
                 "after": coerce_image_bytes(item.get("after")),
+                "visible_additions": [str(x) for x in item.get("visible_additions") or [] if str(x).strip()],
             }
         )
     return out
