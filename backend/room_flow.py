@@ -88,6 +88,9 @@ FURNITURE_STYLES = {
     "basket": {"fill": (214, 175, 130), "line": (138, 98, 60)},
     "rug": {"fill": (234, 224, 202), "line": (150, 130, 100)},
     "block": {"fill": (232, 228, 218), "line": (110, 104, 94)},
+    "sofa": {"fill": (226, 232, 228), "line": (96, 112, 104)},
+    "chair": {"fill": (238, 232, 220), "line": (124, 104, 84)},
+    "table": {"fill": (236, 226, 208), "line": (124, 96, 70)},
 }
 
 _NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
@@ -117,17 +120,25 @@ def outline_phrases(flow: Dict[str, Any]) -> Dict[str, str]:
         }
     return {
         "badge": "Approximate room outline",
-        "map_note": "Approximate room outline. Furniture footprints and zones are approximate.",
-        "rule": "Approximate room outline. Furniture footprints and zones are approximate.",
-        "board_caption": "Approximate room outline. Furniture footprints and zones are approximate.",
+        "map_note": APPROXIMATE_NOTE,
+        "rule": "Approximate room outline \u2022 Measurements not confirmed",
+        "board_caption": APPROXIMATE_NOTE,
     }
+
+
+APPROXIMATE_NOTE = (
+    "Approximate room outline. Measurements are not confirmed. Furniture footprints and zones are approximate."
+)
 
 
 def guide_outline_sentence(flow: Dict[str, Any]) -> str:
     """The companion guide's opening outline sentence; same claim as ``outline_phrases``."""
     if flow.get("outline_source") == "measured":
         return "The room outline follows your measurements, while furniture footprints and zones remain approximate."
-    return "The room outline is approximate, and furniture footprints and zones are approximate too."
+    return (
+        "The room outline is approximate and its measurements are not confirmed; "
+        "furniture footprints and zones are approximate too."
+    )
 
 
 ZONE_APPROACH_HEADING = "WHY THE FLOWSPACE ZONE APPROACH HELPS"
@@ -278,7 +289,10 @@ def default_room_flow(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict
     )
     if _space_key(lead) in {"living_room", "living"}:
         subtitle = LIVING_ROOM_SUBTITLE
-    return {**base, "zones": zones, "subtitle": subtitle}
+    flow = {**base, "zones": zones, "subtitle": subtitle}
+    if _living_zone(flow) and _dining_zone(flow):
+        flow["path"] = connecting_path(flow)
+    return flow
 
 
 def _space_key(lead: Optional[Dict[str, Any]]) -> str:
@@ -415,14 +429,95 @@ def validate_room_flow(flow: Dict[str, Any]) -> List[str]:
     ):
         issues.append("a measured outline must carry wall lengths")
     for item in list(flow.get("furniture") or []) + list(flow.get("zones") or []):
-        for x, y in _shape_corners(item):
+        corners = list(_shape_corners(item))
+        for rect in furniture_footprints(item)[1:] if isinstance(item, dict) and "kind" in item else []:
+            l, t, r, b = rect
+            corners += [(l, t), (r, t), (r, b), (l, b)]
+        for x, y in corners:
             if not point_in_polygon((x, y), outline, tolerance=0.02):
                 issues.append(f"{item.get('id') or item.get('label')} sits outside the room outline")
                 break
     numbers = [str(z.get("number")) for z in flow.get("zones") or []]
     if len(numbers) != len(set(numbers)):
         issues.append("zone numbers repeat")
+    for item in flow.get("furniture") or []:
+        extended = item.get("extended") if isinstance(item, dict) else None
+        if not isinstance(extended, dict):
+            continue
+        if not item.get("rect") or not extended.get("rect"):
+            issues.append(f"{item.get('id') or item.get('label')} needs a rect for both table configurations")
+            continue
+        l, t, r, b = [float(v) for v in item["rect"]]
+        el, et, er, eb = [float(v) for v in extended["rect"]]
+        if not (el <= l + 1e-6 and et <= t + 1e-6 and er >= r - 1e-6 and eb >= b - 1e-6):
+            issues.append(f"{item.get('id') or item.get('label')} extended footprint must contain the compact one")
+        if int(extended.get("seats") or 0) <= int(item.get("seats") or 0):
+            issues.append(f"{item.get('id') or item.get('label')} extended configuration must seat more")
+    living, dining = _living_zone(flow), _dining_zone(flow)
+    if living and dining and not (_path_reaches(flow, living) and _path_reaches(flow, dining)):
+        issues.append("the clear path must connect the living and dining zones")
     return issues
+
+
+_LIVING = re.compile(r"\b(?:living|lounge|sitting|family|tv)\b", re.I)
+_DINING = re.compile(r"\b(?:dining|dinner|meals?|eat(?:ing)?)\b", re.I)
+
+
+def _zone_matching(flow: Dict[str, Any], pattern: re.Pattern) -> Optional[Dict[str, Any]]:
+    for zone in flow.get("zones") or []:
+        if isinstance(zone, dict) and pattern.search(f"{zone.get('id') or ''} {zone.get('title') or ''}"):
+            return zone
+    return None
+
+
+def _living_zone(flow: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    return _zone_matching(flow, _LIVING)
+
+
+def _dining_zone(flow: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    return _zone_matching(flow, _DINING)
+
+
+def _path_reaches(flow: Dict[str, Any], zone: Dict[str, Any], tolerance: float = 0.04) -> bool:
+    """True when the clear path runs through (or within ``tolerance`` m of) the zone."""
+    pts = [(float(p[0]), float(p[1])) for p in flow.get("path") or [] if isinstance(p, (list, tuple)) and len(p) >= 2]
+    corners = _shape_corners(zone)
+    if len(pts) < 2 or not corners:
+        return False
+    for a, b in zip(pts, pts[1:]):
+        for k in range(11):
+            x = a[0] + (b[0] - a[0]) * k / 10
+            y = a[1] + (b[1] - a[1]) * k / 10
+            if point_in_polygon((x, y), corners, tolerance=tolerance):
+                return True
+    return False
+
+
+def connecting_path(flow: Dict[str, Any]) -> List[List[float]]:
+    """A walkway from the door through each zone's centre, nearest zone first."""
+    outline = flow.get("outline") or []
+    centres = []
+    for zone in flow.get("zones") or []:
+        corners = _shape_corners(zone) if isinstance(zone, dict) else []
+        if corners:
+            centres.append((sum(c[0] for c in corners) / len(corners), sum(c[1] for c in corners) / len(corners)))
+    door = flow.get("door") or {}
+    if door.get("wall") is not None and len(outline) >= 3:
+        index = int(door["wall"])
+        a, b = outline[index], outline[(index + 1) % len(outline)]
+        length = edge_length(outline, index) or 1.0
+        mid = (float(door.get("from_m") or 0) + float(door.get("to_m") or length)) / 2 / length
+        start = (float(a[0]) + (float(b[0]) - float(a[0])) * mid, float(a[1]) + (float(b[1]) - float(a[1])) * mid)
+    elif centres:
+        start = centres.pop(0)
+    else:
+        return []
+    path = [start]
+    while centres:
+        nxt = min(centres, key=lambda c: math.hypot(c[0] - path[-1][0], c[1] - path[-1][1]))
+        centres.remove(nxt)
+        path.append(nxt)
+    return [[round(x, 3), round(y, 3)] for x, y in path]
 
 
 def _shape_corners(item: Dict[str, Any]) -> List[Tuple[float, float]]:
@@ -567,6 +662,7 @@ def zone_map_text(spec: Dict[str, Any]) -> str:
         parts.append(str(zone.get("map_label") or ""))
     for item in flow.get("furniture") or []:
         parts.append(str(item.get("label") or ""))
+        parts.append(_config_line(item))
     parts.extend(wall_labels(flow))
     return "\n".join(p for p in parts if p)
 
@@ -807,10 +903,104 @@ def _draw_rug(base: Image.Image, mp: _Mapper, item: Dict[str, Any], u: float) ->
     )
 
 
+def table_chairs(rect: Sequence[float], seats: int) -> List[List[float]]:
+    """Chair footprints around a table: split across the two long sides, evenly spaced."""
+    seats = max(0, int(seats or 0))
+    if not seats:
+        return []
+    l, t, r, b = [float(v) for v in rect]
+    w, h = r - l, b - t
+    size = max(0.035, min(0.07, min(w, h) * 0.6))
+    gap = size * 0.2
+    horizontal = w >= h
+    first = (seats + 1) // 2
+    second = seats - first
+    chairs: List[List[float]] = []
+    for side, count in ((0, first), (1, second)):
+        for k in range(count):
+            if horizontal:
+                cx = l + w * (k + 0.5) / count
+                y0 = t - gap - size if side == 0 else b + gap
+                chairs.append([cx - size / 2, y0, cx + size / 2, y0 + size])
+            else:
+                cy = t + h * (k + 0.5) / count
+                x0 = l - gap - size if side == 0 else r + gap
+                chairs.append([x0, cy - size / 2, x0 + size, cy + size / 2])
+    return chairs
+
+
+def _draw_chair(draw: ImageDraw.ImageDraw, box, u: float, *, dashed: bool = False) -> None:
+    style = FURNITURE_STYLES["chair"]
+    x0, y0, x1, y1 = box
+    if dashed:
+        _dashed(draw, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], style["line"], max(1, int(round(1.1 * u))), 2.6 * u, 2.2 * u)
+        return
+    draw.rounded_rectangle(box, radius=2.5 * u, fill=style["fill"], outline=style["line"], width=max(1, int(round(1.3 * u))))
+
+
+def _draw_table(base: Image.Image, mp: _Mapper, item: Dict[str, Any], u: float) -> None:
+    """Compact top and chairs solid; an extended configuration dashed around it."""
+    draw = ImageDraw.Draw(base)
+    style = FURNITURE_STYLES["table"]
+    extended = item.get("extended") if isinstance(item.get("extended"), dict) else None
+    compact_chairs = table_chairs(item["rect"], int(item.get("seats") or 0))
+    if extended and extended.get("rect"):
+        ex = mp.rect(extended["rect"])
+        _dashed(draw, [(ex[0], ex[1]), (ex[2], ex[1]), (ex[2], ex[3]), (ex[0], ex[3]), (ex[0], ex[1])], style["line"], max(1, int(round(1.3 * u))), 3.5 * u, 2.5 * u)
+        for chair in table_chairs(extended["rect"], int(extended.get("seats") or 0)):
+            if not any(_boxes_overlap(mp.rect(chair), mp.rect(c)) for c in compact_chairs):
+                _draw_chair(draw, mp.rect(chair), u, dashed=True)
+    draw.rounded_rectangle(mp.rect(item["rect"]), radius=4 * u, fill=style["fill"], outline=style["line"], width=max(1, int(round(1.6 * u))))
+    for chair in compact_chairs:
+        _draw_chair(draw, mp.rect(chair), u)
+
+
+def _draw_sofa(base: Image.Image, mp: _Mapper, item: Dict[str, Any], u: float) -> None:
+    """A sofa or sectional, with an optional chaise drawn as one joined piece."""
+    draw = ImageDraw.Draw(base)
+    style = FURNITURE_STYLES["sofa"]
+    line_w = max(1, int(round(1.6 * u)))
+    main = mp.rect(item["rect"])
+    chaise = mp.rect(item["chaise"]) if item.get("chaise") else None
+    for box in [b for b in (main, chaise) if b]:
+        draw.rounded_rectangle(box, radius=5 * u, fill=style["fill"], outline=style["line"], width=line_w)
+    if chaise:
+        ix0, iy0 = max(main[0], chaise[0]), max(main[1], chaise[1])
+        ix1, iy1 = min(main[2], chaise[2]), min(main[3], chaise[3])
+        if ix1 > ix0 and iy1 > iy0:
+            draw.rectangle((ix0 + line_w, iy0 + line_w, ix1 - line_w, iy1 - line_w), fill=style["fill"])
+        cx0, cy0, cx1, cy1 = chaise
+        inset = 0.22 * min(cx1 - cx0, cy1 - cy0)
+        draw.rounded_rectangle((cx0 + inset, cy0 + inset, cx1 - inset, cy1 - inset), radius=3 * u, outline=(150, 164, 156), width=max(1, int(u)))
+
+
+def furniture_footprints(item: Dict[str, Any]) -> List[List[float]]:
+    """Every rect an item occupies on the map, chairs and the extended table included."""
+    rects = [list(item["rect"])] if item.get("rect") else []
+    if item.get("chaise"):
+        rects.append(list(item["chaise"]))
+    if str(item.get("kind") or "") == "table" and item.get("rect"):
+        rects.extend(table_chairs(item["rect"], int(item.get("seats") or 0)))
+        extended = item.get("extended") if isinstance(item.get("extended"), dict) else None
+        if extended and extended.get("rect"):
+            rects.append(list(extended["rect"]))
+            rects.extend(table_chairs(extended["rect"], int(extended.get("seats") or 0)))
+    return rects
+
+
 def _draw_furniture(base: Image.Image, mp: _Mapper, item: Dict[str, Any], u: float) -> None:
     kind = str(item.get("kind") or "block")
     if kind == "rug":
         _draw_rug(base, mp, item, u)
+        return
+    if kind == "table" and item.get("rect"):
+        _draw_table(base, mp, item, u)
+        return
+    if kind == "sofa" and item.get("rect"):
+        _draw_sofa(base, mp, item, u)
+        return
+    if kind == "chair" and item.get("rect"):
+        _draw_chair(ImageDraw.Draw(base), mp.rect(item["rect"]), u)
         return
     if not item.get("rect"):
         return
@@ -1017,19 +1207,185 @@ def _label_block(draw, center_x: float, top: float, lines: Sequence[Tuple[str, A
     return (center_x - half, top, center_x + half, y)
 
 
+def _block_size(draw, lines: Sequence[Tuple[str, Any, Tuple[int, int, int], float]]) -> Tuple[float, float]:
+    width = max((_spaced_width(draw, text, face, tracking) for text, face, _fill, tracking in lines), default=0.0)
+    return width, sum(face.size * 1.45 for _text, face, _fill, _tracking in lines)
+
+
+Segment = Tuple[Tuple[float, float], Tuple[float, float]]
+
+# Clear space kept between a label and any zone border or wall, in reference pixels.
+LABEL_PAD = 3.5
+
+
+def _orient(a, b, c) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _segments_cross(p1, p2, q1, q2) -> bool:
+    d1, d2 = _orient(q1, q2, p1), _orient(q1, q2, p2)
+    d3, d4 = _orient(p1, p2, q1), _orient(p1, p2, q2)
+    if ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)) and d1 and d2 and d3 and d4:
+        return True
+    return False
+
+
+def _in_box(p, box: Box) -> bool:
+    return box[0] <= p[0] <= box[2] and box[1] <= p[1] <= box[3]
+
+
+def box_segment_gap(box: Box, seg: Segment) -> float:
+    """Pixels between a label box and a border segment. 0 when they touch or cross."""
+    a, b = seg
+    if _in_box(a, box) or _in_box(b, box):
+        return 0.0
+    x0, y0, x1, y1 = box
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    edges = list(zip(corners, corners[1:] + corners[:1]))
+    if any(_segments_cross(a, b, c, d) for c, d in edges):
+        return 0.0
+    gaps = [_segment_distance(c, a, b) for c in corners]
+    for p in (a, b):
+        nx, ny = min(max(p[0], x0), x1), min(max(p[1], y0), y1)
+        gaps.append(math.hypot(p[0] - nx, p[1] - ny))
+    return min(gaps)
+
+
+def _boxes_overlap(a: Box, b: Box, pad: float = 0.0) -> bool:
+    return a[0] - pad < b[2] and a[2] + pad > b[0] and a[1] - pad < b[3] and a[3] + pad > b[1]
+
+
+def zone_border_segments(mp: "_Mapper", flow: Dict[str, Any]) -> List[Segment]:
+    segments: List[Segment] = []
+    for zone in flow.get("zones") or []:
+        if not isinstance(zone, dict):
+            continue
+        if zone.get("rect"):
+            x0, y0, x1, y1 = mp.rect(zone["rect"])
+            pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        elif zone.get("ellipse"):
+            cx, cy, rx, ry = zone["ellipse"]
+            c = mp.pt(cx, cy)
+            pts = _ellipse_points(c[0], c[1], mp.m(rx), mp.m(ry), n=32)[:-1]
+        else:
+            continue
+        segments.extend(zip(pts, pts[1:] + pts[:1]))
+    return segments
+
+
+def wall_segments(mp: "_Mapper", flow: Dict[str, Any]) -> List[Segment]:
+    poly = [mp.pt(*p) for p in flow.get("outline") or []]
+    return list(zip(poly, poly[1:] + poly[:1]))
+
+
+def _fits(box: Box, pad: float, segments: Sequence[Segment], placed: Sequence[Box], poly, avoid: Sequence[Box] = ()) -> bool:
+    x0, y0, x1, y1 = box
+    if not all(point_in_polygon(c, poly) for c in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))):
+        return False
+    if any(_boxes_overlap(box, other, pad) for other in placed):
+        return False
+    if any(_boxes_overlap(box, other, pad * 0.5) for other in avoid):
+        return False
+    return all(box_segment_gap(box, seg) >= pad for seg in segments)
+
+
+def _fit_label(
+    draw,
+    lines: List[Tuple[str, Any, Tuple[int, int, int], float]],
+    center_x: float,
+    top: float,
+    u: float,
+    segments: Sequence[Segment],
+    placed: Sequence[Box],
+    poly,
+    min_px: float,
+    avoid: Sequence[Box] = (),
+) -> Tuple[List[Tuple[str, Any, Tuple[int, int, int], float]], float, float]:
+    """Move (then shrink) a label until it keeps ``LABEL_PAD`` clear of zone borders, walls, and labels.
+
+    Returns the lines to paint, the centre x, and the top y. The nearest clear
+    spot to the preferred one wins; type shrinks only when no spot fits.
+    """
+    pad = LABEL_PAD * u
+    offsets = sorted(
+        ((dx * 3 * u, dy * 2 * u) for dx in range(-24, 25) for dy in range(-24, 25)),
+        key=lambda o: math.hypot(o[0], o[1] * 1.3),
+    )
+    for scale in (1.0, 0.92, 0.84, 0.76):
+        sized = [
+            (text, font(_face_kind(face), max(min_px, face.size * scale)) if scale < 1 else face, fill, tracking * scale)
+            for text, face, fill, tracking in lines
+        ]
+        width, height = _block_size(draw, sized)
+        for dx, dy in offsets:
+            cx, ty = center_x + dx, top + dy
+            box = (cx - width / 2, ty, cx + width / 2, ty + height)
+            if _fits(box, pad, segments, placed, poly, avoid):
+                return sized, cx, ty
+    if avoid:
+        # A crowded corner: keep clear of borders and labels even if a label must sit on furniture.
+        return _fit_label(draw, lines, center_x, top, u, segments, placed, poly, min_px)
+    return lines, center_x, top
+
+
+def _face_kind(face) -> str:
+    for (kind, _px), cached in _fonts.items():
+        if cached is face:
+            return kind
+    return "sans-bold"
+
+
+def _config_line(item: Dict[str, Any]) -> str:
+    """"2 SEATS · OPENS TO 4" for a table drawn in two configurations."""
+    extended = item.get("extended") if isinstance(item.get("extended"), dict) else None
+    seats = int(item.get("seats") or 0)
+    if extended and seats:
+        return f"{seats} SEATS \u00b7 OPENS TO {int(extended.get('seats') or 0)}"
+    if seats:
+        return f"{seats} SEATS"
+    return ""
+
+
 def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float, compact: bool, min_px: float) -> List[Box]:
     draw = ImageDraw.Draw(base)
     boxes: List[Box] = []
     zones = {str(z.get("id")): z for z in flow.get("zones") or []}
     label_face = font("sans-bold", max(8 * u, min_px))
     zone_face = font("sans", max(6.8 * u, min_px - 1))
+    config_face = font("sans-medium", max(6.4 * u, min_px - 1))
+    segments = zone_border_segments(mp, flow) + wall_segments(mp, flow)
+    poly = [mp.pt(*p) for p in flow.get("outline") or []]
     labelled_zones = set()
+    pieces = [
+        (item, [mp.rect(r) for r in furniture_footprints(item)])
+        for item in flow.get("furniture") or []
+        if isinstance(item, dict) and item.get("rect") and item.get("kind") != "rug"
+    ]
+
+    def avoid_for(owner: Optional[Dict[str, Any]]) -> List[Box]:
+        out: List[Box] = []
+        for item, rects in pieces:
+            if item is owner:
+                # A label may sit on its own piece when it was placed there on purpose.
+                inside = owner.get("label_at") and _in_box(mp.pt(*owner["label_at"]), rects[0])
+                out.extend(rects[1:] if inside else rects)
+            else:
+                out.extend(rects)
+        return out
+
+    def place(lines, cx, top, owner: Optional[Dict[str, Any]] = None) -> None:
+        lines, cx, top = _fit_label(draw, lines, cx, top, u, segments, boxes, poly, min_px, avoid_for(owner))
+        boxes.append(_label_block(draw, cx, top, lines))
+
     for item in flow.get("furniture") or []:
         label = _clean(item.get("label"))
         if not label:
             continue
         zone = zones.get(str(item.get("zone") or ""))
         lines = [(label, label_face, INK, 0.7 * u)]
+        config = _config_line(item)
+        if config and not compact:
+            lines.append((config, config_face, CLAY, 0.6 * u))
         if zone and not compact and zone.get("map_label"):
             lines.append((str(zone["map_label"]), zone_face, MUTED, 0.9 * u))
             labelled_zones.add(str(zone.get("id")))
@@ -1037,11 +1393,11 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
             cx, cy = mp.pt(*item["label_at"])
             top = cy - label_face.size * 0.6
         elif item.get("rect"):
-            x0, _y0, x1, y1 = mp.rect(item["rect"])
+            x0, _y0, x1, y1 = mp.rect((item.get("extended") or {}).get("rect") or item["rect"])
             cx, top = (x0 + x1) / 2, y1 + 5 * u
         else:
             continue
-        boxes.append(_label_block(draw, cx, top, lines))
+        place(lines, cx, top, item)
     for zone in flow.get("zones") or []:
         if str(zone.get("id")) in labelled_zones:
             continue
@@ -1058,9 +1414,11 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
         else:
             continue
         face = label_face
-        lines = wrap(draw, text, face, max(20, (x1 - x0) - 8 * u))[:2]
-        boxes.append(
-            _label_block(draw, (x0 + x1) / 2, (y0 + y1) / 2 - face.size * 0.75 * len(lines), [(ln, face, INK, 0.6 * u) for ln in lines])
+        wrapped = wrap(draw, text, face, max(20, (x1 - x0) - 2 * (LABEL_PAD + 4) * u))[:2]
+        place(
+            [(ln, face, INK, 0.6 * u) for ln in wrapped],
+            (x0 + x1) / 2,
+            (y0 + y1) / 2 - face.size * 0.75 * len(wrapped),
         )
     if flow.get("path"):
         at = flow.get("path_label_at")
@@ -1071,9 +1429,7 @@ def _draw_labels(base: Image.Image, mp: _Mapper, flow: Dict[str, Any], u: float,
             mid = pts[len(pts) // 2]
             px, py = mp.pt(mid[0], mid[1] - 0.12)
         face = font("sans-medium", max(7 * u, min_px - 1))
-        spaced_text(draw, (px, py - face.size / 2), "CLEAR PATH", face, MUTED, 0.9 * u, anchor="m")
-        half = _spaced_width(draw, "CLEAR PATH", face, 0.9 * u) / 2
-        boxes.append((px - half, py - face.size * 0.75, px + half, py + face.size * 0.75))
+        place([("CLEAR PATH", face, MUTED, 0.9 * u)], px, py - face.size / 2)
     return boxes
 
 
@@ -1136,7 +1492,12 @@ def place_zone_markers(
     outline = flow.get("outline") or []
     poly = [mp.pt(*p) for p in outline]
     zones = [z for z in (flow.get("zones") or []) if isinstance(z, dict) and str(z.get("number") or "")]
-    furniture = [mp.rect(item["rect"]) for item in flow.get("furniture") or [] if item.get("rect") and item.get("kind") != "rug"]
+    furniture = [
+        mp.rect(rect)
+        for item in flow.get("furniture") or []
+        if item.get("rect") and item.get("kind") != "rug"
+        for rect in furniture_footprints(item)
+    ]
     path = [mp.pt(p[0], p[1]) for p in flow.get("path") or [] if isinstance(p, (list, tuple)) and len(p) >= 2]
     pad = radius * 0.25
     placed: List[Tuple[Dict[str, Any], float, float]] = []
@@ -1261,6 +1622,8 @@ def draw_floor_plan(
         "label_boxes": label_boxes,
         "text_boxes": text_boxes,
         "markers": marker_boxes,
+        "zone_edges": zone_border_segments(mp, flow),
+        "wall_edges": wall_segments(mp, flow),
     }
 
 
@@ -1362,7 +1725,11 @@ def _paint_sheet(base: Image.Image, spec: Dict[str, Any]) -> None:
     # 01 Map
     phrases = spec["phrases"]
     spaced_text(draw, (_s(69), _s(242)), "01 ROOM FLOW + FUNCTIONAL ZONES", font("sans-medium", _s(9.5)), GREEN, _s(1.2))
-    draw.text((_s(69), _s(259)), phrases["map_note"], font=font("sans", _s(8.5)), fill=INK)
+    note_lines, note_face = _fit_block(draw, phrases["map_note"], _s(500) - _s(69), 2, _s(8.5), _s(7))
+    ny = _s(257) if len(note_lines) > 1 else _s(259)
+    for line in note_lines:
+        draw.text((_s(69), ny), line, font=note_face, fill=INK)
+        ny += _s(11.5)
     geom = draw_floor_plan(base, (_s(118), _s(300), _s(445), _s(637)), spec["flow"], markers=True)
     draw = ImageDraw.Draw(base)
     if spec.get("what_stays"):

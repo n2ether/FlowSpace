@@ -53,6 +53,7 @@ BUDGET_LABELS = {
     "100_300": "$100 – $300",
     "300_700": "$300 – $700",
     "700_plus": "$700+",
+    "open": "Open budget (no cap)",
 }
 BOTHERS = {
     "clutter": "Too much clutter",
@@ -346,6 +347,8 @@ def _band_status(lead: Dict[str, Any], total: float) -> Tuple[str, str]:
         "300_700": (300, 700),
         "700_plus": (700, 10_000),
     }
+    if raw == "open" and total > 0:
+        return "pass", f"Kit totals ${total:,.0f}. The budget is open, with no cap."
     if raw not in ranges or total <= 0:
         return "watch", "Typical retail range — confirm prices before you buy."
     lo, hi = ranges[raw]

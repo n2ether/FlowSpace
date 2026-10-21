@@ -297,6 +297,10 @@ LINK_REFERENCE = "Reference search"
 LINK_TESTED_NOTE = "Tested product links open the exact product page we checked."
 LINK_REFERENCE_NOTE = "Reference searches open a labeled retailer search to compare options."
 LINK_KIND_NOTE = f"{LINK_TESTED_NOTE} {LINK_REFERENCE_NOTE}"
+# A price not read from the tested product page is an estimate, and says so.
+PRICE_ESTIMATE_MARK = "est."
+PRICE_ESTIMATE_NOTE = "est. = estimated price"
+PRICE_ESTIMATE_GUIDE_NOTE = "Prices marked estimated were not confirmed on the product page; check them before you buy."
 
 
 def link_kind_note(kinds) -> str:

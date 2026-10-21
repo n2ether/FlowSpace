@@ -99,6 +99,7 @@ export const BUDGETS = [
     { id: "100_300", label: "$100–$300" },
     { id: "300_700", label: "$300–$700" },
     { id: "700_plus", label: "$700+" },
+    { id: "open", label: "Open budget (no cap)" },
     { id: "not_sure", label: "Not sure yet" },
 ];
 

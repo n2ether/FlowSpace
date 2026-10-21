@@ -41,6 +41,7 @@ BUDGETS = {
     "100_300": "$100–$300",
     "300_700": "$300–$700",
     "700_plus": "$700+",
+    "open": "Open budget (no cap)",
     "not_sure": "Not sure yet",
 }
 VISUAL_MODES = {"match_current", "choose_style", "suggest"}
@@ -60,6 +61,49 @@ OUT_OF_SCOPE_RE = re.compile(
     r"exterior|outside|office building|store|shop floor|restaurant|warehouse|commercial|car interior|boat|rv|camper)\b",
     re.I,
 )
+
+
+# Hard ceiling for an admin per-lead photo override (test / QA projects only).
+# Customer plan caps live in server.PACKAGES and are never raised by this.
+PHOTO_OVERRIDE_MAX = 6
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off"}
+_PREVIEW_ENVS = {"development", "dev", "local", "test", "preview", "staging"}
+
+
+def photo_override_enabled(env: Optional[Dict[str, str]] = None) -> bool:
+    """Whether admins may raise a lead's photo cap on this deployment.
+
+    ``ADMIN_PHOTO_OVERRIDE=1`` turns it on, ``=0`` off. Unset, it is on only
+    for development / preview / staging environments, never in production.
+    """
+    import os
+
+    env = os.environ if env is None else env
+    flag = str(env.get("ADMIN_PHOTO_OVERRIDE") or "").strip().lower()
+    if flag in _TRUE:
+        return True
+    if flag in _FALSE:
+        return False
+    names = {
+        str(env.get(key) or "").strip().lower()
+        for key in ("ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT")
+    }
+    if "production" in names or "prod" in names:
+        return False
+    return bool(names & _PREVIEW_ENVS) or any("preview" in n or "staging" in n for n in names)
+
+
+def max_photos_for(package: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> int:
+    """The plan's photo cap, or the lead's admin override (never above ``PHOTO_OVERRIDE_MAX``)."""
+    base = int(package.get("max_photos") or 0)
+    try:
+        override = int((lead or {}).get("photo_limit_override") or 0)
+    except (TypeError, ValueError):
+        override = 0
+    if override > base:
+        return min(override, PHOTO_OVERRIDE_MAX)
+    return base
 
 
 class IntakeError(ValueError):
@@ -115,8 +159,18 @@ def accepted_wide_views(intake: Dict[str, Any]) -> int:
     return sum(1 for p in intake.get("photos") or [] if (p or {}).get("shot", "wide") == "wide")
 
 
-def validate_intake(intake: Dict[str, Any], *, package: Dict[str, Any], photos: List[Any]) -> List[Dict[str, str]]:
-    """Field errors for a submitted intake. Empty list means valid."""
+def validate_intake(
+    intake: Dict[str, Any],
+    *,
+    package: Dict[str, Any],
+    photos: List[Any],
+    lead: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """Field errors for a submitted intake. Empty list means valid.
+
+    ``lead`` is only passed for a stored lead, so an admin photo override applies;
+    a new customer submission is always held to the plan cap.
+    """
     errors: List[Dict[str, str]] = []
 
     def err(field: str, message: str) -> None:
@@ -138,7 +192,7 @@ def validate_intake(intake: Dict[str, Any], *, package: Dict[str, Any], photos: 
     if intake.get("priority") not in PRIORITIES:
         err("priority", "Choose what would make the biggest difference.")
 
-    max_photos = int(package.get("max_photos") or 0)
+    max_photos = max_photos_for(package, lead)
     if len(photos) > max_photos:
         err("photos", f"The {package['name']} plan includes up to {max_photos} photos.")
     paid = float(package.get("price") or 0) > 0
@@ -214,7 +268,7 @@ def chargeable_block_reason(lead: Dict[str, Any], package: Dict[str, Any]) -> Op
     if isinstance(intake, dict):
         if intake.get("photo_mode") == "conceptual" or accepted_wide_views(intake) < 1:
             return "Add one clear, wide photo of your space before payment."
-    if len(photos) > int(package.get("max_photos") or 0):
+    if len(photos) > max_photos_for(package, lead):
         return f"The {package.get('name')} plan includes up to {package.get('max_photos')} photos."
     return None
 

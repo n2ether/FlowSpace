@@ -313,11 +313,25 @@ def rug_description(spec: Dict[str, Any]) -> str:
     return sentence
 
 
+RUG_ADDITION_RAILS = (
+    "RUG ADDITION: the brief asks for an area rug. Add exactly one rug in the spot the plan names, and show "
+    "that same rug — same shape, size, color, texture, pattern, and position — in every view where its spot is visible."
+)
+
+
+def brief_requests_rug(lead: Dict[str, Any] | None) -> bool:
+    from package_items import brief_requests
+
+    return any(item["kind"] == "rug" for item in brief_requests(lead)["decor"])
+
+
 def rug_prompt_rails(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None = None) -> str:
     """Rug lock for every after-generation prompt. Off when the customer asked for a different rug."""
+    described = rug_description(rug_spec(lead, deliverable))
+    if brief_requests_rug(lead):
+        return RUG_ADDITION_RAILS + (f" THE NEW RUG IS {described}." if described else "")
     if customer_requested_rug_change(lead):
         return ""
-    described = rug_description(rug_spec(lead, deliverable))
     if not described:
         return RUG_PRESERVE_RAILS
     return f"{RUG_PRESERVE_RAILS} THE RUG IN THIS ROOM IS {described}. Show exactly that rug."
@@ -349,8 +363,10 @@ def nursery_storage_line(lead: Dict[str, Any] | None, storage_str: str) -> str:
             "Do not add baskets in place of drawers, and do not add large open cubbies. "
         )
     return (
-        f"Add tidy storage for {storage_str}: matching baskets, "
-        "labeled bins, streamlined shelving. Clear clutter from the floor and surfaces. "
+        f"Tidy storage for {storage_str}: labeled bins, baskets, and streamlined shelving only where the plan lists them. "
+        "Clear clutter from the floor and surfaces. "
+        "Baskets sit on the floor beside furniture or inside shelving, never on a seat, a bed, "
+        "or a shoe bench's shoe area. "
     )
 
 

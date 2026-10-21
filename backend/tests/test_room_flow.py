@@ -211,7 +211,7 @@ def test_outline_caption_matches_the_board_for_both_sources():
         "Room outline based on your measurements. Furniture footprints and zones are approximate."
     )
     assert outline_caption({"id": "no-outline-0000", "space_type": "closet"}, {}) == (
-        "Approximate room outline. Furniture footprints and zones are approximate."
+        "Approximate room outline. Measurements are not confirmed. Furniture footprints and zones are approximate."
     )
 
 

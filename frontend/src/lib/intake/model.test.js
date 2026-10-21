@@ -1,4 +1,5 @@
 import {
+    BUDGETS,
     PAID_PHOTO_REQUIRED,
     PLANS,
     PLAN_SCOPE,
@@ -115,6 +116,13 @@ describe("screen 2 — photos", () => {
 });
 
 describe("screen 3 — essentials", () => {
+    it("offers an open budget with no cap and sends it to the backend", () => {
+        expect(BUDGETS.map((b) => b.id)).toContain("open");
+        const form = readyForm({ budget: "open" });
+        expect(validateNeeds(form, PLANS.plus).budget).toBeUndefined();
+        expect(buildLeadPayload(form, [wide(1)], PLANS.plus, null).budget).toBe("open");
+    });
+
     it("requires explicit keep, limits and budget answers", () => {
         const e = validateNeeds({ ...emptyForm(), space_type: "closet" }, PLANS.plus);
         expect(Object.keys(e)).toEqual(expect.arrayContaining(["keep", "limits", "budget"]));
