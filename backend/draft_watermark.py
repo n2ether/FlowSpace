@@ -64,8 +64,10 @@ def _pdf_stamp(width: float, height: float, text: str) -> bytes:
     c.drawCentredString(0, -min(width, height) * 0.08, text)
     c.restoreState()
     c.setFillColor(Color(_FILL[0] / 255, _FILL[1] / 255, _FILL[2] / 255, alpha=0.85))
-    c.setFont(face, 9)
-    c.drawString(18, height - 16, f"{text} — in review, not final")
+    # Centred in the header band, on the header baseline: clear of the logo and
+    # wordmark at top-left and the section label at top-right.
+    c.setFont(face, 8)
+    c.drawCentredString(width / 2, height - 20, f"{text} — in review, not final")
     c.save()
     return buf.getvalue()
 

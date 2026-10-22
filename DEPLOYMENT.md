@@ -66,6 +66,7 @@ git push origin main
 | `JWT_SECRET` | Long random string for member session JWTs |
 | `PHOTO_URL_SECRET` | Optional, recommended. Long random string that signs photo URLs (1-hour links). Falls back to a value derived from `JWT_SECRET`. Rotating it expires every outstanding photo link |
 | `ADMIN_SESSION_SECRET` | Optional. Signs admin session tokens; falls back to a value derived from `JWT_SECRET` |
+| `ADMIN_PHOTO_OVERRIDE` | Optional. `1` lets an admin raise one lead's photo cap to at most 6 (`PUT /api/admin/leads/{id}/photos`); `0` turns it off. Unset, it is on only when `ENVIRONMENT` / `RAILWAY_ENVIRONMENT_NAME` is development, preview, or staging, and always off in production. Customer plan caps (2 / 3 / 4) never change |
 | `RENDER_MAX_RECOVERIES` | Optional, default `2`. How many times a render orphaned by a restart is re-queued before the lead is held as failed |
 | `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` (plus the Railway frontend origin if it is different) |
 
@@ -200,6 +201,28 @@ curl "$API/api/admin/leads/$LEAD_ID/deliverable/afters/refine" -H "X-Admin-Token
   generation vision QA and a rug check (one rug matching the spec, nothing else changed). Otherwise the existing after stays.
 - SOURCE_n → AFTER_n mappings, `package_status`, and the lead status do not change, and no email is sent. The board,
   zone map, PDF, email, and contact sheet pick up the replaced afters on the next render. Old URLs are kept in `after_history`.
+
+### Project brief, photo override, and the consistency check
+
+```bash
+# Brief notes reach the drafter, every image prompt, and every document. "open" = no budget cap.
+curl -X PUT "$API/api/admin/leads/$LEAD_ID/brief" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"notes": "Add larger art on the wall linking dining and kitchen. Add a rug and a set table. Keep the existing art.", "budget": "open"}'
+
+# Test / QA project only: allow up to 6 photos on this lead (stored uploads, in view order), then retry automation.
+curl -X PUT "$API/api/admin/leads/$LEAD_ID/photos" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"max_photos": 6, "photos": ["/api/uploads/photo/<id1>", "...", "/api/uploads/photo/<id6>"]}'
+
+# Shared item list (fixed pieces, planned additions, brief requests) and every mismatch between views, text, and links.
+curl "$API/api/admin/leads/$LEAD_ID/deliverable/consistency" -H "X-Admin-Token: $ADMIN_PASSWORD"
+```
+
+- `send-final` refuses a package whose consistency check has `block` issues (a requested item missing, an added item no
+  view shows, a view showing an unplanned rug / art / basket, a changed fixed piece, a basket on a seat or bed, a product
+  without a tested direct link, non-English or time-bound copy). `?override_consistency=true` sends anyway and records it.
+- Boards are available as PDF too: `.../deliverable/board?format=pdf` and `.../deliverable/zone-map?format=pdf`.
+- Files are named `FlowSpace_<Project>_Design_Plan.png/.pdf`, `_Room_Flow.png/.pdf`, `_Companion_Guide.pdf`, and
+  `_View_01.jpg` …; a review copy adds `_DRAFT`. Every package carries exactly one Companion Guide.
 
 ---
 

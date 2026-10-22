@@ -52,10 +52,35 @@ PAINT_REQUEST_QA_NOTE = (
 )
 
 
-def qa_prompt(paint_request: str = "") -> str:
+ITEMS_QA_NOTE = """
+Also check the furniture and the planned items. Add these keys to the same JSON:
+  "fixed_items_changed": true if any FIXED PIECE below that is visible in BEFORE has a different structure in AFTER — doors turned into open cubbies, baskets, or bins; glass doors became solid or open; drawers or shelves added or removed; or the piece was swapped for a different one,
+  "baskets_misplaced": true if any basket, bin, or box in AFTER sits on a seat (sofa, sectional, chaise, chair, bench seat), on or in a bed or crib, or on or under a shoe bench where shoes are kept{basket_exception},
+  "visible_additions": [names from PLANNED ADDITIONS below that you can clearly see in AFTER, copied exactly],
+  "unlisted_additions": [short names of new decor or storage items visible in AFTER that are not in BEFORE and not in PLANNED ADDITIONS; ignore small accessories]
+Mark ok=false if fixed_items_changed OR baskets_misplaced.
+FIXED PIECES: {fixed}
+PLANNED ADDITIONS: {additions}
+"""
+
+
+def qa_prompt(
+    paint_request: str = "",
+    *,
+    fixed_items: Optional[List[str]] = None,
+    additions: Optional[List[str]] = None,
+    basket_exception: str = "",
+) -> str:
+    prompt = QA_PROMPT
     if paint_request:
-        return QA_PROMPT + "\n" + PAINT_REQUEST_QA_NOTE.format(color=paint_request) + "\n"
-    return QA_PROMPT
+        prompt += "\n" + PAINT_REQUEST_QA_NOTE.format(color=paint_request) + "\n"
+    if fixed_items is not None or additions is not None:
+        prompt += ITEMS_QA_NOTE.format(
+            fixed="; ".join(fixed_items or []) or "none listed (judge the furniture visible in BEFORE)",
+            additions="; ".join(additions or []) or "none",
+            basket_exception=f" (allowed only where the customer asked: \"{basket_exception}\")" if basket_exception else "",
+        )
+    return prompt
 
 
 @dataclass
@@ -64,14 +89,24 @@ class RenderQAResult:
     windows_covered: bool = False
     gravity_wrong: bool = False
     walls_repainted: bool = False
+    fixed_items_changed: bool = False
+    baskets_misplaced: bool = False
     reasons: List[str] = field(default_factory=list)
     suggested_rotate_degrees: int = 0
     skipped: bool = False
     error: Optional[str] = None
     attempt: int = 1
+    # Only present when the item check ran; the consistency report reads them.
+    visible_additions: Optional[List[str]] = None
+    unlisted_additions: Optional[List[str]] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        if self.visible_additions is None:
+            out.pop("visible_additions")
+        if self.unlisted_additions is None:
+            out.pop("unlisted_additions")
+        return out
 
     @property
     def failed(self) -> bool:
@@ -118,22 +153,39 @@ def _image_block(jpeg_bytes: bytes) -> Dict[str, Any]:
     }
 
 
+def _names(value: Any) -> Optional[List[str]]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [" ".join(str(v).split()) for v in value if str(v).strip()]
+
+
 def _from_payload(data: Dict[str, Any], *, skipped: bool = False, error: Optional[str] = None) -> RenderQAResult:
     windows_covered = bool(data.get("windows_covered"))
     gravity_wrong = bool(data.get("gravity_wrong"))
     walls_repainted = bool(data.get("walls_repainted"))
+    fixed_changed = bool(data.get("fixed_items_changed"))
+    baskets = bool(data.get("baskets_misplaced"))
     reasons = data.get("reasons") or []
     if isinstance(reasons, str):
         reasons = [reasons]
     reasons = [str(r).strip() for r in reasons if str(r).strip()]
     ok = data.get("ok")
+    hard = windows_covered or gravity_wrong or walls_repainted or fixed_changed or baskets
     if ok is None:
-        ok = not (windows_covered or gravity_wrong or walls_repainted)
+        ok = not hard
     return RenderQAResult(
-        ok=bool(ok) and not windows_covered and not gravity_wrong and not walls_repainted,
+        ok=bool(ok) and not hard,
         windows_covered=windows_covered,
         gravity_wrong=gravity_wrong,
         walls_repainted=walls_repainted,
+        fixed_items_changed=fixed_changed,
+        baskets_misplaced=baskets,
+        visible_additions=_names(data.get("visible_additions")),
+        unlisted_additions=_names(data.get("unlisted_additions")),
         reasons=reasons,
         suggested_rotate_degrees=_degrees(data.get("suggested_rotate_degrees")),
         skipped=skipped,
@@ -147,11 +199,16 @@ def review_organized_render(
     before_bytes: Optional[bytes] = None,
     attempt: int = 1,
     paint_request: str = "",
+    fixed_items: Optional[List[str]] = None,
+    additions: Optional[List[str]] = None,
+    basket_exception: str = "",
 ) -> RenderQAResult:
     """Synchronous cheap vision check. Never raises — skip/ok on infra failure.
 
     ``paint_request`` is the wall color the customer asked for; when set, a wall
-    change toward that color is not a QA failure.
+    change toward that color is not a QA failure. ``fixed_items`` and
+    ``additions`` (the shared item list) turn on the furniture-structure,
+    basket-placement, and planned-item checks.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -167,24 +224,27 @@ def review_organized_render(
             content.append(_image_block(jpeg_for_vision(before_bytes, max_side=768)))
             content.append({"type": "text", "text": "BEFORE (customer photo, gravity-corrected)."})
         content.append(_image_block(after_jpeg))
-        content.append({"type": "text", "text": "AFTER (organized render).\n\n" + qa_prompt(paint_request)})
+        prompt = qa_prompt(paint_request, fixed_items=fixed_items, additions=additions, basket_exception=basket_exception)
+        content.append({"type": "text", "text": "AFTER (organized render).\n\n" + prompt})
 
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model=QA_MODEL,
-            max_tokens=300,
+            max_tokens=600 if (fixed_items is not None or additions is not None) else 300,
             messages=[{"role": "user", "content": content}],
         )
         raw = message.content[0].text if message.content else ""
         parsed = _from_payload(_parse_qa_json(raw))
         parsed.attempt = attempt
         logger.info(
-            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s walls_repainted=%s rotate=%s reasons=%s",
+            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s walls_repainted=%s fixed_changed=%s baskets=%s rotate=%s reasons=%s",
             attempt,
             parsed.ok,
             parsed.windows_covered,
             parsed.gravity_wrong,
             parsed.walls_repainted,
+            parsed.fixed_items_changed,
+            parsed.baskets_misplaced,
             parsed.suggested_rotate_degrees,
             parsed.reasons,
         )

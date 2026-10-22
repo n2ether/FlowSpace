@@ -693,6 +693,17 @@ def _subtitle(deliverable: Dict[str, Any], draw: Any = None) -> str:
     return sentence or "A calmer refresh of the room you already have."
 
 
+# Short all-caps words that stay upper case when a map label becomes a sentence ("TV console").
+_KEEP_UPPER = {"TV", "AC", "DVD", "LED", "USB"}
+
+
+def _sentence_case(text: str) -> str:
+    """Sentence case for a map label such as "TV CONSOLE + SECTIONAL", keeping acronyms like TV."""
+    words = [word if word.upper() in _KEEP_UPPER else word.lower() for word in text.split(" ")]
+    out = " ".join(words)
+    return out[:1].upper() + out[1:]
+
+
 def _zone_cards(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any]) -> List[Dict[str, str]]:
     """One card per zone: number, title, the piece that anchors it, and its one job."""
     from space_rails import is_nursery_space
@@ -715,7 +726,7 @@ def _zone_cards(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any])
     for index, zone in enumerate(zones):
         zid = str(zone.get("id") or "")
         labels = [_clean(item.get("label")) for item in furniture if str(item.get("zone") or "") == zid and _clean(item.get("label"))]
-        obj = " + ".join(labels[:2]).capitalize() if labels else ""
+        obj = _sentence_case(" + ".join(labels[:2])) if labels else ""
         title = _clean(zone.get("title")) or f"Zone {index + 1}"
         job = complete_clip(_clean(zone.get("job")) or f"One clear home for {title.lower()}.", BOARD_WORDS["zone_job"])
         cards.append(
@@ -783,7 +794,7 @@ def _kept_items(lead: Dict[str, Any], doc: Dict[str, Any], flow: Dict[str, Any],
         return kept[:4]
     from package_facts import what_stays_chips
 
-    return what_stays_chips(doc)
+    return what_stays_chips(doc, lead)
 
 
 def _short_item_name(item: Dict[str, Any]) -> str:
@@ -922,6 +933,10 @@ def _open_image(data: Optional[bytes]) -> Optional[Image.Image]:
         return None
 
 
+# Hero plus a row of thumbnails: every room photo a lead may carry (admin override included).
+BOARD_MAX_VIEWS = 6
+
+
 def _source_pairs(images: Dict[str, Any]) -> List[Dict[str, Any]]:
     pairs = images.get("source_pairs") or []
     if not isinstance(pairs, list):
@@ -994,7 +1009,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         hero_mode = "placeholder"
         claims_organized = False
     hero = slots[0] if slots else None
-    thumbs = slots[1:4]
+    thumbs = slots[1:BOARD_MAX_VIEWS]
     title = customer_project_title(lead, doc) or f"{_possessive(_first_name(lead))} {space_label(lead.get('space_type'))}"
     from package_facts import package_facts
 
@@ -1003,7 +1018,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         {
             "name": row["name"],
             "short": row["short"],
-            "price": row["price"],
+            "price": row["price_display"],
             "subtotal": row["subtotal"],
             "icon": _item_kind(row["name"]),
         }
@@ -1047,7 +1062,7 @@ def board_spec(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None, 
         # Every room view the package carries (with several sources, the hero is the first).
         "detail_captions": [slot["caption"] for slot in (slots if multi else slots[1:])],
         "detail_sources": [slot["source"] for slot in (slots if multi else slots[1:])],
-        # The up-to-three frames under the hero.
+        # Every other view, in a row under the hero.
         "detail_chips": [slot["chip"] for slot in thumbs],
         "space_theme": themed,
         "theme_line": "PLANETS · MOON · ROCKETS · ASTRONAUTS" if themed else "",
@@ -1380,7 +1395,7 @@ def _draw_photos(pen: _Pen, spec: Dict[str, Any], layout: Dict[str, Any], lead: 
     else:
         pen.paste_cover(hero["image"], hero_box, 28, (0.48, 0.62))
         _chip(pen, hero_box[0] + 22, hero_box[3] - 22, hero["chip"], 15)
-    for box, slot in zip(layout["sources"], slots[1:4]):
+    for box, slot in zip(layout["sources"], slots[1:BOARD_MAX_VIEWS]):
         if slot["image"] is None:
             _empty_frame(pen, box, slot["chip"].title(), "", 16)
             continue

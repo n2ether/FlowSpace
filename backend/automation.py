@@ -27,6 +27,8 @@ from gridfs.errors import NoFile
 
 from ai_drafter import draft_deliverable
 from ai_image_generator import (
+    BASKET_RETRY_CONSTRAINT,
+    CONSISTENCY_REFERENCE_CONSTRAINT,
     SAME_CAMERA_CONSTRAINT,
     WALL_RETRY_CONSTRAINT,
     generate_front_view,
@@ -43,6 +45,13 @@ from image_orientation import (
 )
 from image_board import build_image_board
 from pdf_generator import build_pdf
+from package_items import (
+    FIXED_RETRY_CONSTRAINT,
+    consistency_report,
+    customer_basket_request,
+    fixed_item_names,
+    planned_additions,
+)
 from pdf_images import assemble_pdf_images, choose_hero
 from photo_access import gridfs_key, store_photo
 from render_qa import RenderQAResult, review_organized_render
@@ -212,8 +221,27 @@ def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     bits: list[str] = []
     if qa.walls_repainted and not paint_request:
         bits.append(WALL_RETRY_CONSTRAINT)
+    if qa.fixed_items_changed:
+        bits.append(FIXED_RETRY_CONSTRAINT)
+    if qa.baskets_misplaced:
+        bits.append(BASKET_RETRY_CONSTRAINT)
     bits.extend(qa.reasons[:3])
     return " ".join(bits)
+
+
+def _qa_item_kwargs(lead: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
+    """The shared fixed-items and additions lists every view's QA checks against."""
+    return {
+        "fixed_items": fixed_item_names(lead, plan),
+        "additions": [item["name"] for item in planned_additions(lead, plan)],
+        "basket_exception": customer_basket_request(lead),
+    }
+
+
+def _with_view_reference(extra: str, has_reference: bool) -> str:
+    if not has_reference:
+        return extra
+    return f"{extra} {CONSISTENCY_REFERENCE_CONSTRAINT}".strip()
 
 
 def _same_camera_extra(extra: str) -> str:
@@ -230,12 +258,20 @@ async def _generate_organized_with_qa(
     plan: Dict[str, Any],
     fs_bucket,
     original_bytes: Optional[bytes],
+    view_reference: Optional[bytes] = None,
 ) -> tuple[Optional[bytes], str, RenderQAResult]:
-    """OpenAI image once, cheap vision QA, one retry with stronger rails, then give up."""
+    """OpenAI image once, cheap vision QA, one retry with stronger rails, then give up.
+
+    ``view_reference`` is an already approved after of the same room. It rides
+    along as a second image so fixed furniture and planned items match it.
+    """
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
     qa = RenderQAResult(ok=True, skipped=True, error="not_run")
     paint_request = requested_wall_color(lead, plan)
+    item_qa = _qa_item_kwargs(lead, plan)
+    has_reference = bool(view_reference and original_bytes)
+    reference_kw = {"consistency_reference": view_reference} if has_reference else {}
 
     try:
         organized_bytes, image_mime = await generate_front_view(
@@ -243,7 +279,8 @@ async def _generate_organized_with_qa(
             deliverable=plan,
             fs_bucket=fs_bucket,
             reference_photo_bytes=original_bytes,
-            extra_constraint=_same_camera_extra("") if original_bytes else "",
+            extra_constraint=_with_view_reference(_same_camera_extra(""), has_reference) if original_bytes else "",
+            **reference_kw,
         )
         logger.info(
             "[automation] OpenAI organized render ready: %d bytes (%s)",
@@ -263,6 +300,7 @@ async def _generate_organized_with_qa(
         before_bytes=original_bytes,
         attempt=1,
         paint_request=paint_request,
+        **item_qa,
     )
     if not qa.failed:
         return organized_bytes, image_mime, qa
@@ -283,7 +321,8 @@ async def _generate_organized_with_qa(
             fs_bucket=fs_bucket,
             reference_photo_bytes=retry_ref,
             stronger_rails=True,
-            extra_constraint=_same_camera_extra(extra) if original_bytes else extra,
+            extra_constraint=_with_view_reference(_same_camera_extra(extra), has_reference) if original_bytes else extra,
+            **reference_kw,
         )
     except Exception as img_err:
         logger.warning("[automation] OpenAI image QA retry failed: %s", img_err)
@@ -303,6 +342,7 @@ async def _generate_organized_with_qa(
         before_bytes=retry_ref or original_bytes,
         attempt=2,
         paint_request=paint_request,
+        **item_qa,
     )
     if qa2.failed:
         logger.error(
@@ -511,7 +551,12 @@ async def _run_automation(
 
         # ── Step 1: AI Draft (Claude + layers, with the first room photo) ──
         logger.info("[automation] Step 1: AI drafting plan...")
-        plan = await draft_deliverable(lead, reference_photo_bytes=draft_bytes)
+        extra_photos = [photo.get("bytes") for photo in room if photo.get("bytes")][1:]
+        plan = await draft_deliverable(
+            lead,
+            reference_photo_bytes=draft_bytes,
+            **({"extra_photo_bytes": extra_photos} if extra_photos else {}),
+        )
         plan["lead_id"] = lead_id
         if lead.get("fact_sheet"):
             plan["fact_sheet"] = lead["fact_sheet"]
@@ -561,11 +606,15 @@ async def _run_automation(
                     )
                     logger.warning("[automation] %s has no readable photo; source failed", label)
                     continue
+                view_reference = next(
+                    (item.get("after_bytes") for item in outcomes if item.get("after_bytes")), None
+                )
                 after_bytes, mime, qa = await _generate_organized_with_qa(
                     lead=lead,
                     plan=plan,
                     fs_bucket=fs_bucket,
                     original_bytes=src.get("bytes"),
+                    view_reference=view_reference,
                 )
                 after_url = None
                 if after_bytes:
@@ -651,6 +700,7 @@ async def _run_automation(
                     "status": item["status"],
                     "before": item.get("before_bytes"),
                     "after": item.get("after_bytes"),
+                    "visible_additions": list((item.get("qa") or {}).get("visible_additions") or []),
                 }
                 for item in outcomes
             ]
@@ -809,6 +859,22 @@ async def _run_automation(
 
         await touch_render_heartbeat(db, lead_id)
         deliverable_doc = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0}) or plan
+        try:
+            report = await asyncio.to_thread(consistency_report, lead, deliverable_doc)
+        except Exception as report_err:
+            logger.warning("[automation] Consistency check failed to run: %s", report_err)
+            report = {"ok": False, "issues": [{"code": "check_error", "severity": "warn", "message": str(report_err)}], "blocking": 0}
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"consistency": report, "updated_at": _iso(datetime.now(timezone.utc))}},
+        )
+        deliverable_doc["consistency"] = report
+        logger.info(
+            "[automation] Consistency check: ok=%s blocking=%s issues=%d",
+            report.get("ok"),
+            report.get("blocking"),
+            len(report.get("issues") or []),
+        )
         pdf_bytes = await asyncio.to_thread(
             build_pdf, lead=lead, deliverable=deliverable_doc, images=images
         )

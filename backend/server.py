@@ -59,7 +59,16 @@ from photo_access import (
     verify_upload_token,
 )
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
-from intake import IntakeError, build_fact_sheet, chargeable_block_reason, validate_intake
+from package_files import package_file_set, package_filename, png_to_pdf, project_stem
+from intake import (
+    PHOTO_OVERRIDE_MAX,
+    IntakeError,
+    build_fact_sheet,
+    chargeable_block_reason,
+    max_photos_for,
+    photo_override_enabled,
+    validate_intake,
+)
 from auth import (
     COOKIE_NAME,
     cookie_kwargs,
@@ -180,6 +189,10 @@ class Lead(BaseModel):
     automation_failed: Optional[bool] = None
     automation_failed_at: Optional[str] = None
     package_status: Optional[str] = None
+    # Admin-only: raised photo cap for a test / QA project (see PUT /admin/leads/{id}/photos).
+    photo_limit_override: Optional[int] = None
+    # Admin-only project brief: {"notes", "budget", "keep_existing", "decor"}.
+    brief: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -333,6 +346,9 @@ class Deliverable(BaseModel):
     contact_sheet_url: Optional[str] = None
     include_customer_photos: bool = True
     blueprint_layers: Optional[Dict[str, Any]] = None
+    # Shared item list (see package_items). Omitted from an edit means "keep what is stored".
+    fixed_items: Optional[List[Dict[str, Any]]] = None
+    additions: Optional[List[Dict[str, Any]]] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -1151,6 +1167,93 @@ async def retry_automation(lead_id: str, background_tasks: BackgroundTasks, _: b
     return {"message": "Automation started", "lead_id": lead_id}
 
 
+class LeadPhotosOverride(BaseModel):
+    # Raised cap for this lead only; customer plan limits are unchanged.
+    max_photos: int
+    # Full ordered list of stored upload URLs (/api/uploads/photo/<id>). Omit to keep the current list.
+    photos: Optional[List[str]] = None
+
+
+def _override_intake_photos(intake: Dict[str, Any], photos: List[str]) -> Dict[str, Any]:
+    """The intake's photo list in the new order; new uploads count as wide views."""
+    by_url = {str((p or {}).get("url")): p for p in intake.get("photos") or [] if isinstance(p, dict)}
+    rows = []
+    for index, url in enumerate(photos):
+        meta = dict(by_url.get(url) or {"shot": "wide", "custom_label": ""})
+        meta.update({"ref": f"P{index + 1}", "label": f"Photo {index + 1}", "url": url, "photo_id": url.rsplit("/", 1)[-1]})
+        rows.append(meta)
+    return {**intake, "photos": rows}
+
+
+@api_router.put("/admin/leads/{lead_id}/photos")
+async def admin_override_lead_photos(lead_id: str, payload: LeadPhotosOverride, _: bool = Depends(require_admin)):
+    """Admin-only per-lead photo cap (up to 6) for a test project. Never changes plan limits.
+
+    Gated by ``ADMIN_PHOTO_OVERRIDE`` (on by default only on development / preview /
+    staging). Does not start automation or email anyone; run retry-automation after.
+    """
+    if not photo_override_enabled():
+        raise HTTPException(status_code=403, detail="Photo override is disabled on this deployment (ADMIN_PHOTO_OVERRIDE).")
+    if not 1 <= payload.max_photos <= PHOTO_OVERRIDE_MAX:
+        raise HTTPException(status_code=422, detail=f"max_photos must be between 1 and {PHOTO_OVERRIDE_MAX}.")
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    photos = canonicalize_photo_urls(payload.photos) if payload.photos is not None else [
+        p if isinstance(p, str) else str((p or {}).get("url") or "") for p in lead.get("photos") or []
+    ]
+    photos = [str(p) for p in photos if str(p).strip()]
+    for url in photos:
+        if not url.startswith(PHOTO_URL_PREFIX) or gridfs_key(photo_id_from_url(url)) is None:
+            raise HTTPException(status_code=422, detail=f"Not a stored upload: {url}")
+    pkg = PACKAGES.get(lead.get("package_id") or "free") or PACKAGES["free"]
+    cap = max_photos_for(pkg, {"photo_limit_override": payload.max_photos})
+    if len(photos) > cap:
+        raise HTTPException(status_code=422, detail=f"This lead allows up to {cap} photos.")
+    now = _iso(datetime.now(timezone.utc))
+    update: Dict[str, Any] = {
+        "photo_limit_override": payload.max_photos,
+        "photos": photos,
+        "photo_limit_override_at": now,
+        "updated_at": now,
+    }
+    if isinstance(lead.get("intake"), dict):
+        update["intake"] = _override_intake_photos(lead["intake"], photos)
+        update["fact_sheet"] = build_fact_sheet({**lead, **update})
+    await db.leads.update_one({"id": lead_id}, {"$set": update})
+    return {
+        "lead_id": lead_id,
+        "max_photos": cap,
+        "plan_max_photos": pkg["max_photos"],
+        "photos": len(photos),
+        "automation_started": False,
+    }
+
+
+class LeadBrief(BaseModel):
+    notes: str = ""
+    # "open" for no cap; otherwise one of the intake budget ids, or empty to keep the lead's.
+    budget: str = ""
+    keep_existing: List[str] = []
+    decor: List[Any] = []
+
+
+@api_router.put("/admin/leads/{lead_id}/brief")
+async def admin_set_lead_brief(lead_id: str, payload: LeadBrief, _: bool = Depends(require_admin)):
+    """Admin project brief. Drafting, image prompts, and every document read it. No email, no automation."""
+    from package_items import brief_requests
+
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    brief = payload.model_dump()
+    update: Dict[str, Any] = {"brief": brief, "updated_at": _iso(datetime.now(timezone.utc))}
+    if brief["budget"] == "open":
+        update["budget"] = "open"
+    await db.leads.update_one({"id": lead_id}, {"$set": update})
+    return {"lead_id": lead_id, "brief": brief, "requests": brief_requests({**lead, **update})}
+
+
 @api_router.post("/admin/gallery", response_model=GalleryItem)
 async def admin_add_gallery(payload: GalleryCreate, _: bool = Depends(require_admin)):
     item = GalleryItem(**payload.model_dump())
@@ -1219,6 +1322,9 @@ async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depen
     if payload.blueprint_layers:
         payload.blueprint_layers = coerce_layers(payload.blueprint_layers)
     doc = canonicalize_photo_urls(_doc(payload))
+    for key in ("fixed_items", "additions"):
+        if doc.get(key) is None:
+            doc.pop(key, None)
     stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0, "shopping_list": 1}) or {}
     doc["shopping_list"] = _keep_item_tags(doc.get("shopping_list") or [], stored.get("shopping_list") or [])
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
@@ -1326,6 +1432,7 @@ async def _blueprint_render_inputs(lead_id: str, request: Request):
                 "status": entry.get("status") or "",
                 "before": await _resolve_image_bytes(entry.get("source_url"), request),
                 "after": await _resolve_image_bytes(entry.get("after_url"), request) if entry.get("after_url") else None,
+                "visible_additions": list((entry.get("qa") or {}).get("visible_additions") or []),
             }
         )
     # Several source afters are the angles. Stale hero crops must not fill a gap.
@@ -1361,25 +1468,40 @@ def _customer_title(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
     return customer_project_title(lead, deliverable) or plan_title(lead.get("space_type"))
 
 
+def _package_name_inputs(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> Tuple[str, bool]:
+    return _customer_title(lead, deliverable or {}), not is_released(deliverable)
+
+
 def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str]:
-    safe_name = "".join(
-        ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client")
-    )
-    title = _customer_title(lead, deliverable or {})
-    stem = "".join(ch if ch.isalnum() else "_" for ch in title)
-    while "__" in stem:
-        stem = stem.replace("__", "_")
-    stem = stem.strip("_") or "Design_Plan"
+    """Design Plan PNG, Companion Guide PDF, and the review zip, named by ``package_files``."""
+    title, draft = _package_name_inputs(lead, deliverable)
+    board = package_filename(title, "design_plan", "png", draft=draft)
+    pdf = package_filename(title, "companion_guide", "pdf", draft=draft)
     tag = version_tag(package_version(deliverable))
-    board = f"FlowSpace_{stem}_Design_Plan_{safe_name}_{tag}.png"
-    pdf = f"FlowSpace_{stem}_Companion_Guide_{safe_name}_{tag}.pdf"
-    package = f"FlowSpace_{stem}_Design_Plan_{safe_name}_{tag}.zip"
+    package = f"FlowSpace_{project_stem(title)}_Package{'_DRAFT' if draft else ''}_{tag}.zip"
     return board, pdf, package
 
 
 def _zone_map_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str, str]:
     board, pdf, package = _blueprint_filenames(lead, deliverable)
-    return board, pdf, package, board.replace("_Design_Plan_", "_Room_Flow_", 1)
+    title, draft = _package_name_inputs(lead, deliverable)
+    return board, pdf, package, package_filename(title, "room_flow", "png", draft=draft)
+
+
+def _image_or_pdf(png: bytes, filename: str, fmt: str, *, disposition: str = "inline", cache: str = "no-store") -> Response:
+    """The PNG, or with ``format=pdf`` the same board as a one-page PDF."""
+    if (fmt or "png").lower() == "pdf":
+        name = filename.rsplit(".", 1)[0] + ".pdf"
+        return Response(
+            content=png_to_pdf(png),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'{disposition}; filename="{name}"', "Cache-Control": cache},
+        )
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"', "Cache-Control": cache},
+    )
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/presentation")
@@ -1422,30 +1544,23 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/board")
-async def render_deliverable_board(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+async def render_deliverable_board(lead_id: str, request: Request, format: str = "png", _: bool = Depends(require_admin)):
+    """Design Plan board. ``format=pdf`` returns the same board as a one-page PDF."""
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
     filename, _pdf_name, _package = _blueprint_filenames(lead, d)
-    return Response(
-        content=png_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
-    )
+    return _image_or_pdf(png_bytes, filename, format)
 
 
 @api_router.get("/me/spaces/{lead_id}/board")
-async def my_space_board(lead_id: str, request: Request, member: Dict[str, Any] = Depends(require_member)):
+async def my_space_board(lead_id: str, request: Request, format: str = "png", member: Dict[str, Any] = Depends(require_member)):
     await _member_plan_or_404(lead_id, member)
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
     if needs_draft_watermark(d):
         png_bytes = await asyncio.to_thread(watermark_png, png_bytes)
     filename, _pdf_name, _package = _blueprint_filenames(lead, d)
-    return Response(
-        content=png_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "private, no-store"},
-    )
+    return _image_or_pdf(png_bytes, filename, format, cache="private, no-store")
 
 
 @api_router.get("/me/spaces/{lead_id}/pdf")
@@ -1478,9 +1593,10 @@ async def render_deliverable_zone_map(
     lead_id: str,
     request: Request,
     review: bool = False,
+    format: str = "png",
     _: bool = Depends(require_admin),
 ):
-    """Conceptual Zone Map / Flow Plan PNG. ``review=1`` adds the status banner with the lead id."""
+    """Conceptual Zone Map / Flow Plan PNG (``format=pdf`` for a PDF). ``review=1`` adds the status banner."""
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_zone_map(
         lead=lead,
@@ -1491,11 +1607,7 @@ async def render_deliverable_zone_map(
         lead_id=lead_id,
     )
     _board, _pdf, _package, zone_map_name = _zone_map_filenames(lead, d)
-    return Response(
-        content=png_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="{zone_map_name}"', "Cache-Control": "no-store"},
-    )
+    return _image_or_pdf(png_bytes, zone_map_name, format)
 
 
 def _email_inputs(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, str]:
@@ -1548,12 +1660,23 @@ async def render_deliverable_package(lead_id: str, request: Request, _: bool = D
     zone_map = build_zone_map(
         lead=lead, deliverable=d, images=images, final=str(d.get("package_status") or "") == "final"
     )
-    board_name, pdf_name, package_name, zone_map_name = _zone_map_filenames(lead, d)
+    _board_name, _pdf_name, package_name, _zone_map_name = _zone_map_filenames(lead, d)
+    title, draft = _package_name_inputs(lead, d)
+    views = [pair["after"] for pair in images.get("source_pairs") or [] if isinstance(pair, dict) and pair.get("after")]
+    if not views and images.get("after"):
+        views = [images["after"]]
+    rows = package_file_set(
+        title=title,
+        board_png=png_bytes,
+        zone_map_png=zone_map,
+        companion_pdf=pdf_bytes,
+        views=views,
+        draft=draft,
+    )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(board_name, png_bytes)
-        archive.writestr(zone_map_name, zone_map)
-        archive.writestr(pdf_name, pdf_bytes)
+        for row in rows:
+            archive.writestr(row["filename"], row["data"])
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
@@ -1819,7 +1942,7 @@ def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         after = pair.get("after")
         if after:
-            visuals.append({"label": f"Organized-{index + 1}", "bytes": after})
+            visuals.append({"label": f"View-{index + 1}", "bytes": after})
     return visuals
 
 
@@ -1838,6 +1961,12 @@ async def send_draft_package_endpoint(
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images)
+    # A review send is never blocked by the consistency check (missing links included); it only reports.
+    try:
+        report = await _consistency(lead, deliverable, images, pdf_bytes)
+    except Exception as exc:
+        logging.warning("Consistency check failed for draft send %s: %s", lead_id, exc)
+        report = {"ok": False, "issues": [], "blocking": 0, "error": str(exc)}
     recipient = (to or lead.get("email") or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
     cc_raw = (request.query_params.get("cc") or "").strip()
     cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
@@ -1867,18 +1996,65 @@ async def send_draft_package_endpoint(
         "sent_for_review": sent_version,
         "to": recipient,
         "cc": cc_emails,
+        "consistency": {
+            "ok": bool(report.get("ok")),
+            "blocks_final": int(report.get("blocking") or 0),
+            "issues": report.get("issues") or [],
+        },
     }
 
 
+async def _consistency(lead: Dict[str, Any], deliverable: Dict[str, Any], images: Dict[str, Any], pdf_bytes: Optional[bytes]) -> Dict[str, Any]:
+    from package_items import consistency_report, customer_texts
+
+    def run() -> Dict[str, Any]:
+        texts = customer_texts(lead, deliverable, images, companion_pdf=pdf_bytes)
+        return consistency_report(lead, deliverable, texts=texts)
+
+    report = await asyncio.to_thread(run)
+    await db.deliverables.update_one(
+        {"lead_id": lead.get("id")},
+        {"$set": {"consistency": report, "updated_at": _iso(datetime.now(timezone.utc))}},
+    )
+    return report
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/consistency")
+async def deliverable_consistency(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Shared item list and every mismatch between the views, the plan, the shopping list, and the copy."""
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    return {"lead_id": lead_id, **(await _consistency(lead, deliverable, images, pdf_bytes))}
+
+
 @api_router.post("/admin/leads/{lead_id}/deliverable/send-final")
-async def send_final_package(lead_id: str, request: Request, _: bool = Depends(require_admin)):
-    """Email the customer board and companion PDF. Refuses an incomplete package."""
+async def send_final_package(
+    lead_id: str,
+    request: Request,
+    override_consistency: bool = False,
+    _: bool = Depends(require_admin),
+):
+    """Email the customer board and companion PDF. Refuses an incomplete or inconsistent package.
+
+    ``override_consistency=true`` sends despite consistency-check blocks (recorded on the deliverable).
+    """
+    from package_items import final_send_block_reason
+
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     reason = final_email_block_reason(deliverable)
     if reason:
         # Refuse the customer send. Do not rewrite a review lead and do not mark it final.
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    report = await _consistency(lead, deliverable, images, pdf_bytes)
+    blocked = final_send_block_reason(report)
+    if blocked and not override_consistency:
+        raise HTTPException(status_code=409, detail=blocked)
+    if blocked:
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"consistency_override": {"at": _iso(datetime.now(timezone.utc)), "reason": blocked}}},
+        )
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=True)
     sent, error = await send_blueprint(
@@ -1971,6 +2147,9 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
     if release.get("sent_for_review"):
         update["sent_for_review"] = release["sent_for_review"]
     update.pop("emailed", None)
+    from package_items import consistency_report
+
+    update["consistency"] = await asyncio.to_thread(consistency_report, lead, update)
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     await db.leads.update_one(
         {"id": lead_id},
@@ -1990,10 +2169,14 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
         "version_label": release["version_label"],
         "package_status": release["package_status"],
         "emailed": False,
+        "consistency": {"ok": update["consistency"]["ok"], "blocking": update["consistency"]["blocking"]},
         "pieces": {
             "board": f"{base}/board",
+            "board_pdf": f"{base}/board?format=pdf",
             "zone_map": f"{base}/zone-map",
+            "zone_map_pdf": f"{base}/zone-map?format=pdf",
             "pdf": f"{base}/pdf",
+            "consistency": f"{base}/consistency",
         },
     }
 

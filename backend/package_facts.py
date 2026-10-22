@@ -29,6 +29,9 @@ from design_plan_standards import (
     LINK_REFERENCE,
     LINK_TESTED,
     MEASURE_BEFORE_BUYING,
+    PRICE_ESTIMATE_GUIDE_NOTE,
+    PRICE_ESTIMATE_MARK,
+    PRICE_ESTIMATE_NOTE,
     PROCESS_STEPS,
     SHOPPING_DECORATIVE,
     SHOPPING_FUNCTIONAL,
@@ -291,6 +294,7 @@ def _link_for(item: Dict[str, Any], by_name: Dict[str, Dict[str, Any]]) -> Dict[
         "link_type": link_type,
         "kind": kind,
         "kind_label": LINK_TESTED if tested else LINK_REFERENCE,
+        "price_verified": tested and bool(link.get("price_verified")),
     }
 
 
@@ -311,6 +315,9 @@ def shopping_rows(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, A
             qty, price = 1.0, 0.0
         name = _clean(item.get("name"))
         subtotal = qty * price
+        link = _link_for(item, by_name)
+        verified = bool(link.get("price_verified")) or (item.get("price_verified") is True and link["kind"] == "tested")
+        shown = money(subtotal) if subtotal else "Confirm price"
         rows.append(
             {
                 "name": name,
@@ -318,12 +325,15 @@ def shopping_rows(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, A
                 "qty": int(qty) if qty.is_integer() else qty,
                 "unit_price": price,
                 "subtotal": subtotal,
-                "price": money(subtotal) if subtotal else "Confirm price",
+                "price": shown,
+                "price_verified": verified,
+                "price_estimate": bool(subtotal) and not verified,
+                "price_display": f"{shown} {PRICE_ESTIMATE_MARK}" if subtotal and not verified else shown,
                 "priority": item_priority(item),
                 "catch_all": is_catch_all(item),
                 "measure_first": bool(item.get("measure_first")),
                 "item_class": _clean(item.get("item_class")) or "product",
-                "link": _link_for(item, by_name),
+                "link": link,
             }
         )
     return rows
@@ -346,12 +356,13 @@ def total_line(total_display: str, catch_all: Optional[Dict[str, Any]], *, gener
     return f"{SNAPSHOT_TOTAL_LABEL}: {display}, {TAX_SHIPPING_NOTE}."
 
 
-def total_note(catch_all: Optional[Dict[str, Any]]) -> str:
+def total_note(catch_all: Optional[Dict[str, Any]], *, estimates: bool = False) -> str:
     """The board's short line under the total figure."""
     tax = TAX_SHIPPING_NOTE[:1].upper() + TAX_SHIPPING_NOTE[1:]
+    tail = f" · {PRICE_ESTIMATE_NOTE}" if estimates else ""
     if catch_all and catch_all.get("subtotal"):
-        return f"Includes the {money(catch_all['subtotal'])} catch-all · {tax}"
-    return tax
+        return f"Includes the {money(catch_all['subtotal'])} catch-all · {tax}{tail}"
+    return f"{tax}{tail}"
 
 
 def roadmap_steps(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -362,18 +373,30 @@ def roadmap_steps(lead: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, s
     return [{**step, "detail": step["body"]} for step in _roadmap(doc, lead)]
 
 
+def _kept_names(lead: Optional[Dict[str, Any]]) -> List[str]:
+    """Existing pieces the customer or the brief said to keep, beyond "all current furniture"."""
+    from package_items import keep_existing_items
+
+    return [item["name"] for item in keep_existing_items(lead) if item["kind"] != "other" or len(item["name"]) <= 28]
+
+
 def what_stays(lead: Dict[str, Any], doc: Dict[str, Any]) -> str:
     from ai_drafter import is_keep_existing_wall
 
-    if is_keep_existing_wall(doc):
-        return WHAT_STAYS_TEXT
-    return "Keep all current furniture."
+    base = WHAT_STAYS_TEXT if is_keep_existing_wall(doc) else "Keep all current furniture."
+    kept = _kept_names(lead)[:2]
+    if not kept:
+        return base
+    return base.rstrip(".") + ", and the existing " + " and the existing ".join(kept) + "."
 
 
-def what_stays_chips(doc: Dict[str, Any]) -> List[str]:
+def what_stays_chips(doc: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[str]:
     from ai_drafter import is_keep_existing_wall
 
-    return list(WHAT_STAYS_CHIPS) if is_keep_existing_wall(doc) else [WHAT_STAYS_CHIPS[1]]
+    chips = list(WHAT_STAYS_CHIPS) if is_keep_existing_wall(doc) else [WHAT_STAYS_CHIPS[1]]
+    for name in _kept_names(lead):
+        chips.append(f"Existing {name}")
+    return chips[:4]
 
 
 def sent_review_version(deliverable: Optional[Dict[str, Any]]) -> int:
@@ -452,7 +475,9 @@ def package_facts(
         "decorative_total": money(sum(row["subtotal"] for row in decorative)),
         "catch_all": catch_all,
         "total_line": total_line(total_display, catch_all, general=general),
-        "total_note": total_note(catch_all) if general else "",
+        "total_note": total_note(catch_all, estimates=any(row["price_estimate"] for row in rows)) if general else "",
+        "estimates": sum(1 for row in rows if row["price_estimate"]),
+        "estimate_note": PRICE_ESTIMATE_GUIDE_NOTE if any(row["price_estimate"] for row in rows) else "",
         "tested_links": sum(1 for row in rows if row["link"]["kind"] == "tested"),
         "reference_links": sum(1 for row in rows if row["link"]["kind"] == "reference"),
         "steps": roadmap_steps(lead, doc),

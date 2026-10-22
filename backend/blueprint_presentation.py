@@ -17,7 +17,10 @@ from blueprint_consistency import (
 from image_board import _clean, board_spec, customer_view_caption
 
 
-def _shopping(deliverable: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _shopping(deliverable: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    from package_facts import shopping_rows
+
+    facts = {row["name"]: row for row in shopping_rows(lead or {}, deliverable)}
     rows = []
     for item in deliverable.get("shopping_list") or []:
         if not isinstance(item, dict):
@@ -37,11 +40,14 @@ def _shopping(deliverable: Dict[str, Any]) -> List[Dict[str, Any]]:
             price_label = f"${sub:,.2f}"
         else:
             price_label = "Confirm price"
+        fact = facts.get(name) or {}
         rows.append(
             {
                 "name": name,
                 "qty": int(qty) if qty.is_integer() else qty,
-                "price": price_label,
+                "price": fact.get("price_display") or price_label,
+                "price_estimate": bool(fact.get("price_estimate")),
+                "url": ((fact.get("link") or {}).get("url")) or "",
             }
         )
     return rows
@@ -123,7 +129,7 @@ def build_presentation(
         "changes": spec.get("moves") or [],
         "plan": spec.get("topdown") or {},
         "palette": spec.get("palette") or [],
-        "shopping": _shopping(doc),
+        "shopping": _shopping(doc, lead),
         "shopping_total": sections.get("list_total") or "—",
         "shopping_total_line": reference_total_line(sections.get("list_total") or ""),
         "shopping_note": SHOPPING_DISCLAIMER,

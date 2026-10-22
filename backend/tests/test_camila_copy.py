@@ -227,11 +227,12 @@ def test_design_plan_board_matches_the_approved_v5(surfaces):
     ]
     snapshot = spec["snapshot"]
     assert [(row["short"], row["price"]) for row in snapshot["items"]] == [
-        ("Furniture anti-tip kit (2-pack)", "$18"),
-        ("Thermal curtain panels (2)", "$60"),
-        ("Window insulation film kit", "$15"),
-        ("Door draft stopper", "$12"),
-        ("Wall-mounted organizer caddy", "$22"),
+        # Link-tested, but the retailer pages did not expose a stable price: every price is an estimate.
+        ("Furniture anti-tip kit (2-pack)", "$18 est."),
+        ("Thermal curtain panels (2)", "$60 est."),
+        ("Window insulation film kit", "$15 est."),
+        ("Door draft stopper", "$12 est."),
+        ("Wall-mounted organizer caddy", "$22 est."),
     ]
     assert snapshot["more_line"] == "Includes 4 more items ($68) in the Companion Guide"
     assert snapshot["total"] == "$195"
