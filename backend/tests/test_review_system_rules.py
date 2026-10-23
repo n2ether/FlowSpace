@@ -198,6 +198,63 @@ def test_basket_on_a_bench_blocks_the_consistency_check():
     assert any(i["code"] == "basket_on_seat_or_bed" and i["severity"] == "block" for i in report["issues"])
 
 
+# Preview garage draft of 23 Oct 2026: the customer chose "No drilling".
+_GARAGE_DRAFT = {
+    "strategy": [
+        "Mount bike hooks on the right wall so bikes stand upright and clear the car path.",
+        "Consolidate paint cans on one shelf with labels so every color is visible.",
+    ],
+    "zones": [
+        {"title": "Bike & Tool Storage", "desc": "Wall-mounted bike hooks and the existing tool rack keep bikes upright."},
+        {"title": "Parking Zone", "desc": "Central open floor for the car to pull in and park without obstacles."},
+    ],
+    "shopping_list": [
+        {"name": "Heavy-duty wall-mounted bike hooks (set of 3)", "qty": 1, "price": 35},
+        {"name": "Over-door hook rack (6 hooks)", "qty": 1, "price": 15},
+    ],
+}
+
+
+def _garage(limits):
+    return {"id": "g", "space_type": "garage", "intake": {"limits": limits}}
+
+
+def test_no_drilling_blocks_wall_mounting_in_plan_and_shopping():
+    from package_items import consistency_report, no_drilling_conflicts
+
+    hits = no_drilling_conflicts(_garage(["no_drilling"]), _GARAGE_DRAFT)
+    assert any(h.startswith("Mount bike hooks on the right wall") for h in hits)
+    assert any("Wall-mounted bike hooks" in h for h in hits)
+    assert any("Heavy-duty wall-mounted bike hooks" in h for h in hits)
+    assert not any("Over-door" in h or "Parking" in h for h in hits)
+
+    report = consistency_report(_garage(["no_drilling"]), _GARAGE_DRAFT)
+    blocks = [i for i in report["issues"] if i["code"] == "limit_no_drilling_contradicted"]
+    assert blocks and all(i["severity"] == "block" for i in blocks)
+    assert report["ok"] is False
+
+
+def test_no_drilling_rule_only_applies_when_chosen_and_respects_negation():
+    from package_items import no_drilling_conflicts
+
+    assert no_drilling_conflicts(_garage(["none"]), _GARAGE_DRAFT) == []
+    assert no_drilling_conflicts({"space_type": "garage"}, _GARAGE_DRAFT) == []
+    renter = {"strategy": ["Use over-door hooks so nothing needs to be drilled into the wall.", "Add a freestanding bike stand."]}
+    assert no_drilling_conflicts(_garage(["no_drilling"]), renter) == []
+    for sentence in ("Drill pilot holes for the shelf.", "Screw the rail into the studs.", "Anchor the cabinet to the wall."):
+        assert no_drilling_conflicts(_garage(["no_drilling"]), {"strategy": [sentence]}) == [sentence]
+
+
+def test_no_drilling_swaps_the_generic_wall_anchor_safety_line():
+    from blueprint_consistency import NO_DRILL_STABILITY_LINE, safety_essentials
+
+    drill_ok = safety_essentials(_garage(["none"]), {})
+    no_drill = safety_essentials(_garage(["no_drilling"]), {})
+    assert any("Anchor tall or heavy furniture to the wall" in line for line in drill_ok)
+    assert NO_DRILL_STABILITY_LINE in no_drill
+    assert not any("to the wall" in line.lower() for line in no_drill)
+
+
 # ──────────────────────────── 3. Brief notes ─────────────────────────────
 
 

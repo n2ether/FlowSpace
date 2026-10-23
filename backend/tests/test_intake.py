@@ -227,7 +227,12 @@ class TestFactSheet:
         assert "P1 (Photo 1 — Crib wall, wide)" in prompt
         assert "K1 six-drawer dresser" in prompt
         assert "No drilling, Other: rental" in prompt
+        assert "Do not suggest wall-mounted, ceiling-mounted, screwed-in or wall-anchored items." in prompt
         assert "not to scale" in prompt
+
+    def test_prompt_has_no_drilling_rule_only_when_chosen(self):
+        prompt = fact_sheet_prompt(build_fact_sheet(self._lead(limits=["no_painting"])))
+        assert "wall-mounted" not in prompt
 
     def test_drafter_summary_includes_fact_sheet(self):
         from ai_drafter import _summarize_lead

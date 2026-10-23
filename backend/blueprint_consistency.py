@@ -223,6 +223,8 @@ _GENERIC_SAFETY_ESSENTIALS = (
     "Anchor tall or heavy furniture to the wall before you load it.",
     "Keep a clear floor path to the door.",
 )
+# Wall anchoring needs drilling; a "No drilling" customer gets a stability line instead.
+NO_DRILL_STABILITY_LINE = "Keep heavy items on the lowest shelves so tall units stay stable without wall anchors."
 NURSERY_BEDTIME_TITLE = BEDTIME_RITUAL_TITLE
 NURSERY_BEDTIME = BEDTIME_RITUAL_BODY
 
@@ -830,8 +832,13 @@ def safety_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] |
             continue
         if not _same_warning(text, lines):
             lines.append(text)
+    from package_items import stated_limits
+
     covered = " ".join(lines).lower()
-    for keyword, line in zip(("anchor", "path"), _GENERIC_SAFETY_ESSENTIALS):
+    generic = _GENERIC_SAFETY_ESSENTIALS
+    if "no_drilling" in stated_limits(lead):
+        generic = (NO_DRILL_STABILITY_LINE, *generic[1:])
+    for keyword, line in zip(("anchor", "path"), generic):
         if keyword not in covered:
             lines.append(line)
     return lines[:4]
