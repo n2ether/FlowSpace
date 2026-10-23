@@ -441,6 +441,57 @@ class TestLeadApi:
         assert tx["session_id"] == "cs_test_1"
         assert tx["lead_id"] == "ok-1"
 
+    def test_resumed_checkout_expires_the_earlier_open_session(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+        expired = []
+
+        class _Session:
+            id = "cs_test_new"
+            url = "https://checkout.stripe.test/cs_test_new"
+
+        monkeypatch.setattr(server.stripe_sdk.checkout.Session, "create", lambda **kw: _Session())
+        monkeypatch.setattr(server.stripe_sdk.checkout.Session, "expire", lambda sid: expired.append(sid))
+        fake.leads.docs.append({"id": "retry-1", "package_id": "plus", "photos": [P1], "intake": _intake()})
+        fake.payment_transactions.docs.append(
+            {"session_id": "cs_test_old", "lead_id": "retry-1", "payment_status": "unpaid", "status": "open"}
+        )
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "retry-1"}},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        assert expired == ["cs_test_old"]
+        by_session = {t["session_id"]: t for t in fake.payment_transactions.docs}
+        assert by_session["cs_test_old"]["status"] == "expired"
+        assert by_session["cs_test_new"]["lead_id"] == "retry-1"
+        assert len([lead for lead in fake.leads.docs if lead["id"] == "retry-1"]) == 1
+
+    def test_checkout_refuses_a_project_that_is_already_paid(self, api_client, monkeypatch):
+        c, fake, headers = api_client
+        import server
+
+        monkeypatch.setattr(server, "STRIPE_API_KEY", "sk_test_dummy")
+
+        def no_stripe(**kwargs):
+            raise AssertionError("A paid project must not get a second checkout")
+
+        monkeypatch.setattr(server.stripe_sdk.checkout.Session, "create", no_stripe)
+        fake.leads.docs.append({"id": "paid-1", "package_id": "plus", "photos": [P1], "intake": _intake()})
+        fake.payment_transactions.docs.append(
+            {"session_id": "cs_test_paid", "lead_id": "paid-1", "payment_status": "paid", "status": "complete"}
+        )
+        r = c.post(
+            "/api/checkout/session",
+            json={"package_id": "plus", "origin_url": "http://localhost:3000", "metadata": {"lead_id": "paid-1"}},
+            headers=headers,
+        )
+        assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "ALREADY_PAID"
+
     def test_checkout_without_key_is_neutral_payments_disabled(self, api_client, monkeypatch):
         c, fake, headers = api_client
         import server

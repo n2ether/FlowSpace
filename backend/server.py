@@ -2229,6 +2229,23 @@ async def checkout_config():
     }
 
 
+async def _expire_open_checkouts(transactions: List[Dict[str, Any]]) -> None:
+    """Close a project's earlier open Stripe sessions so a resumed checkout can't be paid twice."""
+    for tx in transactions:
+        session_id = tx.get("session_id")
+        if not session_id or tx.get("status") != "open":
+            continue
+        try:
+            await asyncio.to_thread(stripe_sdk.checkout.Session.expire, session_id)
+        except Exception as e:
+            logging.warning("Could not expire earlier checkout %s: %s", session_id, e)
+            continue
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"status": "expired", "updated_at": _iso(datetime.now(timezone.utc))}},
+        )
+
+
 @api_router.post("/checkout/session")
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
@@ -2256,6 +2273,14 @@ async def create_checkout(req: CheckoutRequest, request: Request):
             status_code=409,
             detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
         )
+    earlier = await db.payment_transactions.find(
+        {"lead_id": lead_id}, {"_id": 0, "session_id": 1, "payment_status": 1, "status": 1}
+    ).to_list(50)
+    if any(t.get("payment_status") == "paid" for t in earlier):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ALREADY_PAID", "message": "This project is already paid. Follow it from My spaces."},
+        )
     if not STRIPE_API_KEY:
         raise HTTPException(
             status_code=503,
@@ -2263,6 +2288,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         )
 
     stripe_sdk.api_key = STRIPE_API_KEY
+    await _expire_open_checkouts(earlier)
     origin = req.origin_url.rstrip("/")
     success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/?canceled=1#packages"
