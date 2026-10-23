@@ -1,25 +1,38 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@300;400;500;600;700&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* FlowSpace identity. Hex values mirror backend/design_plan_standards.py. */
 :root {
+  --fs-green: #2F5D50;
+  --fs-green-deep: #24463C;
+  --fs-sage: #A8C3B0;
+  --fs-sage-light: #E4ECE6;
+  --fs-sage-line: #D3E0D6;
+  --fs-off: #F6F7F4;
+  --fs-greige: #E6E1DB;
+  --fs-greige-light: #F1EEE9;
+  --fs-line: #E2DED7;
+  --fs-char: #2B2B2B;
+  --fs-body: #454845;
+  --fs-muted: #5E625F;
+  --fs-font: "Montserrat", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
   --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
-  --primary: 158 64% 40%; /* emerald-600 */
+  --foreground: 0 0% 17%;
+  --primary: 163 33% 27%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 152 76% 96%;
-  --accent-foreground: 158 64% 30%;
-  --destructive: 0 84% 60%;
+  --secondary: 80 11% 96%;
+  --secondary-foreground: 0 0% 17%;
+  --muted: 80 11% 96%;
+  --muted-foreground: 140 2% 38%;
+  --accent: 137 18% 91%;
+  --accent-foreground: 163 33% 27%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 158 64% 40%;
+  --border: 37 14% 87%;
+  --input: 37 14% 87%;
+  --ring: 163 33% 27%;
   --radius: 0.75rem;
 }
 
@@ -33,17 +46,17 @@ html {
 
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--fs-font);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: #ffffff;
-  color: #0f172a;
+  color: var(--fs-char);
 }
 
+/* Montserrat hierarchy: light display headings, medium titles, semibold labels. */
 .font-display {
-  font-family: "Fraunces", serif;
-  font-optical-sizing: auto;
-  letter-spacing: -0.015em;
+  font-family: var(--fs-font);
+  letter-spacing: -0.02em;
 }
 
 .container-app {
@@ -83,9 +96,9 @@ body {
   gap: 0.5rem;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #047857;
+  color: var(--fs-green);
 }
 
 .eyebrow::before {
@@ -93,7 +106,7 @@ body {
   display: block;
   height: 1px;
   width: 24px;
-  background: #34d399;
+  background: var(--fs-sage);
 }
 
 .fade-in {
@@ -105,26 +118,32 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    animation: none;
+  }
+}
+
 .input {
   width: 100%;
   border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--fs-line);
   background: #ffffff;
   padding: 0.7rem 0.9rem;
   font-size: 0.95rem;
-  color: #0f172a;
+  color: var(--fs-char);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .input:focus {
-  border-color: #34d399;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+  border-color: var(--fs-green);
+  box-shadow: 0 0 0 3px rgba(47, 93, 80, 0.15);
 }
 
 .input:disabled {
-  background: #f8fafc;
-  color: #475569;
+  background: var(--fs-off);
+  color: var(--fs-muted);
   cursor: not-allowed;
 }
 
@@ -135,20 +154,21 @@ body {
   gap: 0.5rem;
   padding: 0.95rem 1.6rem;
   border-radius: 9999px;
-  background: #10b981;
+  background: var(--fs-green);
   color: white;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 0.95rem;
+  letter-spacing: 0.01em;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+  box-shadow: 0 4px 14px rgba(47, 93, 80, 0.18);
   transition: all 0.2s ease;
 }
 
 .btn-primary:hover {
-  background: #059669;
+  background: var(--fs-green-deep);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35);
+  box-shadow: 0 6px 18px rgba(47, 93, 80, 0.24);
 }
 
 .btn-primary:disabled {
@@ -165,17 +185,18 @@ body {
   padding: 0.95rem 1.6rem;
   border-radius: 9999px;
   background: white;
-  color: #334155;
-  font-weight: 500;
+  color: var(--fs-body);
+  font-weight: 600;
   font-size: 0.95rem;
-  border: 1px solid #e2e8f0;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--fs-line);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .btn-ghost:hover {
-  border-color: #6ee7b7;
-  color: #047857;
+  border-color: var(--fs-sage);
+  color: var(--fs-green);
 }
 
 .card-hover {
@@ -184,16 +205,5 @@ body {
 
 .card-hover:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-}
-
-/* logo wordmark gradient */
-.brand-mark {
-  background: linear-gradient(135deg, #059669 0%, #0ea5e9 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  font-family: "Fraunces", serif;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  box-shadow: 0 12px 32px rgba(43, 43, 43, 0.07);
 }

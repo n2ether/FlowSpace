@@ -197,7 +197,7 @@ test("Free: conceptual path is labelled and the draft survives a reload", async 
     await page.getByTestId("intake-next").click();
 
     await expectStep(page, 4, "Review your project.");
-    await expect(page.getByTestId("review-photos")).toContainText("None — conceptual plan");
+    await expect(page.getByTestId("review-photos")).toContainText("Inspiration-based plan; no photos used");
     await expect(page.getByTestId("review-limitations")).toContainText("Conceptual plan");
     await expect(page.getByTestId("room-flow-mode")).toContainText("Conceptual zone diagram");
     await expect(page.getByTestId("review-plan-line")).toContainText("Your plan: Free — $0");

@@ -388,7 +388,7 @@ const AdminDeliverable = () => {
             const space_cap = space.charAt(0).toUpperCase() + space.slice(1);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `FlowSpace_${space_cap}_Blueprint_${safeName}.zip`;
+            a.download = `FlowSpace_${space_cap}_Design_Plan_${safeName}.zip`;
             document.body.appendChild(a);
             a.click();
             a.remove();

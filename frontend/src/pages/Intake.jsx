@@ -12,6 +12,7 @@ import StepPhotos from "../components/intake/StepPhotos";
 import StepNeeds from "../components/intake/StepNeeds";
 import StepReview from "../components/intake/StepReview";
 import { measurePhoto, withIssues } from "../lib/intake/photoChecks";
+import { CHECKOUT_LEAD_KEY } from "../lib/projectStatus";
 import {
     DRAFT_KEY,
     PAID_PHOTO_REQUIRED,
@@ -327,6 +328,11 @@ export default function Intake() {
                 email: (member?.email || form.email).trim(),
                 metadata: { lead_id: lead.id },
             });
+            try {
+                sessionStorage.setItem(CHECKOUT_LEAD_KEY, lead.id);
+            } catch {
+                /* the success page falls back to My spaces */
+            }
             window.location.href = checkout.url;
         } catch (err) {
             const code = apiErrorCode(err);

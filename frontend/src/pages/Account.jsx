@@ -1,90 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api, apiErrorMessage } from "../lib/api";
+import {
+    DELIVERED_NOTE,
+    STATUS_STYLES,
+    customerStatus,
+    displayStatus,
+    serverClockOffset,
+    spaceThumbnail,
+    spaceTitle,
+} from "../lib/projectStatus";
+import { useNow } from "../lib/useNow";
 
-const SPACE_LABELS = {
-    closet: "Closet",
-    garage: "Garage",
-    laundry_room: "Laundry room",
-    pantry: "Pantry",
-    mudroom: "Mudroom",
-    storage: "Storage area",
-    kids_room: "Kids' room",
-    home_office: "Home office",
-    living_room: "Living room",
-    bedroom: "Bedroom",
-    other: "Other space",
-};
-
-const IN_PROGRESS = { key: "in_progress", label: "In progress", note: "We're preparing your Design Plan." };
-const IN_REVIEW = { key: "in_review", label: "In review", note: "Our beta team reviews every plan before it's sent." };
-const DELIVERED = { key: "delivered", label: "Delivered", note: "Design Plan emailed to you." };
-const AWAITING_PAYMENT = {
-    key: "awaiting_payment",
-    label: "Awaiting payment",
-    note: "Finish checkout to start your Design Plan.",
-};
-const PAYMENT_NOT_COMPLETED = {
-    key: "payment_not_completed",
-    label: "Payment not completed",
-    note: "Your payment didn't go through. Start checkout again to continue.",
-};
-const CHECKOUT_EXPIRED = {
-    key: "checkout_expired",
-    label: "Checkout expired",
-    note: "Your checkout timed out before payment. Start checkout again to continue.",
-};
-
-// Raw lead statuses (and legacy "error") never reach the customer.
-const CUSTOMER_STATUS = {
-    new: IN_PROGRESS,
-    paid: IN_PROGRESS,
-    processing: IN_PROGRESS,
-    in_progress: IN_PROGRESS,
-    review: IN_REVIEW,
-    incomplete: IN_REVIEW,
-    pdf_ready: IN_REVIEW,
-    error: IN_REVIEW,
-    in_review: IN_REVIEW,
-    delivered: DELIVERED,
-    awaiting_payment: AWAITING_PAYMENT,
-    payment_not_completed: PAYMENT_NOT_COMPLETED,
-    checkout_expired: CHECKOUT_EXPIRED,
-};
-
-const STATUS_STYLES = {
-    in_progress: "bg-sky-50 text-sky-800",
-    in_review: "bg-slate-100 text-slate-700",
-    delivered: "bg-emerald-50 text-emerald-800",
-    awaiting_payment: "bg-amber-50 text-amber-800",
-    payment_not_completed: "bg-red-50 text-red-800",
-    checkout_expired: "bg-amber-50 text-amber-800",
-};
-
-export function spaceTitle(space) {
-    const title = (space.title || "").trim();
-    if (title) return title;
-    if (space.space_type === "other") return SPACE_LABELS.other;
-    return SPACE_LABELS[space.space_type] || "Your space";
-}
-
-export function customerStatus(space) {
-    const known = CUSTOMER_STATUS[(space.status || "new").toLowerCase()] || IN_REVIEW;
-    // The backend owns the label (it knows the payment state); the table is a fallback.
-    if (space.status_label) {
-        return { key: known.key, label: space.status_label, note: space.status_note || known.note };
-    }
-    return known;
-}
-
-function photoSrc(url) {
-    if (!url) return null;
-    if (url.startsWith("http")) return url;
-    return `${process.env.REACT_APP_BACKEND_URL || ""}${url}`;
-}
+export { customerStatus, spaceTitle };
 
 export default function Account() {
     const { member, loading } = useAuth();
@@ -93,6 +25,8 @@ export default function Account() {
     const [usage, setUsage] = useState(member?.usage || null);
     const [fetching, setFetching] = useState(true);
     const [error, setError] = useState("");
+    const [clockOffset, setClockOffset] = useState(0);
+    const now = useNow(30000) + clockOffset;
 
     useEffect(() => {
         if (loading) return;
@@ -107,6 +41,7 @@ export default function Account() {
                 if (cancelled) return;
                 setSpaces(data.spaces || []);
                 setUsage(data.usage || member.usage);
+                setClockOffset(serverClockOffset(data.server_time));
             } catch (err) {
                 if (!cancelled) setError(apiErrorMessage(err, "Could not load your spaces."));
             } finally {
@@ -194,18 +129,15 @@ export default function Account() {
                     ) : (
                         <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2" data-testid="account-spaces">
                             {spaces.map((space) => {
-                                const thumb =
-                                    photoSrc(space.deliverable?.front_view_url) ||
-                                    photoSrc(
-                                        typeof space.photos?.[0] === "string"
-                                            ? space.photos[0]
-                                            : space.photos?.[0]?.url
-                                    );
-                                const status = customerStatus(space);
+                                const status = displayStatus(space, now);
+                                const thumb = spaceThumbnail(space, status);
+                                const styleKey = status.delayed ? "delayed" : status.key;
                                 return (
-                                    <article
+                                    <Link
                                         key={space.id}
-                                        className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                                        to={`/account/spaces/${space.id}`}
+                                        className="group block overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-colors hover:border-emerald-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                                        aria-label={`${spaceTitle(space)}: ${status.label}. Open project`}
                                         data-testid={`space-card-${space.id}`}
                                     >
                                         <div className="h-40 bg-slate-100">
@@ -216,13 +148,13 @@ export default function Account() {
                                                     className="h-full w-full object-contain"
                                                 />
                                             ) : (
-                                                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                                                <div className="flex h-full items-center justify-center text-sm text-slate-500">
                                                     Photos processing
                                                 </div>
                                             )}
                                         </div>
                                         <div className="p-5">
-                                            <div className="flex items-start justify-between gap-3">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
                                                 <h3
                                                     className="font-display text-xl font-medium text-slate-900"
                                                     data-testid={`space-title-${space.id}`}
@@ -231,7 +163,7 @@ export default function Account() {
                                                 </h3>
                                                 <span
                                                     className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                                                        STATUS_STYLES[status.key]
+                                                        STATUS_STYLES[styleKey]
                                                     }`}
                                                     data-testid={`space-status-${space.id}`}
                                                 >
@@ -244,11 +176,15 @@ export default function Account() {
                                                     ? ` · ${new Date(space.created_at).toLocaleDateString()}`
                                                     : ""}
                                             </p>
-                                            <p className="mt-3 text-sm text-slate-500">
-                                                {space.email_sent ? DELIVERED.note : status.note}
+                                            <p className="mt-3 text-sm text-slate-600">
+                                                {space.email_sent ? DELIVERED_NOTE : status.note}
+                                            </p>
+                                            <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 group-hover:text-emerald-800">
+                                                View project
+                                                <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                                             </p>
                                         </div>
-                                    </article>
+                                    </Link>
                                 );
                             })}
                         </div>

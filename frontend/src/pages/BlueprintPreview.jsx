@@ -198,7 +198,7 @@ export default function BlueprintPreview() {
             ) : null}
 
             <main className="mx-auto w-full max-w-[430px] px-4 pb-16 pt-5">
-                {!doc && !error ? <p className="text-base text-[#6e655c]">Loading the Blueprint…</p> : null}
+                {!doc && !error ? <p className="text-base text-[#6e655c]">Loading the Design Plan…</p> : null}
                 {error ? <p className="text-base text-[#1F3D2C]">{error}</p> : null}
                 {doc ? (
                     <>
