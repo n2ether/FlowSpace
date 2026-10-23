@@ -582,9 +582,22 @@ def test_send_final_refuses_an_inconsistent_package_unless_overridden(monkeypatc
         asyncio.run(server.send_final_package(LIVING_ID, _Request(), _=True))
     assert err.value.status_code == 409 and "no organized view shows it" in err.value.detail
     assert not sends and saved.get("package_status") != "final"
-    out = asyncio.run(server.send_final_package(LIVING_ID, _Request(), override_consistency=True, _=True))
+    with pytest.raises(HTTPException) as silent:
+        asyncio.run(server.send_final_package(LIVING_ID, _Request(), override_consistency=True, _=True))
+    assert silent.value.status_code == 422 and not sends
+    out = asyncio.run(
+        server.send_final_package(
+            LIVING_ID,
+            _Request(),
+            override_consistency=True,
+            override_reason="Camila approved the rug as a future purchase.",
+            _=True,
+        )
+    )
     assert out["final"] is True and len(sends) == 1
     assert "no organized view" in saved["consistency_override"]["reason"]
+    assert saved["consistency_override"]["override_reason"] == "Camila approved the rug as a future purchase."
+    assert saved["consistency_override_log"][-1]["issues"][0]["code"] == "addition_not_shown"
 
 
 def test_consistency_report_lists_the_shared_item_list():

@@ -39,8 +39,9 @@ from email_service import (
 from source_photos import draft_send_block_reason, final_email_block_reason, mapping_is_own_source
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
-from ai_image_generator import generate_front_view, refine_after_image
+from ai_image_generator import generate_front_view, refine_after_image, requested_wall_color
 from rug_refine import describe_rug, refine_one, resolve_refine_rug
+from view_verification import verify_views
 from automation import run_automation
 from render_recovery import sweep_forever
 from draft_watermark import needs_draft_watermark, watermark_pdf, watermark_png
@@ -1250,23 +1251,49 @@ class LeadBrief(BaseModel):
     # "open" for no cap; otherwise one of the intake budget ids, or empty to keep the lead's.
     budget: str = ""
     keep_existing: List[str] = []
+    # Kept pieces with the structure every view must keep: [{"name": "TV console", "details": "two glass doors"}].
+    retained: List[Any] = []
+    # What no view may show, in plain words: ["basket on Sam's bed"].
+    avoid: List[str] = []
     decor: List[Any] = []
 
 
 @api_router.put("/admin/leads/{lead_id}/brief")
 async def admin_set_lead_brief(lead_id: str, payload: LeadBrief, _: bool = Depends(require_admin)):
-    """Admin project brief. Drafting, image prompts, and every document read it. No email, no automation."""
-    from package_items import brief_requests
+    """Admin project brief. Drafting, image prompts, and every document read it. No email, no automation.
+
+    Existing views were checked against the earlier room inventory; when the
+    brief changes it, the consistency check marks them stale until verify or
+    a regeneration runs.
+    """
+    from intake import BUDGETS
+    from package_items import brief_requests, room_inventory
 
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     brief = payload.model_dump()
+    brief["budget"] = brief["budget"].strip()
+    if brief["budget"] and brief["budget"] not in BUDGETS:
+        raise HTTPException(status_code=422, detail=f"Unknown budget '{brief['budget']}'.")
     update: Dict[str, Any] = {"brief": brief, "updated_at": _iso(datetime.now(timezone.utc))}
-    if brief["budget"] == "open":
-        update["budget"] = "open"
+    if brief["budget"]:
+        update["budget"] = brief["budget"]
+    merged = {**lead, **update}
+    if lead.get("intake") or lead.get("fact_sheet"):
+        update["fact_sheet"] = build_fact_sheet(merged)
+        merged["fact_sheet"] = update["fact_sheet"]
     await db.leads.update_one({"id": lead_id}, {"$set": update})
-    return {"lead_id": lead_id, "brief": brief, "requests": brief_requests({**lead, **update})}
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    inventory = room_inventory(merged, stored or {})
+    previous = ((stored or {}).get("room_inventory") or {}).get("hash")
+    return {
+        "lead_id": lead_id,
+        "brief": brief,
+        "requests": brief_requests(merged),
+        "room_inventory": inventory,
+        "views_need_verification": bool(stored and stored.get("source_afters") and previous != inventory["hash"]),
+    }
 
 
 @api_router.post("/admin/gallery", response_model=GalleryItem)
@@ -1787,6 +1814,9 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
     first_after = afters[0] if afters else None
     rug = resolve_refine_rug(lead, d, rug_override)
     rug = await asyncio.to_thread(describe_rug, [s for s in sources if s], first_after, rug)
+    from package_items import room_inventory, view_check_inputs
+
+    item_qa = {"paint_request": requested_wall_color(lead, d), **view_check_inputs(room_inventory(lead, d))}
     reference: Optional[bytes] = None
     report: List[Dict[str, Any]] = []
     replaced_urls: Dict[str, str] = {}
@@ -1808,6 +1838,7 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
             after=after,
             reference=None if position == 0 else (reference or first_after),
             edit=refine_after_image,
+            qa_kwargs=item_qa,
         )
         row = outcome.report()
         if outcome.replaced and outcome.after_bytes:
@@ -1859,7 +1890,16 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
         "updated_at": _iso(datetime.now(timezone.utc)),
     }
     if replaced_urls:
+        # A refined view must pass the full item check and the cross-view comparison again.
+        verified = await verify_views(
+            lead=lead,
+            deliverable={**d, "source_afters": entries},
+            load=lambda url: _resolve_image_bytes(url, None),
+        )
+        entries = verified["source_afters"]
         update["source_afters"] = entries
+        update["cross_view"] = verified["cross_view"]
+        update["room_inventory"] = verified["room_inventory"]
         front = str(d.get("front_view_url") or "")
         if front in replaced_urls:
             update["front_view_url"] = replaced_urls[front]
@@ -2042,18 +2082,52 @@ async def deliverable_consistency(lead_id: str, request: Request, _: bool = Depe
     return {"lead_id": lead_id, **(await _consistency(lead, deliverable, images, pdf_bytes))}
 
 
+@api_router.post("/admin/leads/{lead_id}/deliverable/verify")
+async def verify_deliverable_views(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Re-check every stored after against the current room inventory, and the afters against each other.
+
+    Generates nothing and sends nothing. A view that fails stays in the package
+    with its failure recorded, so the final send stays blocked until the view is
+    regenerated. Returns the refreshed consistency report.
+    """
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not stored:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
+    verified = await verify_views(lead=lead, deliverable=stored, load=lambda url: _resolve_image_bytes(url, request))
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {**verified, "updated_at": _iso(datetime.now(timezone.utc))}},
+    )
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    report = await _consistency(lead, deliverable, images, pdf_bytes)
+    return sign_photo_urls({"lead_id": lead_id, "emailed": False, "cross_view": verified["cross_view"], **report})
+
+
+OVERRIDE_REASON_MIN_CHARS = 15
+
+
 @api_router.post("/admin/leads/{lead_id}/deliverable/send-final")
 async def send_final_package(
     lead_id: str,
     request: Request,
     override_consistency: bool = False,
+    override_reason: Optional[str] = None,
     _: bool = Depends(require_admin),
 ):
     """Email the customer board and companion PDF. Refuses an incomplete or inconsistent package.
 
-    ``override_consistency=true`` sends despite consistency-check blocks (recorded on the deliverable).
+    The consistency check is recomputed here, on the files about to be sent.
+    ``override_consistency=true`` (admin only) may send past its blocks only with
+    a written ``override_reason``; it is logged and kept in the deliverable's
+    override history. Fidelity failures (a fixed piece changed or missing,
+    views that disagree, something the brief rules out, a basket on a seat or
+    bed) cannot be overridden: fix the views instead.
     """
-    from package_items import final_send_block_reason
+    from package_items import NON_OVERRIDABLE, final_send_block_reason
 
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     reason = final_email_block_reason(deliverable)
@@ -2066,9 +2140,38 @@ async def send_final_package(
     if blocked and not override_consistency:
         raise HTTPException(status_code=409, detail=blocked)
     if blocked:
+        blocking = [i for i in report.get("issues") or [] if i.get("severity") == "block"]
+        hard = [i for i in blocking if i.get("code") in NON_OVERRIDABLE]
+        if hard:
+            raise HTTPException(
+                status_code=409,
+                detail="These checks cannot be overridden: " + "; ".join(str(i.get("message")) for i in hard[:3]),
+            )
+        written = " ".join(str(override_reason or "").split())
+        if len(written) < OVERRIDE_REASON_MIN_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail="An override needs override_reason: a written explanation of why this package may go out.",
+            )
+        record = {
+            "at": _iso(datetime.now(timezone.utc)),
+            "reason": blocked,
+            "override_reason": written,
+            "issues": [{"code": i.get("code"), "message": i.get("message")} for i in blocking],
+            "package_version": package_version(deliverable),
+            "actor": "admin",
+        }
+        history = [r for r in (deliverable.get("consistency_override_log") or []) if isinstance(r, dict)]
+        logging.warning(
+            "Consistency override on final send for lead %s (version %s): %s — reason: %s",
+            lead_id,
+            record["package_version"],
+            [i["code"] for i in record["issues"]],
+            written,
+        )
         await db.deliverables.update_one(
             {"lead_id": lead_id},
-            {"$set": {"consistency_override": {"at": _iso(datetime.now(timezone.utc)), "reason": blocked}}},
+            {"$set": {"consistency_override": record, "consistency_override_log": [*history, record]}},
         )
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=True)
@@ -2162,8 +2265,10 @@ async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
     if release.get("sent_for_review"):
         update["sent_for_review"] = release["sent_for_review"]
     update.pop("emailed", None)
-    from package_items import consistency_report
+    from package_items import consistency_report, room_inventory
 
+    # Views keep the inventory hash they were checked against; a changed inventory reads as stale.
+    update["room_inventory"] = room_inventory(lead, update)
     update["consistency"] = await asyncio.to_thread(consistency_report, lead, update)
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     await db.leads.update_one(
