@@ -234,12 +234,8 @@ def space_label(space_type: Optional[str]) -> str:
 
 
 def plan_title(space_type: Optional[str]) -> str:
-    """Space-aware PDF title. Closets use Blueprint; others are Organization Plans."""
-    key = (space_type or "space").strip().lower().replace(" ", "_")
-    label = space_label(space_type)
-    if key == "closet":
-        return "Closet Blueprint"
-    return f"{label} Organization Plan"
+    """Space-aware PDF title, e.g. "Garage Organization Plan"."""
+    return f"{space_label(space_type)} Organization Plan"
 
 
 _CHILD_TURNING = re.compile(

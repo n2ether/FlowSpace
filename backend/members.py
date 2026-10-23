@@ -32,6 +32,14 @@ SPACE_PUBLIC_FIELDS = (
     "email_sent",
 )
 
+# Preview logs put full runs between about 3.5 and 7.5 minutes; the estimate a
+# customer sees is the ceiling, and past it the status says so.
+GENERATION_ESTIMATE_MINUTES = 10
+DELAYED_NOTE = (
+    "This is taking a little longer than usual. Your Design Plan is still being prepared, "
+    "and we'll email you when it's ready. There's no need to keep this page open."
+)
+
 
 def is_free_package(package_id: Optional[str], packages: Optional[Dict[str, Any]] = None) -> bool:
     if not package_id:
@@ -169,12 +177,38 @@ def latest_transactions(transactions: Iterable[Dict[str, Any]]) -> Dict[str, Dic
     return by_lead
 
 
+def _parse_iso(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def is_delayed(
+    lead: Dict[str, Any],
+    status_code: str,
+    now: Optional[datetime] = None,
+) -> bool:
+    """True once in-progress work runs past the estimate the customer was shown."""
+    if status_code != "in_progress":
+        return False
+    started = _parse_iso(lead.get("processing_started_at") or lead.get("created_at"))
+    if not started:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return (now - started).total_seconds() > GENERATION_ESTIMATE_MINUTES * 60
+
+
 def public_space(
     lead: Dict[str, Any],
     deliverable: Optional[Dict[str, Any]] = None,
     *,
     transaction: Optional[Dict[str, Any]] = None,
     packages: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     out = {k: lead.get(k) for k in SPACE_PUBLIC_FIELDS}
     out["title"] = space_title(lead)
@@ -185,6 +219,11 @@ def public_space(
             transaction=transaction,
         )
     )
+    out["processing_started_at"] = lead.get("processing_started_at")
+    out["estimate_minutes"] = GENERATION_ESTIMATE_MINUTES
+    out["delayed"] = is_delayed(lead, out["status"], now)
+    if out["delayed"]:
+        out["status_note"] = DELAYED_NOTE
     if deliverable:
         out["deliverable"] = {
             "has_plan": True,

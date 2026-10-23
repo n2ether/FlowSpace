@@ -550,7 +550,7 @@ async def _resolve_member_for_lead(
         status_code=401,
         detail={
             "code": "ACCOUNT_REQUIRED",
-            "message": "Create a free account (or log in) to keep this plan and start your Blueprint.",
+            "message": "Create a free account (or log in) to keep this plan and start your Design Plan.",
         },
     )
 
@@ -625,14 +625,26 @@ async def _start_automation_for_lead(
         return False
     if not force:
         query["status"] = {"$nin": ["processing", "delivered", "review", "incomplete"]}
+    # Restart recovery re-claims a stuck run; the customer's wait started with the first claim.
+    started = now
+    if lead.get("status") == "processing" and lead.get("processing_started_at"):
+        started = lead["processing_started_at"]
     res = await db.leads.update_one(
         query,
-        {"$set": {**extra_fields, "status": "processing", "render_heartbeat_at": now, "updated_at": now}},
+        {
+            "$set": {
+                **extra_fields,
+                "status": "processing",
+                "processing_started_at": started,
+                "render_heartbeat_at": now,
+                "updated_at": now,
+            }
+        },
     )
     if res.matched_count == 0:
         logging.info("Skipping automation for lead %s — already in flight or delivered", lead_id)
         return False
-    queued = {**lead, **extra_fields, "status": "processing"}
+    queued = {**lead, **extra_fields, "status": "processing", "processing_started_at": started}
     _schedule_automation(background_tasks, queued)
     logging.info("Automation queued for lead %s", lead_id)
     return True
@@ -911,18 +923,21 @@ async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
             {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "payment_status": 1, "status": 1, "created_at": 1}
         ).to_list(2000)
     tx_by_lead = latest_transactions(transactions)
+    now = datetime.now(timezone.utc)
     spaces = [
         public_space(
             lead,
             by_lead.get(lead.get("id")),
             transaction=tx_by_lead.get(lead.get("id")),
             packages=PACKAGES,
+            now=now,
         )
         for lead in leads
     ]
     return {
         "spaces": sign_photo_urls(spaces),
         "usage": await _usage_for(member["id"]),
+        "server_time": _iso(now),
     }
 
 

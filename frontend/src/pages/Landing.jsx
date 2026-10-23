@@ -51,7 +51,7 @@ const PLANS = [
       "1 space included per account",
       "Upload up to 2 photos",
       "AI-generated organized rooms",
-      "Starter plan emailed as PDF",
+      "Starter Design Plan by email",
     ],
     pdf: false,
   },
@@ -63,7 +63,7 @@ const PLANS = [
     features: [
       "Upload up to 3 photos",
       "AI-generated organized rooms",
-      "Custom PDF organization plan",
+      "Custom FlowSpace Design Plan",
       "Email delivery",
     ],
     pdf: true,
@@ -76,7 +76,7 @@ const PLANS = [
     features: [
       "Upload up to 4 photos",
       "AI-generated organized rooms",
-      "Custom PDF organization plan",
+      "Custom FlowSpace Design Plan",
       "Shopping & labeling guide",
     ],
     pdf: true,
@@ -223,7 +223,7 @@ export default function Landing() {
         <div className="container-app grid grid-cols-1 items-center gap-12 pb-16 md:gap-16 md:pb-24 lg:grid-cols-[1.05fr_1fr] fade-in">
           <div className="flex flex-col gap-7">
             <span className="eyebrow" data-testid="hero-eyebrow">
-              AI-powered room organization
+              Clear space. Create flow. Live better.
             </span>
             <h1 className="font-display text-[40px] font-light leading-[1.05] tracking-tight text-slate-900 sm:text-[56px] lg:text-[64px]">
               Turn cluttered rooms into
@@ -365,8 +365,8 @@ export default function Landing() {
               Pick a plan that fits your space
             </h2>
             <p className="mt-4 text-slate-600">
-              All plans include an AI-organized room image and an emailed PDF
-              plan. Upgrade for more photos and a fuller shopping guide.
+              All plans include an AI-organized room image and an emailed
+              FlowSpace Design Plan. Upgrade for more photos and a fuller shopping guide.
             </p>
           </div>
           {checkoutCanceled && (

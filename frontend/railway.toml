@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npm run build"
+buildCommand = "npm ci || npm install; npm install ajv@8.17.1 --no-save; CI=false npm run build"
 
 [deploy]
 startCommand = "npx serve -s build -l $PORT"

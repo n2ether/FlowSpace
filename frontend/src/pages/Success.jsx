@@ -4,16 +4,30 @@ import { Check, Loader2, AlertCircle, Mail } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { api } from "../lib/api";
+import { CHECKOUT_LEAD_KEY, ESTIMATE_MINUTES, recordProgressStart } from "../lib/projectStatus";
+
+function checkoutLead() {
+    try {
+        return sessionStorage.getItem(CHECKOUT_LEAD_KEY) || "";
+    } catch {
+        return "";
+    }
+}
 
 const Success = () => {
     const [params] = useSearchParams();
     const sessionId = params.get("session_id");
     const planParam = (params.get("plan") || "").toLowerCase();
+    const [leadId] = useState(() => params.get("lead") || (sessionId ? checkoutLead() : ""));
     const navigate = useNavigate();
     const [status, setStatus] = useState(sessionId ? "checking" : (planParam === "free" ? "free" : "expired"));
     const [amount, setAmount] = useState(null);
     const [currency, setCurrency] = useState("usd");
     const attempts = useRef(0);
+
+    useEffect(() => {
+        if (status === "paid" || status === "free") recordProgressStart(leadId);
+    }, [status, leadId]);
 
     useEffect(() => {
         if (!sessionId) return; // free flow — nothing to poll
@@ -63,7 +77,7 @@ const Success = () => {
 
                     {status === "checking" && (
                         <>
-                            <Loader2 className="mx-auto h-10 w-10 animate-spin text-emerald-600" />
+                            <Loader2 className="mx-auto h-10 w-10 animate-spin text-emerald-600" strokeWidth={1.75} />
                             <h1 className="mt-6 font-display text-3xl font-light text-slate-900">Confirming your payment…</h1>
                             <p className="mt-3 text-slate-600">Hang tight, this takes a few seconds.</p>
                         </>
@@ -86,9 +100,10 @@ const Success = () => {
                                     <div>
                                         <p className="font-medium text-emerald-900">We&apos;ll email you when it&apos;s ready</p>
                                         <p className="mt-1 text-sm text-emerald-800">
-                                            We&apos;re preparing your FlowSpace Design Plan. During the beta, our team
-                                            reviews every plan before it&apos;s sent to the inbox you provided.
-                                            Check spam if it isn&apos;t there.
+                                            We&apos;re preparing your FlowSpace Design Plan. This step usually takes up
+                                            to {ESTIMATE_MINUTES} minutes. During the beta, our team then reviews every
+                                            plan before it&apos;s sent to the inbox you provided. Check spam if it
+                                            isn&apos;t there.
                                         </p>
                                     </div>
                                 </div>
@@ -96,8 +111,12 @@ const Success = () => {
                             <p className="mt-6 text-xs text-slate-500">
                                 Questions? Reply to any of our emails to reach us.
                             </p>
-                            <Link to="/account" className="btn-primary mt-8 w-full justify-center" data-testid="success-account">
-                                View my spaces
+                            <Link
+                                to={leadId ? `/account/spaces/${leadId}` : "/account"}
+                                className="btn-primary mt-8 w-full justify-center"
+                                data-testid="success-account"
+                            >
+                                {leadId ? "Follow my project" : "View my spaces"}
                             </Link>
                             <Link to="/" className="btn-ghost mt-3 w-full justify-center">Back to homepage</Link>
                         </>

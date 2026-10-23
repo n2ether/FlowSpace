@@ -68,6 +68,24 @@ describe("My Spaces", () => {
         expect(spaceTitle({ space_type: "laundry_room" })).toBe("Laundry room");
     });
 
+    it("opens every project, including one in review, from its card", async () => {
+        renderAccount([
+            {
+                id: "r1",
+                space_type: "nursery",
+                status: "in_review",
+                status_label: "In review",
+                package_id: "plus",
+                photos: [{ url: "https://cdn.example/own.jpg" }],
+                deliverable: { has_plan: true, front_view_url: "https://cdn.example/generated.jpg" },
+            },
+        ]);
+        const card = await screen.findByTestId("space-card-r1");
+        expect(card.tagName).toBe("A");
+        expect(card).toHaveAttribute("href", "/account/spaces/r1");
+        expect(card.querySelector("img")).toHaveAttribute("src", "https://cdn.example/own.jpg");
+    });
+
     it("shows unpaid, failed and expired checkouts with payment labels, not In progress", async () => {
         renderAccount([
             { id: "p1", space_type: "closet", status: "awaiting_payment", status_label: "Awaiting payment", package_id: "plus" },

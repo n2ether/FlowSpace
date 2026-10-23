@@ -1,3 +1,5 @@
+import BrandLockup from "./BrandLockup";
+
 export default function Footer() {
   return (
     <footer
@@ -6,15 +8,12 @@ export default function Footer() {
     >
       <div className="container-app py-12 grid grid-cols-1 md:grid-cols-3 gap-8">
         <div>
-          <img
-            src="https://customer-assets.emergentagent.com/job_organize-design/artifacts/rb6cf6gu_FlowSpace%20Logo.png"
-            alt="FlowSpace — Clear space. Create flow. Live better."
-            className="h-12 w-auto"
-            data-testid="footer-logo-image"
-          />
-          <p className="mt-3 text-sm text-slate-600 max-w-xs">
-            Personalized AI-powered organization systems for garages, closets,
-            laundry rooms, storage areas, and every space in between.
+          <span data-testid="footer-logo-image">
+            <BrandLockup size="lg" showTagline />
+          </span>
+          <p className="mt-4 text-sm text-slate-600 max-w-xs">
+            A personalized FlowSpace Design Plan for closets, garages, laundry
+            rooms, nurseries, living rooms, and every space in between.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-6 text-sm sm:grid-cols-3 md:col-span-2 md:justify-end">
@@ -128,8 +127,7 @@ export default function Footer() {
       <div className="border-t border-slate-200">
         <div className="container-app py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-500">
           <p data-testid="footer-copyright">
-            © {new Date().getFullYear()} FlowSpace.Solutions — Turn cluttered
-            into clean.
+            © {new Date().getFullYear()} FlowSpace.Solutions — Clear space. Create flow. Live better.
           </p>
           <div className="flex items-center gap-4">
             <p>Made with care for real homes.</p>

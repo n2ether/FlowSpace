@@ -1,10 +1,16 @@
 """My Spaces: customer-safe titles and statuses, and admin retry of a failed run."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
-from members import customer_status, public_space, space_title
+from members import (
+    DELAYED_NOTE,
+    GENERATION_ESTIMATE_MINUTES,
+    customer_status,
+    public_space,
+    space_title,
+)
 from tests.test_member_auth import FakeDB, _signup, client  # noqa: F401  (fixture)
 
 
@@ -207,3 +213,89 @@ class TestPaymentLabels:
             "paid": "In progress",
             "free": "In progress",
         }
+
+
+class TestDelayNotice:
+    NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+
+    def _space(self, minutes_ago, **over):
+        started = (self.NOW - timedelta(minutes=minutes_ago)).isoformat()
+        lead = {"id": "l1", "space_type": "bedroom", "status": "processing", "processing_started_at": started}
+        lead.update(over)
+        return public_space(lead, now=self.NOW)
+
+    def test_within_the_estimate_reads_in_progress(self):
+        space = self._space(GENERATION_ESTIMATE_MINUTES - 1)
+        assert space["status"] == "in_progress"
+        assert space["delayed"] is False
+        assert space["estimate_minutes"] == GENERATION_ESTIMATE_MINUTES
+        assert space["status_note"] == "We're preparing your Design Plan."
+
+    def test_past_the_estimate_says_so_and_promises_an_email(self):
+        space = self._space(GENERATION_ESTIMATE_MINUTES + 1)
+        assert space["status"] == "in_progress"
+        assert space["status_label"] == "In progress"
+        assert space["delayed"] is True
+        assert space["status_note"] == DELAYED_NOTE
+        assert "email you" in space["status_note"]
+
+    def test_legacy_lead_without_start_time_uses_created_at(self):
+        created = (self.NOW - timedelta(minutes=45)).isoformat()
+        space = self._space(0, processing_started_at=None, created_at=created)
+        assert space["delayed"] is True
+
+    @pytest.mark.parametrize("raw", ["review", "delivered", "incomplete"])
+    def test_finished_work_is_never_delayed(self, raw):
+        assert self._space(120, status=raw)["delayed"] is False
+
+    def test_unpaid_checkout_is_never_delayed(self):
+        out = public_space(
+            {"id": "l1", "status": "new", "package_id": "plus", "created_at": "2026-01-01T00:00:00+00:00"},
+            transaction={"payment_status": "initiated", "status": "open"},
+            now=self.NOW,
+        )
+        assert out["status"] == "awaiting_payment"
+        assert out["delayed"] is False
+
+    def test_my_spaces_reports_delay_and_server_time(self, client):  # noqa: F811
+        c, db = client
+        ada = _signup(c).json()
+        mid = ada["member"]["id"]
+        long_ago = (datetime.now(timezone.utc) - timedelta(minutes=GENERATION_ESTIMATE_MINUTES + 5)).isoformat()
+        just_now = datetime.now(timezone.utc).isoformat()
+        db.leads.docs.extend(
+            [
+                _space_lead("slow", mid, status="processing", package_id="free", processing_started_at=long_ago),
+                _space_lead("fresh", mid, status="processing", package_id="free", processing_started_at=just_now),
+            ]
+        )
+        r = c.get("/api/me/spaces", headers={"Authorization": f"Bearer {ada['token']}"})
+        body = r.json()
+        spaces = {s["id"]: s for s in body["spaces"]}
+        assert spaces["slow"]["delayed"] is True
+        assert spaces["slow"]["status_note"] == DELAYED_NOTE
+        assert spaces["fresh"]["delayed"] is False
+        assert body["server_time"]
+
+
+def test_claim_records_start_and_recovery_keeps_it(monkeypatch):
+    import asyncio
+
+    import server
+
+    fake = FakeDB()
+    fake.leads.docs.append(_space_lead("fresh", "m1", status="new", package_id="free"))
+    first = "2026-10-14T11:00:00+00:00"
+    fake.leads.docs.append(_space_lead("stuck", "m1", status="processing", processing_started_at=first))
+    monkeypatch.setattr(server, "db", fake)
+    monkeypatch.setattr(server, "_schedule_automation", lambda *_a, **_k: None)
+
+    async def run():
+        await server._start_automation_for_lead(dict(fake.leads.docs[0]), None)
+        await server._start_automation_for_lead(dict(fake.leads.docs[1]), None, force=True)
+
+    asyncio.run(run())
+    fresh, stuck = fake.leads.docs
+    assert fresh["status"] == "processing"
+    assert fresh["processing_started_at"]
+    assert stuck["processing_started_at"] == first
