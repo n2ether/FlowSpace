@@ -206,8 +206,14 @@ curl "$API/api/admin/leads/$LEAD_ID/deliverable/afters/refine" -H "X-Admin-Token
 
 ```bash
 # Brief notes reach the drafter, every image prompt, and every document. "open" = no budget cap.
+# "retained" pins a kept piece's structure; "avoid" lists what no view may show. Both are also parsed from the notes
+# ("Keep the TV console's original glass doors", "Remove any basket placed on Sam's bed").
 curl -X PUT "$API/api/admin/leads/$LEAD_ID/brief" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
-  -d '{"notes": "Add larger art on the wall linking dining and kitchen. Add a rug and a set table. Keep the existing art.", "budget": "open"}'
+  -d '{"notes": "Add larger art on the wall linking dining and kitchen. Add a rug and a set table. Keep the existing art.", "budget": "open",
+       "retained": [{"name": "TV console", "details": "two original glass doors"}], "avoid": ["basket on the shoe bench"]}'
+
+# Re-check the stored afters against the current room inventory and against each other (no generation, no email).
+curl -X POST "$API/api/admin/leads/$LEAD_ID/deliverable/verify" -H "X-Admin-Token: $ADMIN_PASSWORD"
 
 # Test / QA project only: allow up to 6 photos on this lead (stored uploads, in view order), then retry automation.
 curl -X PUT "$API/api/admin/leads/$LEAD_ID/photos" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
@@ -217,9 +223,18 @@ curl -X PUT "$API/api/admin/leads/$LEAD_ID/photos" -H "X-Admin-Token: $ADMIN_PAS
 curl "$API/api/admin/leads/$LEAD_ID/deliverable/consistency" -H "X-Admin-Token: $ADMIN_PASSWORD"
 ```
 
-- `send-final` refuses a package whose consistency check has `block` issues (a requested item missing, an added item no
-  view shows, a view showing an unplanned rug / art / basket, a changed fixed piece, a basket on a seat or bed, a product
-  without a tested direct link, non-English or time-bound copy). `?override_consistency=true` sends anyway and records it.
+- One room inventory (`room_inventory` on the deliverable: kept pieces with their structure, planned additions, never-show
+  rules, walls, budget) feeds every image prompt, every vision check, and the documents. Each view's check records the
+  inventory hash and the exact after URL it covered; the views are also compared with each other (`cross_view`), and a view
+  that drifts is re-edited once against the first after.
+- `send-final` recomputes the check and refuses a package with `block` issues: a requested item missing, a change the plan
+  describes that no view shows, a view showing an unplanned rug / art / basket or something the brief rules out, a kept
+  piece changed or missing, views that disagree, a view not verified (vision check skipped) or verified against an older
+  inventory or a different image, a budget that differs between surfaces, a product without a tested direct link,
+  non-English or time-bound copy. After a brief edit, run `verify` (or retry automation) before sending.
+- `?override_consistency=true&override_reason=<why>` (admin only) can send past the other blocks; it needs a written
+  reason, is logged, and is kept in `consistency_override_log`. Kept pieces changed or missing, views that disagree,
+  never-show rules broken, and baskets on seats or beds cannot be overridden.
 - Boards are available as PDF too: `.../deliverable/board?format=pdf` and `.../deliverable/zone-map?format=pdf`.
 - Files are named `FlowSpace_<Project>_Design_Plan.png/.pdf`, `_Room_Flow.png/.pdf`, `_Companion_Guide.pdf`, and
   `_View_01.jpg` …; a review copy adds `_DRAFT`. Every package carries exactly one Companion Guide.
