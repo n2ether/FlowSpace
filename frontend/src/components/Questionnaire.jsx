@@ -471,6 +471,7 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
                                     copy={q.orientation}
                                     onRotate={rotatePending}
                                     onConfirm={confirmPending}
+                                    busy={uploading}
                                 />
                             )}
                             {form.photos.length > 0 && (

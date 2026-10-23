@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { isHeifFile, isSupportedPhotoFile } from "./photoFiles";
 import { bakeRotation, inspectPhotoFile } from "./photoOrientation";
 
@@ -6,6 +6,8 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots, onReject }) {
     const [uploading, setUploading] = useState(false);
     const [pending, setPending] = useState(null);
     const [queue, setQueue] = useState([]);
+    // A second tap on "Ceiling is up" before the first upload returns would add the same photo twice.
+    const confirming = useRef(false);
 
     const uploadBaked = useCallback(
         async (file, quarterTurns) => {
@@ -77,7 +79,8 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots, onReject }) {
     }, [pending]);
 
     const confirmPending = useCallback(async () => {
-        if (!pending) return;
+        if (!pending || confirming.current) return;
+        confirming.current = true;
         setUploading(true);
         try {
             await uploadBaked(pending.inspection.file, pending.quarterTurns);
@@ -86,6 +89,7 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots, onReject }) {
             const rest = queue;
             setPending(null);
             setQueue([]);
+            confirming.current = false;
             await processQueue(rest);
         }
     }, [pending, queue, processQueue, uploadBaked]);
