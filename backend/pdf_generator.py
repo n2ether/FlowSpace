@@ -978,7 +978,9 @@ def _line_total(item: Dict[str, Any]) -> Tuple[float, float, float]:
 
 
 def _budget_range(lead: Dict[str, Any], deliverable: Dict[str, Any], layers: Dict[str, Any]) -> str:
-    key = str(lead.get("budget") or "").strip()
+    from package_items import effective_budget
+
+    key = effective_budget(lead)
     if key in BUDGET_LABELS:
         return BUDGET_LABELS[key]
     candidates = [
