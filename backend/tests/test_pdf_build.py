@@ -82,7 +82,7 @@ def _page_image_count(pdf_bytes: bytes, page: int = 0) -> int:
 
 def test_plan_titles_are_space_aware_not_bedroom_generic():
     assert plan_title("garage") == "Garage Organization Plan"
-    assert plan_title("closet") == "Closet Blueprint"
+    assert plan_title("closet") == "Closet Organization Plan"
     assert plan_title("laundry_room") == "Laundry Organization Plan"
     assert plan_title("pantry") == "Pantry Organization Plan"
     assert plan_title("mudroom") == "Mudroom Organization Plan"
@@ -160,7 +160,8 @@ def test_pdf_handles_empty_deliverable():
     pdf = build_pdf(lead={"name": "Sam", "space_type": "closet"}, deliverable={}, images={})
     text = _text(pdf)
     assert "Sam" in text
-    assert "Closet Blueprint" in text
+    assert "Closet Organization Plan" in text
+    assert "Blueprint" not in text
     assert "FlowSpace" in text
     assert "Windows and room proportions follow your photos" in text or "follow your photos" in text
     assert "organized view" in text.lower() or "shopping list" in text.lower()
