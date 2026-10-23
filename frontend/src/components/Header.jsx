@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import BrandLockup from "./BrandLockup";
 
 const navItems = [
   { label: "How it works", href: "/#how" },
@@ -24,13 +25,10 @@ export default function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-100 bg-white/85 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/90 backdrop-blur">
       <div className="container-app flex h-16 items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-2" data-testid="header-logo" onClick={close}>
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-white font-semibold">F</span>
-          <span className="font-display text-lg font-medium tracking-tight text-slate-900">
-            FlowSpace<span className="text-emerald-600">.</span>
-          </span>
+        <Link to="/" className="flex items-center" aria-label="FlowSpace home" data-testid="header-logo" onClick={close}>
+          <BrandLockup />
         </Link>
         <nav className="hidden items-center gap-7 md:flex">
           {navItems.map((item) => (
