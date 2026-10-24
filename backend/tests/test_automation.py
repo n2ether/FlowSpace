@@ -936,3 +936,52 @@ def test_rotation_confirm_that_cannot_run_keeps_the_current_reject(monkeypatch):
     assert len(calls) == 2
     assert len(asked) == 2
     assert captured["images"].get("after") is None
+
+
+def _reference_retry(monkeypatch, first_qa):
+    import asyncio
+
+    import automation
+    from render_qa import RenderQAResult
+
+    calls: list = []
+
+    async def fake_generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    answers = [first_qa, RenderQAResult(ok=True)]
+    monkeypatch.setattr(automation, "generate_front_view", fake_generate)
+    monkeypatch.setattr(automation, "review_organized_render", lambda **_k: answers.pop(0))
+    monkeypatch.setattr(automation, "review_same_shot", lambda **_k: (True, "same shot"))
+    monkeypatch.setattr(automation, "confirm_orientation_problem", lambda **_k: (None, "not needed"))
+    asyncio.run(
+        automation._generate_organized_with_qa(
+            lead=_lead(with_photo=True),
+            plan={},
+            fs_bucket=None,
+            original_bytes=_jpeg((110, 90, 60)),
+            view_reference=_jpeg((10, 200, 10)),
+        )
+    )
+    return calls
+
+
+def test_camera_retry_drops_the_reference_view(monkeypatch):
+    """Preview closet of 24 Oct 2026: with the approved view attached, both attempts copied its camera."""
+    from ai_image_generator import CONSISTENCY_REFERENCE_CONSTRAINT
+    from render_qa import RenderQAResult
+
+    calls = _reference_retry(monkeypatch, RenderQAResult(ok=False, camera_changed=True, reasons=["different shot"]))
+    assert len(calls) == 2
+    assert "consistency_reference" in calls[0]
+    assert "consistency_reference" not in calls[1]
+    assert CONSISTENCY_REFERENCE_CONSTRAINT not in calls[1]["extra_constraint"]
+
+
+def test_other_retries_keep_the_reference_view(monkeypatch):
+    from render_qa import RenderQAResult
+
+    calls = _reference_retry(monkeypatch, RenderQAResult(ok=False, walls_repainted=True, reasons=["walls repainted"]))
+    assert len(calls) == 2
+    assert "consistency_reference" in calls[1]

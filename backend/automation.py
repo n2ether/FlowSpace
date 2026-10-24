@@ -366,6 +366,12 @@ async def _generate_organized_with_qa(
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
     extra = f"{extra_constraint} {_qa_retry_extra(qa, paint_request)}".strip()
+    # The approved view rides along as a second image; when the last render copied
+    # that view's camera instead of editing this photo, retry from this photo alone.
+    retry_has_reference = has_reference and not qa.camera_changed
+    retry_reference_kw = reference_kw if retry_has_reference else {}
+    if has_reference and not retry_has_reference:
+        logger.info("[automation] Camera changed: retrying without the reference view")
     try:
         organized_bytes, image_mime = await generate_front_view(
             lead=lead,
@@ -373,8 +379,8 @@ async def _generate_organized_with_qa(
             fs_bucket=fs_bucket,
             reference_photo_bytes=retry_ref,
             stronger_rails=True,
-            extra_constraint=_with_view_reference(_same_camera_extra(extra), has_reference) if original_bytes else extra,
-            **reference_kw,
+            extra_constraint=_with_view_reference(_same_camera_extra(extra), retry_has_reference) if original_bytes else extra,
+            **retry_reference_kw,
         )
     except Exception as img_err:
         logger.warning("[automation] OpenAI image QA retry failed: %s", img_err)
