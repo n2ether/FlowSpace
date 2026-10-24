@@ -5,7 +5,9 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api, apiErrorMessage } from "../lib/api";
+import { resolvePlan } from "../lib/intake/model";
 import {
+    CHECKOUT_LEAD_KEY,
     PAYMENT_KEYS,
     STATUS_STYLES,
     displayStatus,
@@ -129,13 +131,66 @@ function StatusMessage({ status, space, email }) {
             </div>
         );
     }
+    return <PaymentMessage status={status} space={space} email={email} />;
+}
+
+// Reopens Stripe for this same project, so a retry never creates a second one.
+function PaymentMessage({ status, space, email }) {
+    const plan = resolvePlan(space.package_id);
+    const [starting, setStarting] = useState(false);
+    const [error, setError] = useState("");
+
+    const resume = async () => {
+        setStarting(true);
+        setError("");
+        try {
+            const { data } = await api.post("/checkout/session", {
+                package_id: plan.id,
+                origin_url: window.location.origin,
+                email: email || undefined,
+                metadata: { lead_id: space.id },
+            });
+            try {
+                sessionStorage.setItem(CHECKOUT_LEAD_KEY, space.id);
+            } catch {
+                /* the success page falls back to My spaces */
+            }
+            window.location.href = data.url;
+        } catch (err) {
+            setError(apiErrorMessage(err, "We couldn't reopen checkout. Please try again."));
+            setStarting(false);
+        }
+    };
+
     return (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5" role="status" data-testid="project-payment">
             <p className="font-semibold text-amber-900">{status.label}</p>
             <p className="mt-1 text-sm leading-relaxed text-amber-900">{status.note}</p>
-            <a href="/#packages" className="btn-primary mt-4" data-testid="project-choose-plan">
-                Choose a plan
-            </a>
+            {plan.price > 0 ? (
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <button
+                        type="button"
+                        onClick={resume}
+                        disabled={starting}
+                        className={`btn-primary ${starting ? "cursor-wait opacity-60" : ""}`}
+                        data-testid="project-resume-checkout"
+                    >
+                        {starting ? "Opening checkout…" : `Finish checkout — $${plan.price}`}
+                    </button>
+                    <a href="/#packages" className="text-sm font-semibold text-amber-900 underline" data-testid="project-choose-plan">
+                        Choose a different plan
+                    </a>
+                </div>
+            ) : (
+                <a href="/#packages" className="btn-primary mt-4" data-testid="project-choose-plan">
+                    Choose a plan
+                </a>
+            )}
+            {error ? (
+                <p className="mt-3 text-sm text-rose-700" role="alert" data-testid="project-resume-error">
+                    {error}
+                </p>
+            ) : null}
         </div>
     );
 }
