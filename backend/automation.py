@@ -46,15 +46,14 @@ from image_orientation import (
 from image_board import build_image_board
 from pdf_generator import build_pdf
 from package_items import (
-    FIXED_RETRY_CONSTRAINT,
     consistency_report,
-    customer_basket_request,
-    fixed_item_names,
-    planned_additions,
+    fixed_retry_constraint,
+    room_inventory,
+    view_check_inputs,
 )
 from pdf_images import assemble_pdf_images, choose_hero
 from photo_access import gridfs_key, store_photo
-from render_qa import RenderQAResult, review_organized_render
+from render_qa import RenderQAResult, review_cross_view, review_organized_render
 from render_recovery import heartbeat_loop, touch_render_heartbeat
 from source_photos import (
     classify_upload,
@@ -222,20 +221,30 @@ def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     if qa.walls_repainted and not paint_request:
         bits.append(WALL_RETRY_CONSTRAINT)
     if qa.fixed_items_changed:
-        bits.append(FIXED_RETRY_CONSTRAINT)
+        bits.append(fixed_retry_constraint(qa.fixed_items_altered or [], qa.fixed_items_missing or []))
     if qa.baskets_misplaced:
         bits.append(BASKET_RETRY_CONSTRAINT)
+    if qa.avoid_seen:
+        bits.append("FAILED QA: the view showed what the brief rules out: " + "; ".join(qa.avoid_seen) + ". Remove it.")
     bits.extend(qa.reasons[:3])
     return " ".join(bits)
 
 
+CROSS_VIEW_RETRY_CONSTRAINT = (
+    "FAILED CROSS-VIEW CHECK: this view shows a piece differently from the reference view of the same room. "
+    "Make each listed piece identical to the reference (structure, doors and glass, drawers, color, material, "
+    "size) while keeping this photo's own camera: "
+)
+
+
 def _qa_item_kwargs(lead: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
-    """The shared fixed-items and additions lists every view's QA checks against."""
-    return {
-        "fixed_items": fixed_item_names(lead, plan),
-        "additions": [item["name"] for item in planned_additions(lead, plan)],
-        "basket_exception": customer_basket_request(lead),
-    }
+    """The room inventory's fixed pieces, additions, and avoid rules that every view's QA checks."""
+    return view_check_inputs(room_inventory(lead, plan))
+
+
+def _stamp_qa(qa: Dict[str, Any], inventory_hash: str, after_url: Optional[str]) -> Dict[str, Any]:
+    """Record which inventory and which stored image this check covered."""
+    return {**qa, "inventory_hash": inventory_hash, "checked_after_url": after_url or ""}
 
 
 def _with_view_reference(extra: str, has_reference: bool) -> str:
@@ -259,11 +268,13 @@ async def _generate_organized_with_qa(
     fs_bucket,
     original_bytes: Optional[bytes],
     view_reference: Optional[bytes] = None,
+    extra_constraint: str = "",
 ) -> tuple[Optional[bytes], str, RenderQAResult]:
     """OpenAI image once, cheap vision QA, one retry with stronger rails, then give up.
 
     ``view_reference`` is an already approved after of the same room. It rides
     along as a second image so fixed furniture and planned items match it.
+    ``extra_constraint`` is added to both attempts (a cross-view repair note).
     """
     organized_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
@@ -272,6 +283,7 @@ async def _generate_organized_with_qa(
     item_qa = _qa_item_kwargs(lead, plan)
     has_reference = bool(view_reference and original_bytes)
     reference_kw = {"consistency_reference": view_reference} if has_reference else {}
+    first_extra = f"{_same_camera_extra('')} {extra_constraint}".strip() if original_bytes else extra_constraint
 
     try:
         organized_bytes, image_mime = await generate_front_view(
@@ -279,7 +291,7 @@ async def _generate_organized_with_qa(
             deliverable=plan,
             fs_bucket=fs_bucket,
             reference_photo_bytes=original_bytes,
-            extra_constraint=_with_view_reference(_same_camera_extra(""), has_reference) if original_bytes else "",
+            extra_constraint=_with_view_reference(first_extra, has_reference) if original_bytes else first_extra,
             **reference_kw,
         )
         logger.info(
@@ -313,7 +325,7 @@ async def _generate_organized_with_qa(
         qa.reasons,
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
-    extra = _qa_retry_extra(qa, paint_request)
+    extra = f"{extra_constraint} {_qa_retry_extra(qa, paint_request)}".strip()
     try:
         organized_bytes, image_mime = await generate_front_view(
             lead=lead,
@@ -359,6 +371,96 @@ async def _generate_organized_with_qa(
     return organized_bytes, image_mime, qa2
 
 
+async def _cross_view_round(inventory: Dict[str, Any], approved: List[Dict[str, Any]]):
+    inputs = view_check_inputs(inventory)
+    return await asyncio.to_thread(
+        review_cross_view,
+        views=[(item["after_label"], item["after_bytes"]) for item in approved],
+        fixed_items=inputs["fixed_items"],
+        additions=inputs["additions"],
+    )
+
+
+async def _cross_view_check(
+    *,
+    lead: Dict[str, Any],
+    plan: Dict[str, Any],
+    inventory: Dict[str, Any],
+    outcomes: List[Dict[str, Any]],
+    fs_bucket,
+    lead_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Compare every approved after for the shared pieces; re-edit mismatched views once.
+
+    The first approved after is the reference. A view that shows a piece
+    differently is re-edited from its own source photo with the reference
+    attached and the mismatch named. Its replacement must pass the per-view
+    check; otherwise the earlier after stays and the mismatch is recorded, so
+    the consistency report blocks the final send. ``None`` for fewer than two views.
+    """
+    approved = [item for item in outcomes if item.get("after_bytes")]
+    if len(approved) < 2:
+        return None
+    result = await _cross_view_round(inventory, approved)
+    repaired: List[str] = []
+    if result.mismatches and not result.skipped:
+        reference = approved[0]
+        for item in approved[1:]:
+            notes = [
+                f"{row['name']}" + (f" ({row['difference']})" if row.get("difference") else "")
+                for row in result.mismatches
+                if item["after_label"] in row.get("views", [])
+            ]
+            if not notes:
+                continue
+            after_bytes, mime, qa = await _generate_organized_with_qa(
+                lead=lead,
+                plan=plan,
+                fs_bucket=fs_bucket,
+                original_bytes=item.get("before_bytes"),
+                view_reference=reference["after_bytes"],
+                extra_constraint=CROSS_VIEW_RETRY_CONSTRAINT + "; ".join(notes) + ".",
+            )
+            if not after_bytes:
+                logger.warning("[automation] %s cross-view repair did not pass QA; keeping the earlier after", item["after_label"])
+                continue
+            ext = "jpg" if "jpeg" in (mime or "") else "png"
+            url = await _store_bytes(
+                fs_bucket,
+                filename=f"ai_{item['label'].lower()}_xview_{lead_id}.{ext}",
+                data=after_bytes,
+                mime=mime or "image/jpeg",
+                lead_id=lead_id,
+                slot=item["label"].lower(),
+                source_photo_id=item.get("source_photo_id") or "",
+            )
+            if not url:
+                continue
+            item.update(
+                {
+                    "after_bytes": after_bytes,
+                    "after_url": url,
+                    "qa": _stamp_qa(qa.as_dict(), inventory["hash"], url),
+                }
+            )
+            repaired.append(item["after_label"])
+        if repaired:
+            result = await _cross_view_round(inventory, approved)
+    logger.info(
+        "[automation] Cross-view check: ok=%s skipped=%s mismatches=%s repaired=%s",
+        result.ok,
+        result.skipped,
+        [row["name"] for row in result.mismatches],
+        repaired,
+    )
+    return {
+        **result.as_dict(),
+        "inventory_hash": inventory["hash"],
+        "after_urls": [item.get("after_url") or "" for item in approved],
+        "repaired": repaired,
+    }
+
+
 async def _clear_stale_render_slots(db, lead_id: str) -> None:
     """Drop previous afters and extra views so this run cannot mix them in."""
     await db.deliverables.update_one(
@@ -371,6 +473,7 @@ async def _clear_stale_render_slots(db, lead_id: str) -> None:
                 "view_3_url": None,
                 "front_view_kind": None,
                 "source_afters": [],
+                "cross_view": None,
                 "non_room_uploads": [],
                 "contact_sheet_url": None,
                 "package_status": None,
@@ -560,6 +663,8 @@ async def _run_automation(
         plan["lead_id"] = lead_id
         if lead.get("fact_sheet"):
             plan["fact_sheet"] = lead["fact_sheet"]
+        inventory = room_inventory(lead, plan)
+        plan["room_inventory"] = inventory
         plan["updated_at"] = _iso(datetime.now(timezone.utc))
         stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0, "package_version": 1})
         if not (stored or {}).get("package_version"):
@@ -643,7 +748,7 @@ async def _run_automation(
                         "after_label": after_label,
                         "after_url": after_url,
                         "status": "approved" if approved else "failed",
-                        "qa": qa.as_dict(),
+                        "qa": _stamp_qa(qa.as_dict(), inventory["hash"], after_url),
                         "after_bytes": after_bytes if approved else None,
                         "before_bytes": src.get("bytes"),
                     }
@@ -655,6 +760,16 @@ async def _run_automation(
                     "approved" if approved else "failed",
                     src.get("photo_id"),
                 )
+
+            cross_view = await _cross_view_check(
+                lead=lead,
+                plan=plan,
+                inventory=inventory,
+                outcomes=outcomes,
+                fs_bucket=fs_bucket,
+                lead_id=lead_id,
+            )
+            await touch_render_heartbeat(db, lead_id)
 
             failed = [item for item in outcomes if item["status"] != "approved"]
             render_qa_source = failed[0] if failed else outcomes[-1]
@@ -746,6 +861,8 @@ async def _run_automation(
                     "$set": {
                         "render_qa": summary_qa,
                         "source_afters": [_public_source_after(item) for item in outcomes],
+                        "cross_view": cross_view,
+                        "room_inventory": inventory,
                         "required_source_ids": [
                             str(photo.get("photo_id") or "")
                             for photo in room

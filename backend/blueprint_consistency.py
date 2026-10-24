@@ -69,8 +69,9 @@ def shopping_total(deliverable: Dict[str, Any] | None) -> float:
 
 
 def stated_budget_label(lead: Dict[str, Any] | None) -> str:
-    raw = str((lead or {}).get("budget") or "").strip()
-    return BUDGET_LABELS.get(raw, "")
+    from package_items import effective_budget
+
+    return BUDGET_LABELS.get(effective_budget(lead), "")
 
 
 def _parse_amounts(text: str) -> Tuple[List[Tuple[float, float]], List[float]]:
