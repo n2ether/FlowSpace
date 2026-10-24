@@ -818,3 +818,26 @@ def test_pipeline_exception_holds_lead_for_review_not_error(monkeypatch, caplog)
     assert doc["automation_error"] == "anthropic 529 overloaded"
     assert doc["automation_failed_at"]
     assert any("Pipeline failed" in r.getMessage() for r in caplog.records)
+
+
+def test_changed_camera_is_retried_with_a_camera_note_then_discarded(monkeypatch):
+    from automation import CAMERA_RETRY_CONSTRAINT
+    from render_qa import RenderQAResult
+
+    original = _jpeg((110, 90, 60))
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10)), "image/jpeg"
+
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **_k: RenderQAResult(ok=False, camera_changed=True, reasons=["close-up became a wide room view"]),
+    )
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    assert len(calls) == 2
+    assert CAMERA_RETRY_CONSTRAINT in calls[1]["extra_constraint"]
+    assert captured["images"].get("after") is None
+    assert captured["images"]["front_view_kind"] != "organized"
