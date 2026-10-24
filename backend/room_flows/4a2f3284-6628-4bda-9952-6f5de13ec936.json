@@ -1,0 +1,253 @@
+{
+  "outline_source": "approximate",
+  "source_views": 3,
+  "subtitle": "A calmer flow through the living, dining, and entry areas.",
+  "view_names": [
+    "Whole area",
+    "TV and dining",
+    "Couch and front door"
+  ],
+  "view_chips": [
+    "Whole area",
+    "TV + dining",
+    "Couch + door"
+  ],
+  "outline": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      1.4,
+      0.0
+    ],
+    [
+      1.4,
+      1.1
+    ],
+    [
+      0.0,
+      1.1
+    ]
+  ],
+  "walls": [
+    {
+      "label": "WINDOW + FRONT DOOR WALL"
+    },
+    {
+      "label": "MIRROR WALL"
+    },
+    {
+      "label": "KITCHEN + HALL SIDE"
+    },
+    {
+      "label": "TV WALL"
+    }
+  ],
+  "window": {
+    "wall": 0,
+    "from_m": 0.36,
+    "to_m": 0.78
+  },
+  "door": {
+    "wall": 0,
+    "from_m": 0.98,
+    "to_m": 1.18
+  },
+  "zones": [
+    {
+      "id": "living",
+      "style": "sleep",
+      "number": "01",
+      "title": "Living",
+      "job": "Sectional and TV console, with hidden storage for shoes.",
+      "map_label": "LIVING",
+      "rect": [
+        0.16,
+        0.27,
+        0.9,
+        0.76
+      ]
+    },
+    {
+      "id": "dining",
+      "style": "change",
+      "number": "02",
+      "title": "Dining",
+      "job": "Folding table: two seats daily, four when it opens.",
+      "map_label": "DINING",
+      "rect": [
+        0.05,
+        0.78,
+        0.8,
+        1.08
+      ]
+    },
+    {
+      "id": "entry",
+      "style": "comfort",
+      "number": "03",
+      "title": "Entry Path",
+      "job": "Front door to couch and dining, kept clear.",
+      "map_label": "ENTRY PATH",
+      "rect": [
+        0.95,
+        0.05,
+        1.36,
+        0.72
+      ]
+    },
+    {
+      "id": "play",
+      "style": "play",
+      "number": "04",
+      "title": "Play",
+      "job": "The playpen stays by the window, near the TV console.",
+      "map_label": "PLAY",
+      "rect": [
+        0.16,
+        0.03,
+        0.5,
+        0.28
+      ]
+    }
+  ],
+  "furniture": [
+    {
+      "id": "tv",
+      "kind": "block",
+      "label": "TV CONSOLE",
+      "zone": "living",
+      "rect": [
+        0.03,
+        0.3,
+        0.12,
+        0.7
+      ],
+      "label_at": [
+        0.22,
+        0.66
+      ]
+    },
+    {
+      "id": "sofa",
+      "kind": "sofa",
+      "label": "SECTIONAL + CHAISE",
+      "zone": "living",
+      "rect": [
+        0.66,
+        0.3,
+        0.84,
+        0.7
+      ],
+      "label_at": [
+        0.75,
+        0.46
+      ],
+      "chaise": [
+        0.54,
+        0.58,
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "coffee",
+      "kind": "block",
+      "label": "COFFEE TABLE",
+      "zone": "living",
+      "rect": [
+        0.36,
+        0.42,
+        0.52,
+        0.54
+      ]
+    },
+    {
+      "id": "playpen",
+      "kind": "block",
+      "label": "PLAYPEN",
+      "zone": "play",
+      "rect": [
+        0.25,
+        0.05,
+        0.41,
+        0.13
+      ]
+    },
+    {
+      "id": "dining",
+      "kind": "table",
+      "label": "DINING TABLE",
+      "zone": "dining",
+      "rect": [
+        0.18,
+        0.87,
+        0.32,
+        0.97
+      ],
+      "seats": 2,
+      "extended": {
+        "rect": [
+          0.08,
+          0.87,
+          0.42,
+          0.97
+        ],
+        "seats": 4
+      },
+      "label_at": [
+        0.61,
+        0.88
+      ]
+    },
+    {
+      "id": "bench",
+      "kind": "block",
+      "label": "BENCH + MIRROR",
+      "zone": "entry",
+      "rect": [
+        1.29,
+        0.1,
+        1.37,
+        0.4
+      ],
+      "label_at": [
+        1.21,
+        0.47
+      ]
+    }
+  ],
+  "path": [
+    [
+      1.08,
+      0.04
+    ],
+    [
+      1.0,
+      0.4
+    ],
+    [
+      0.9,
+      0.73
+    ],
+    [
+      0.6,
+      0.8
+    ],
+    [
+      0.47,
+      0.84
+    ]
+  ],
+  "path_label_at": [
+    1.2,
+    0.64
+  ],
+  "flow_principle": [
+    "Less visual noise.",
+    "Fewer decisions.",
+    "Easier resets."
+  ],
+  "flow_note": "A clear route from the front door past the couch keeps the living and dining areas connected for everyday routines."
+}

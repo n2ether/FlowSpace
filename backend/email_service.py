@@ -33,25 +33,35 @@ from design_plan_standards import (
     TAGLINE,
 )
 from image_orientation import upright_jpeg_bytes
+from package_files import assert_single_companion, package_file_set, package_filename, project_stem
 from pdf_generator import plan_title, space_label
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_FROM = "FlowSpace <blueprints@flowspace.solutions>"
 DEFAULT_ADMIN = "hello@flowspace.solutions"
+DEFAULT_REPLY_TO = "help@flowspace.solutions"
 
 
 def _from_email() -> str:
     return (os.environ.get("RESEND_FROM_EMAIL") or DEFAULT_FROM).strip() or DEFAULT_FROM
 
 
+def reply_to_email() -> str:
+    """Where customer replies land; the From mailbox is send-only."""
+    return (os.environ.get("EMAIL_REPLY_TO") or DEFAULT_REPLY_TO).strip() or DEFAULT_REPLY_TO
+
+
 def _admin_email() -> str:
     return (os.environ.get("ADMIN_EMAIL") or DEFAULT_ADMIN).strip() or DEFAULT_ADMIN
 
 
+def public_app_url() -> str:
+    return (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").strip().rstrip("/")
+
+
 def _preview_url(lead_id: str) -> str:
-    base = (os.environ.get("PUBLIC_APP_URL") or "https://flowspace.solutions").rstrip("/")
-    return f"{base}/admin/leads/{lead_id}/blueprint"
+    return f"{public_app_url()}/admin/leads/{lead_id}/blueprint"
 
 
 def _first_name(customer_name: str) -> str:
@@ -208,21 +218,14 @@ VIEW_JPEG_STEPS: Tuple[Tuple[Optional[int], int], ...] = (
 
 
 def attachment_slug(title: str) -> str:
-    """``Nicholas's Nursery`` -> ``Nicholas-Nursery``. Never a lead id or a pipeline code."""
-    text = re.sub(r"['’]s\b", "", title or "")
-    words = re.findall(r"[A-Za-z0-9]+", text)
-    return "-".join(words) or "Design-Plan"
+    """``Nicholas's Nursery`` -> ``Nicholas_Nursery``. Never a lead id or a pipeline code."""
+    return project_stem(title)
 
 
-def display_filename(title: str, kind: str) -> str:
-    """``Nicholas's Nursery`` + ``Design Plan`` -> ``Nicholas's Nursery — Design Plan.png``.
-
-    Apostrophes and the em dash stay (Resend encodes non-ASCII filenames);
-    only characters no filesystem accepts are removed.
-    """
-    text = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", title or "")
-    text = re.sub(r"\s+", " ", text).strip() or "FlowSpace"
-    return f"{text} — {kind}.png"
+def display_filename(title: str, kind: str, ext: str = "png", *, draft: bool = False) -> str:
+    """``Living Room`` + ``Design Plan`` -> ``FlowSpace_Living_Room_Design_Plan.png``."""
+    piece = {"Design Plan": "design_plan", "Room Flow": "room_flow", "Companion Guide": "companion_guide"}.get(kind, kind)
+    return package_filename(title, piece, ext, draft=draft)
 
 
 def _attachment(filename: str, data: bytes, content_type: str, content_id: str = "") -> dict:
@@ -236,9 +239,9 @@ def _attachment(filename: str, data: bytes, content_type: str, content_id: str =
     return att
 
 
-def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[Tuple[str, bytes]]:
-    out: List[Tuple[str, bytes]] = []
-    for index, visual in enumerate(visuals or []):
+def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[bytes]:
+    out: List[bytes] = []
+    for visual in visuals or []:
         if not isinstance(visual, dict):
             continue
         raw = visual.get("bytes") or visual.get("png") or visual.get("content")
@@ -249,8 +252,7 @@ def _view_sources(visuals: Optional[List[Dict[str, Any]]]) -> List[Tuple[str, by
                 continue
         if not isinstance(raw, (bytes, bytearray)) or not raw:
             continue
-        label = "-".join(re.findall(r"[A-Za-z0-9]+", str(visual.get("label") or ""))) or f"View-{index + 1}"
-        out.append((label, bytes(raw)))
+        out.append(bytes(raw))
     return out
 
 
@@ -270,32 +272,35 @@ def package_attachments(
     draft: bool = False,
     budget: Optional[int] = None,
 ) -> List[dict]:
-    """Board and zone map (PNG, full size), view photos (JPEG), then the companion PDF.
+    """Design Plan and Room Flow (PNG and PDF), view photos (JPEG), then exactly one Companion Guide.
 
-    The board and zone map go out twice: once inline (``content_id``) so the
-    body shows them, and once as a plain attachment so mobile Gmail and Apple
-    Mail list a downloadable tile. Mail clients do not list inline parts.
+    The board and Room Flow PNGs go out twice: once inline (``content_id``) so
+    the body shows them, and once as a plain attachment so mobile Gmail and
+    Apple Mail list a downloadable tile. Mail clients do not list inline parts.
+    Names come from ``package_files``.
 
     View photos are the only part that bends to the size budget: quality and
     long edge step down, and as a last resort they are left out (they are
     still in the email body and the PDF). Size never fails a send.
     """
     budget = EMAIL_SIZE_BUDGET if budget is None else budget
-    slug = attachment_slug(title)
-    suffix = "-DRAFT" if draft else ""
-    inline: List[dict] = []
-    files: List[dict] = []
-    if board_bytes:
-        pngs = [(DESIGN_PLAN_NAME, board_bytes, "blueprint-preview")]
-        if zone_map_bytes:
-            pngs.append(("Room Flow", zone_map_bytes, "room-flow"))
-        for kind, data, cid in pngs:
-            name = display_filename(title, kind)
-            inline.append(_attachment(name, data, "image/png", cid))
-            files.append(_attachment(name, data, "image/png"))
+    rows = package_file_set(
+        title=title,
+        board_png=board_bytes,
+        zone_map_png=zone_map_bytes if board_bytes else None,
+        companion_pdf=pdf_bytes,
+        draft=draft,
+    )
+    cids = {"design_plan": "blueprint-preview", "room_flow": "room-flow"}
+    inline = [
+        _attachment(row["filename"], row["data"], row["content_type"], cids[row["piece"]])
+        for row in rows
+        if row["content_type"] == "image/png"
+    ]
+    files = [_attachment(row["filename"], row["data"], row["content_type"]) for row in rows if row["piece"] != "companion_guide"]
+    pdf = next(_attachment(row["filename"], row["data"], row["content_type"]) for row in rows if row["piece"] == "companion_guide")
     head = inline + files
-    pdf = _attachment(f"{slug}-Companion{suffix}.pdf", pdf_bytes, "application/pdf")
-    base = head + [pdf]
+    base = assert_single_companion(head + [pdf])
     sources = _view_sources(extra_visuals)
     if not sources:
         return base
@@ -303,10 +308,10 @@ def package_attachments(
     size = encoded_message_size(html, base)
     for step, (max_edge, quality) in enumerate(VIEW_JPEG_STEPS):
         views = []
-        for label, raw in sources:
+        for index, raw in enumerate(sources, start=1):
             jpeg = upright_jpeg_bytes(raw, quality=quality, max_edge=max_edge)
             if jpeg:
-                views.append(_attachment(f"{label}.jpg", jpeg, "image/jpeg"))
+                views.append(_attachment(package_filename(title, "view", "jpg", index=index, draft=draft), jpeg, "image/jpeg"))
         attachments = head + views + [pdf]
         size = encoded_message_size(html, attachments)
         if size <= budget:
@@ -317,13 +322,13 @@ def package_attachments(
                     quality,
                     size / 1e6,
                 )
-            return attachments
+            return assert_single_companion(attachments)
 
     size = encoded_message_size(html, base)
     logger.warning(
         "Email size budget: dropped %d view photo attachments (%s); they stay in the body and the PDF (%.1f MB encoded)",
         len(sources),
-        ", ".join(f"{label}.jpg" for label, _raw in sources),
+        ", ".join(package_filename(title, "view", "jpg", index=i, draft=draft) for i in range(1, len(sources) + 1)),
         size / 1e6,
     )
     if size > budget:
@@ -484,6 +489,7 @@ async def send_blueprint(
             {
                 "from": sender,
                 "to": [customer_email.strip()],
+                "reply_to": reply_to_email(),
                 "subject": subject,
                 "html": html,
                 "attachments": attachments,
@@ -683,3 +689,55 @@ async def send_draft_package(
         logger.exception("Draft package email failed: %s", exc)
         return False, f"Resend draft package send failed: {exc}"
 
+
+
+def password_reset_html(reset_link: str, ttl_minutes: int) -> str:
+    link = html.escape(reset_link, quote=True)
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:24px;background:{BRAND_OFF};font-family:{FONT_STACK};color:#1f2937;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px;">
+    <p style="{_LABEL}">FlowSpace</p>
+    <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;color:#1f2937;">Reset your password</h1>
+    <p style="{_BODY}">We received a request to reset the password for your FlowSpace account.
+    Use the button below to choose a new one. The link works once and expires in {ttl_minutes} minutes.</p>
+    <p style="margin:24px 0;">
+      <a href="{link}" style="display:inline-block;background:{_GREEN};color:#ffffff;text-decoration:none;
+      padding:12px 24px;border-radius:999px;font-weight:600;">Choose a new password</a>
+    </p>
+    <p style="{_BODY}">If you didn't ask for this, you can ignore this email. Your password stays the same.</p>
+    <p style="margin:0;font-size:13px;color:{_MUTED};">Questions? Write to help@flowspace.solutions.</p>
+  </div>
+</body>
+</html>
+"""
+
+
+async def send_password_reset(*, to_email: str, reset_link: str, ttl_minutes: int) -> Tuple[bool, Optional[str]]:
+    """Email a password reset link. Never logs the link: it carries the token."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        logger.error("RESEND_API_KEY not configured — skipping password reset email")
+        return False, "RESEND_API_KEY is not configured on this server"
+    recipient = (to_email or "").strip()
+    if not recipient:
+        return False, "Reset recipient is missing"
+
+    resend.api_key = api_key
+    try:
+        await asyncio.to_thread(
+            resend.Emails.send,
+            {
+                "from": _from_email(),
+                "to": [recipient],
+                "reply_to": reply_to_email(),
+                "subject": "Reset your FlowSpace password",
+                "html": password_reset_html(reset_link, ttl_minutes),
+            },
+        )
+        logger.info("Password reset email sent")
+        return True, None
+    except Exception as exc:
+        logger.error("Password reset email failed (%s)", type(exc).__name__)
+        return False, "Resend password reset send failed"

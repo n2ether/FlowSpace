@@ -6,6 +6,7 @@ that maps directly to the Deliverable model.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,8 @@ from blueprint_layers import DRAFTER_SCHEMA_SNIPPET, derive_layers, merge_layers
 from design_plan_standards import DRAFTER_DESIGN_PLAN_RULES
 from evergreen_copy import DRAFTER_EVERGREEN_RULE
 from image_orientation import jpeg_for_vision, upright_bytes
+from intake import fact_sheet_prompt
+from package_items import BASKET_DRAFT_RULE, brief_prompt_lines, effective_budget
 from space_rails import NURSERY_DRAFT_RULES, nursery_draft_addon
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,10 @@ MODEL_NAME = "claude-sonnet-4-5"
 # a cut-off reply.
 DRAFT_MAX_TOKENS = 8192
 _DRAFT_ATTEMPTS = 2
+# Per-request timeout (seconds) so a stalled Anthropic call cannot hang a render.
+DRAFT_TIMEOUT_SECONDS = 120.0
+# Every room photo the intake (or an admin photo override) allows.
+MAX_DRAFT_PHOTOS = 6
 _RETRY_HINT = (
     "\n\nYour previous reply was truncated or was not valid JSON. "
     "Return ONE compact JSON object and nothing else — no markdown fences, no commentary. "
@@ -71,14 +78,16 @@ no code fences) — keep every list short and concrete (max ~5 items each):
   "wall_color_code": string,
   "wall_color_hex": string,
   "wall_color_note": string,
-  "shopping_list": [{"name": string, "qty": number, "price": number}],
+  "shopping_list": [{"name": string, "qty": number, "price": number, "priority": "functional" | "decorative"}],
   "budget_note": string,
   "strategy": [string],
   "action_plan": [string],
   "benefits": [string],
   "notes": string,
   "summary": string,
-  "attachment_note": string,""" + DRAFTER_SCHEMA_SNIPPET + """
+  "attachment_note": string,
+  "fixed_items": [{"name": string, "details": string}],
+  "additions": [{"name": string, "placement": string}],""" + DRAFTER_SCHEMA_SNIPPET + """
 }
 
 Style: calm, friendly, second-person, concise. Prices in USD at typical mid-range retail levels; name products generically, not by brand or retailer.
@@ -103,7 +112,12 @@ Brain-layer rules:
 - Validation: REAL checks — fit, flow, budget_band (vs stated budget), possession_respect, plus conflicts and assumptions. status is pass, watch, or fail. Do not invent scores or room measurements.
 - Customer instruction: start_here + do_this_week the customer can do without construction.
 - One kit total only. The budget figure you write must equal the sum of qty × price. Do not state a lower range than that sum.
-""" + DRAFTER_EVERGREEN_RULE + DRAFTER_DESIGN_PLAN_RULES + NURSERY_DRAFT_RULES
+
+Shared item list (every after image and every document is built from these two lists):
+- fixed_items: every existing furniture piece and built-in that stays, seen in ANY attached photo, with its exact structure in details — doors (glass or solid, open or closed), drawers (count), shelves, open cubbies, finish, and color. Example: {"name": "TV console", "details": "low wood console with two glass doors, closed cabinets, no open cubbies"}. Describe each piece once, the same way for every view. Never describe a door as a cubby or basket.
+- additions: every NEW visible item the after images should show, with where it goes. Every brief request appears here and in shopping_list. Every shopping_list item that is visible in the room appears here. Nothing else is added.
+- A piece the customer says to keep ("keep the existing art") stays in fixed_items; never replace, remove, or restyle it. A request to add something larger or new does not remove what they keep.
+""" + BASKET_DRAFT_RULE + DRAFTER_EVERGREEN_RULE + DRAFTER_DESIGN_PLAN_RULES + NURSERY_DRAFT_RULES
 
 BOTHERS = {
     "clutter": "Too much clutter", "no_storage": "Not enough storage",
@@ -134,8 +148,11 @@ COLORS = {
     "wood": "Wood tones", "black": "Black accents",
 }
 BUDGET = {
+    "use_owned": "Use what I own (no purchases)",
     "under_100": "Under $100", "100_300": "$100 – 300",
     "300_700": "$300 – 700", "700_plus": "$700+",
+    "not_sure": "Not sure yet (reorganize first; purchases optional)",
+    "open": "Open budget (no cap)",
 }
 DIY = {
     "very": "Very DIY-friendly", "simple": "Simple assembly only",
@@ -230,12 +247,17 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
             "Wall paint: KEEP EXISTING / no paint change. Customer did not ask to paint. "
             "Do not invent an optional accent wall color."
         )
-    if lead.get("budget"):
-        parts.append("Budget: " + BUDGET.get(lead["budget"], lead["budget"]))
+    budget = effective_budget(lead)
+    if budget:
+        parts.append("Budget: " + BUDGET.get(budget, budget))
     if lead.get("diy_level"):
         parts.append("DIY: " + DIY.get(lead["diy_level"], lead["diy_level"]))
     if lead.get("daily_improvement"):
         parts.append(f"Daily improvement goal: {lead['daily_improvement']}")
+    facts = fact_sheet_prompt(lead.get("fact_sheet"))
+    if facts:
+        parts.append(facts)
+    parts.extend(brief_prompt_lines(lead))
     return "\n".join(parts) or f"Space: {space}"
 
 
@@ -545,20 +567,31 @@ def _message_text(message: Any) -> str:
     return "".join(parts)
 
 
-def _user_content(user_text: str, photo_b64: Optional[str]) -> Any:
-    if not photo_b64:
+def _user_content(user_text: str, photo_b64: Any) -> Any:
+    """One text block after every photo. ``photo_b64`` is one base64 JPEG or a list of them."""
+    photos = [photo_b64] if isinstance(photo_b64, str) else [p for p in (photo_b64 or []) if p]
+    if not photos:
         return user_text
-    return [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": photo_b64,
-            },
-        },
-        {"type": "text", "text": user_text},
-    ]
+    blocks: List[Dict[str, Any]] = []
+    for index, data in enumerate(photos, start=1):
+        if len(photos) > 1:
+            blocks.append({"type": "text", "text": f"Photo {index} of {len(photos)}."})
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}})
+    blocks.append({"type": "text", "text": user_text})
+    return blocks
+
+
+def _named_rows(rows: Any, detail_key: str) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            name = " ".join(str(row.get("name") or "").split())
+            detail = " ".join(str(row.get(detail_key) or "").split())
+        else:
+            name, detail = " ".join(str(row or "").split()), ""
+        if name:
+            out.append({"name": name, detail_key: detail})
+    return out
 
 
 def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -590,7 +623,11 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
             qty, price = 1.0, 0.0
         name = as_str(it.get("name"))
         if name:
-            shopping_list.append({"name": name, "qty": qty, "price": price})
+            row = {"name": name, "qty": qty, "price": price}
+            priority = as_str(it.get("priority")).lower()
+            if priority in {"functional", "decorative"}:
+                row["priority"] = priority
+            shopping_list.append(row)
 
     hex_color = as_str(plan.get("wall_color_hex"))
     if hex_color and not hex_color.startswith("#"):
@@ -627,6 +664,8 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
         ),
         "summary": as_str(plan.get("summary")),
         "attachment_note": as_str(plan.get("attachment_note")),
+        "fixed_items": _named_rows(plan.get("fixed_items"), "details"),
+        "additions": _named_rows(plan.get("additions"), "placement"),
         "blueprint_layers": {},
     }
     coerced["blueprint_layers"] = merge_layers(
@@ -636,21 +675,30 @@ def _coerce(plan: Dict[str, Any], lead: Optional[Dict[str, Any]] = None) -> Dict
     return prepare_deliverable(lead or {}, coerced)
 
 
+def _photo_to_vision_b64(photo: bytes) -> str:
+    import base64
+
+    vision_jpeg = jpeg_for_vision(photo, max_side=1280)
+    return base64.b64encode(vision_jpeg).decode("ascii")
+
+
 async def draft_deliverable(
     lead: Dict[str, Any],
     *,
     reference_photo_bytes: Optional[bytes] = None,
+    extra_photo_bytes: Optional[List[bytes]] = None,
 ) -> Dict[str, Any]:
     """Call Claude and return a normalized deliverable dict.
 
-    When a gravity-corrected customer photo is available, attach it so
-    observation / spatial layers can name real windows and fixtures.
+    When gravity-corrected customer photos are available, attach them all so
+    observation / spatial layers can name real windows and fixtures, and so
+    ``fixed_items`` is derived once from every view of the room.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not configured")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.AsyncAnthropic(api_key=api_key, timeout=DRAFT_TIMEOUT_SECONDS)
     user_text = (
         "Customer questionnaire answers:\n\n"
         + _summarize_lead(lead)
@@ -664,13 +712,22 @@ async def draft_deliverable(
     if nursery_addon:
         user_text += "\n\n" + nursery_addon
 
-    photo_b64: Optional[str] = None
-    photo = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
-    if photo:
-        import base64
-
-        vision_jpeg = jpeg_for_vision(photo, max_side=1280)
-        photo_b64 = base64.b64encode(vision_jpeg).decode("ascii")
+    photo_b64: List[str] = []
+    for raw in [reference_photo_bytes, *(extra_photo_bytes or [])][:MAX_DRAFT_PHOTOS]:
+        if not raw:
+            continue
+        photo = await asyncio.to_thread(upright_bytes, raw)
+        if photo:
+            photo_b64.append(await asyncio.to_thread(_photo_to_vision_b64, photo))
+    if len(photo_b64) > 1:
+        user_text = (
+            f"{len(photo_b64)} gravity-corrected photos of the same space are attached, one per view. "
+            "Floor is at the bottom; ceiling is at the top. Use them for observation, spatial_constraint, "
+            "and fixed_items — describe each fixed piece once, the way it looks in every photo. "
+            "Do not invent openings the photos do not show.\n\n"
+            + user_text
+        )
+    elif photo_b64:
         user_text = (
             "A gravity-corrected photo of the customer's space is attached. "
             "Floor is at the bottom; ceiling is at the top. Use it for observation "
@@ -681,7 +738,7 @@ async def draft_deliverable(
     last_error: Optional[DraftJSONError] = None
     for attempt in range(1, _DRAFT_ATTEMPTS + 1):
         prompt = user_text if attempt == 1 else user_text + _RETRY_HINT
-        message = client.messages.create(
+        message = await client.messages.create(
             model=MODEL_NAME,
             max_tokens=DRAFT_MAX_TOKENS,
             system=SYSTEM_PROMPT,

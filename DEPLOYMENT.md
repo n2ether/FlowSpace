@@ -55,11 +55,19 @@ git push origin main
 | `OPENAI_API_KEY` | `sk-...` from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Required for the organized after-image. Customer photo → Images **edit**; no photo → Images **generations**. Model: `gpt-image-2.5-sunburst`. Already set on the Backend service in production — redeploy Backend to pick up this path. The backend raises `OPENAI_API_KEY is not configured` if this is missing, and the board + PDF continue with the labeled original (or a placeholder). |
 | `RESEND_API_KEY` | `re_...` (required for any PDF email — without it the PDF is built but never sent; lead status becomes `pdf_ready`) |
 | `RESEND_FROM_EMAIL` | Optional. Defaults to `FlowSpace <blueprints@flowspace.solutions>` |
+| `EMAIL_REPLY_TO` | Optional. Reply-To on customer emails (Design Plan delivery, password reset). Defaults to `help@flowspace.solutions` |
+| `PUBLIC_APP_URL` | Frontend base URL used in emailed links, including password reset links (`/reset-password?token=…`). Defaults to `https://flowspace.solutions`; set it to the Railway frontend URL on staging |
 | `ADMIN_EMAIL` | Your email (receives admin copies) |
 | `STRIPE_API_KEY` | `sk_live_...` (or `sk_test_...` for testing) |
-| `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below |
-| `ADMIN_PASSWORD` | Change this to a strong password |
+| `STRIPE_WEBHOOK_SECRET` | Fill in after step 4 below. Required: without it the webhook returns 503 unless `ENVIRONMENT=development` |
+| `ALLOW_STRIPE_TEST_EVENTS` | Preview only: `1` to process Stripe test-mode (`livemode: false`) events. **Never set in production** — test events are acknowledged and ignored there |
+| `ENVIRONMENT` | Optional. `development` lets a local backend accept unsigned Stripe events when no webhook secret is set |
+| `ADMIN_PASSWORD` | Change this to a strong password. Used to log in; the browser receives a 12-hour session token, not the password |
 | `JWT_SECRET` | Long random string for member session JWTs |
+| `PHOTO_URL_SECRET` | Optional, recommended. Long random string that signs photo URLs (1-hour links). Falls back to a value derived from `JWT_SECRET`. Rotating it expires every outstanding photo link |
+| `ADMIN_SESSION_SECRET` | Optional. Signs admin session tokens; falls back to a value derived from `JWT_SECRET` |
+| `ADMIN_PHOTO_OVERRIDE` | Optional. `1` lets an admin raise one lead's photo cap to at most 6 (`PUT /api/admin/leads/{id}/photos`); `0` turns it off. Unset, it is on only when `ENVIRONMENT` / `RAILWAY_ENVIRONMENT_NAME` is development, preview, or staging, and always off in production. Customer plan caps (2 / 3 / 4) never change |
+| `RENDER_MAX_RECOVERIES` | Optional, default `2`. How many times a render orphaned by a restart is re-queued before the lead is held as failed |
 | `CORS_ORIGINS` | `https://flowspace.solutions,https://www.flowspace.solutions` (plus the Railway frontend origin if it is different) |
 
 `REPLICATE_API_TOKEN` is no longer read by the after-image path. If it is already set on the Backend service, leave the secret in place — this deploy does not require deleting it.
@@ -193,6 +201,43 @@ curl "$API/api/admin/leads/$LEAD_ID/deliverable/afters/refine" -H "X-Admin-Token
   generation vision QA and a rug check (one rug matching the spec, nothing else changed). Otherwise the existing after stays.
 - SOURCE_n → AFTER_n mappings, `package_status`, and the lead status do not change, and no email is sent. The board,
   zone map, PDF, email, and contact sheet pick up the replaced afters on the next render. Old URLs are kept in `after_history`.
+
+### Project brief, photo override, and the consistency check
+
+```bash
+# Brief notes reach the drafter, every image prompt, and every document. "open" = no budget cap.
+# "retained" pins a kept piece's structure; "avoid" lists what no view may show. Both are also parsed from the notes
+# ("Keep the TV console's original glass doors", "Remove any basket placed on Sam's bed").
+curl -X PUT "$API/api/admin/leads/$LEAD_ID/brief" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"notes": "Add larger art on the wall linking dining and kitchen. Add a rug and a set table. Keep the existing art.", "budget": "open",
+       "retained": [{"name": "TV console", "details": "two original glass doors"}], "avoid": ["basket on the shoe bench"]}'
+
+# Re-check the stored afters against the current room inventory and against each other (no generation, no email).
+curl -X POST "$API/api/admin/leads/$LEAD_ID/deliverable/verify" -H "X-Admin-Token: $ADMIN_PASSWORD"
+
+# Test / QA project only: allow up to 6 photos on this lead (stored uploads, in view order), then retry automation.
+curl -X PUT "$API/api/admin/leads/$LEAD_ID/photos" -H "X-Admin-Token: $ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"max_photos": 6, "photos": ["/api/uploads/photo/<id1>", "...", "/api/uploads/photo/<id6>"]}'
+
+# Shared item list (fixed pieces, planned additions, brief requests) and every mismatch between views, text, and links.
+curl "$API/api/admin/leads/$LEAD_ID/deliverable/consistency" -H "X-Admin-Token: $ADMIN_PASSWORD"
+```
+
+- One room inventory (`room_inventory` on the deliverable: kept pieces with their structure, planned additions, never-show
+  rules, walls, budget) feeds every image prompt, every vision check, and the documents. Each view's check records the
+  inventory hash and the exact after URL it covered; the views are also compared with each other (`cross_view`), and a view
+  that drifts is re-edited once against the first after.
+- `send-final` recomputes the check and refuses a package with `block` issues: a requested item missing, a change the plan
+  describes that no view shows, a view showing an unplanned rug / art / basket or something the brief rules out, a kept
+  piece changed or missing, views that disagree, a view not verified (vision check skipped) or verified against an older
+  inventory or a different image, a budget that differs between surfaces, a product without a tested direct link,
+  non-English or time-bound copy. After a brief edit, run `verify` (or retry automation) before sending.
+- `?override_consistency=true&override_reason=<why>` (admin only) can send past the other blocks; it needs a written
+  reason, is logged, and is kept in `consistency_override_log`. Kept pieces changed or missing, views that disagree,
+  never-show rules broken, and baskets on seats or beds cannot be overridden.
+- Boards are available as PDF too: `.../deliverable/board?format=pdf` and `.../deliverable/zone-map?format=pdf`.
+- Files are named `FlowSpace_<Project>_Design_Plan.png/.pdf`, `_Room_Flow.png/.pdf`, `_Companion_Guide.pdf`, and
+  `_View_01.jpg` …; a review copy adds `_DRAFT`. Every package carries exactly one Companion Guide.
 
 ---
 

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import BeforeAfterSlider from "@/components/BeforeAfterSlider";
@@ -50,7 +51,7 @@ const PLANS = [
       "1 space included per account",
       "Upload up to 2 photos",
       "AI-generated organized rooms",
-      "Starter plan emailed as PDF",
+      "Starter Design Plan by email",
     ],
     pdf: false,
   },
@@ -62,7 +63,7 @@ const PLANS = [
     features: [
       "Upload up to 3 photos",
       "AI-generated organized rooms",
-      "Custom PDF organization plan",
+      "Custom FlowSpace Design Plan",
       "Email delivery",
     ],
     pdf: true,
@@ -75,9 +76,8 @@ const PLANS = [
     features: [
       "Upload up to 4 photos",
       "AI-generated organized rooms",
-      "Custom PDF organization plan",
+      "Custom FlowSpace Design Plan",
       "Shopping & labeling guide",
-      "Priority delivery",
     ],
     pdf: true,
   },
@@ -171,11 +171,11 @@ const FAQS = [
   },
   {
     q: "Do I need an account to get started?",
-    a: "Yes — a free member account keeps every space you create. You can sign up from Members in the nav, or set a password on the intake form. After your first free Blueprint, Plus or Premium unlocks another space.",
+    a: "Yes — a free member account keeps every space you create. You can sign up from Members in the nav, or set a password on the intake form. The Free plan includes one Design Plan per account; Plus or Premium unlocks another space.",
   },
   {
     q: "How is the PDF plan different from the AI image?",
-    a: "The AI image shows the organized version of your actual space (paint is not forced into that visual). The emailed PDF Blueprint adds zones, a shopping list, a step-by-step action plan, and an optional paint note to consider only if it helps your goal — usually within a few minutes (free after submit; Plus and Premium after payment).",
+    a: "The AI image shows the organized version of your actual space (paint is not forced into that visual). Your FlowSpace Design Plan adds a Room Flow map of the zones and a Companion Guide with practical steps and shopping notes. During the beta, our team reviews every plan before we email it to you.",
   },
   {
     q: "Will you change my windows or paint the walls?",
@@ -195,6 +195,17 @@ export default function Landing() {
   const [filter, setFilter] = useState("all");
   const filtered =
     filter === "all" ? GALLERY : GALLERY.filter((g) => g.id === filter);
+  const [params] = useSearchParams();
+  const checkoutCanceled = params.get("canceled") === "1";
+
+  // The browser's own #packages jump fires before React has rendered the section.
+  useEffect(() => {
+    if (!checkoutCanceled) return undefined;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById("packages")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [checkoutCanceled]);
 
   return (
     <div className="min-h-screen bg-white">
@@ -212,7 +223,7 @@ export default function Landing() {
         <div className="container-app grid grid-cols-1 items-center gap-12 pb-16 md:gap-16 md:pb-24 lg:grid-cols-[1.05fr_1fr] fade-in">
           <div className="flex flex-col gap-7">
             <span className="eyebrow" data-testid="hero-eyebrow">
-              AI-powered room organization
+              Clear space. Create flow. Live better.
             </span>
             <h1 className="font-display text-[40px] font-light leading-[1.05] tracking-tight text-slate-900 sm:text-[56px] lg:text-[64px]">
               Turn cluttered rooms into
@@ -254,25 +265,6 @@ export default function Landing() {
               >
                 See examples
               </a>
-            </div>
-            <div className="flex flex-wrap items-center gap-5 pt-2 text-sm text-slate-500">
-              <div className="flex items-center gap-1.5" data-testid="hero-rating">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <svg
-                    key={i}
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="#fbbf24"
-                    stroke="#fbbf24"
-                    strokeWidth="1.6"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                  >
-                    <path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />
-                  </svg>
-                ))}
-                <span className="ml-1">4.9 / 500+ homes organized</span>
-              </div>
             </div>
           </div>
           <div className="relative">
@@ -325,7 +317,7 @@ export default function Landing() {
           <div className="flex flex-col items-start gap-4 fade-in">
             <span className="eyebrow">Process</span>
             <h2 className="font-display text-4xl font-light tracking-tight text-slate-900 sm:text-5xl">
-              Simple. Fast. Done for you.
+              Simple. Guided. Made for your space.
             </h2>
           </div>
           <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
@@ -333,12 +325,12 @@ export default function Landing() {
               {
                 n: 1,
                 title: "Create your free account",
-                body: "Save every space you organize. The first Blueprint is free; Plus and Premium add more photos and another space.",
+                body: "Save every space you organize. The Free plan includes one Design Plan; Plus and Premium add more photos and another space.",
               },
               {
                 n: 2,
                 title: "Upload your photos",
-                body: "Snap photos of your messy space, drop them in, and we get to work instantly.",
+                body: "Snap photos of your messy space, drop them in, and tell us what the plan should work around.",
               },
               {
                 n: 3,
@@ -373,11 +365,19 @@ export default function Landing() {
               Pick a plan that fits your space
             </h2>
             <p className="mt-4 text-slate-600">
-              All plans include an AI-organized room image and an emailed PDF
-              plan. Upgrade for more photos, a fuller shopping guide, and
-              priority delivery.
+              All plans include an AI-organized room image and an emailed
+              FlowSpace Design Plan. Upgrade for more photos and a fuller shopping guide.
             </p>
           </div>
+          {checkoutCanceled && (
+            <p
+              role="status"
+              className="mx-auto mt-8 max-w-xl rounded-2xl border border-slate-200 bg-white px-5 py-3 text-center text-sm text-slate-700"
+              data-testid="checkout-canceled-notice"
+            >
+              Checkout canceled. No charge was made.
+            </p>
+          )}
           <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-3">
             {PLANS.map((p) => (
               <PricingCard
@@ -389,7 +389,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-8 text-center text-xs text-slate-500">
-            Free includes one Blueprint per account. Create a member login to keep your plans.
+            Free includes one Design Plan per account. Create a member login to keep your plans.
           </p>
         </div>
       </section>
@@ -543,11 +543,11 @@ export default function Landing() {
             <div className="relative grid grid-cols-1 items-center gap-10 md:grid-cols-[1.4fr_1fr]">
               <div>
                 <h2 className="font-display text-4xl font-light tracking-tight sm:text-5xl">
-                  Your space can feel different — fast.
+                  Your space can feel different.
                 </h2>
                 <p className="mt-4 max-w-xl text-lg text-emerald-50">
                   Upload your room photos and get a visual plan for a cleaner,
-                  more functional home. Pick a plan and start in under a minute.
+                  more functional home. Pick a plan to get started.
                 </p>
               </div>
               <div className="flex md:justify-end">

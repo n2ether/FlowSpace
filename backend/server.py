@@ -3,8 +3,8 @@ from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
-from bson import ObjectId
 from gridfs.errors import NoFile
+from pymongo.errors import DuplicateKeyError
 import base64
 import io
 import os
@@ -22,27 +22,61 @@ import httpx
 
 from image_board import build_image_board
 from room_flow import build_zone_map, outline_caption
-from blueprint_consistency import internal_record, project_story_line
+from blueprint_consistency import internal_record, prepare_deliverable, project_story_line
 from blueprint_presentation import build_presentation
-from design_plan_standards import is_released
+from design_plan_standards import is_released, package_version, version_tag
 from pdf_generator import build_pdf, customer_project_title, plan_title
-from pdf_images import as_gridfs_source, assemble_pdf_images, choose_hero
+from pdf_images import assemble_pdf_images, choose_hero
 from contact_sheet import build_contact_sheet
-from email_service import email_body_html, send_blueprint, send_contact_sheet, send_draft_package
+from email_service import (
+    email_body_html,
+    public_app_url,
+    send_blueprint,
+    send_contact_sheet,
+    send_draft_package,
+    send_password_reset,
+)
 from source_photos import draft_send_block_reason, final_email_block_reason, mapping_is_own_source
 from blueprint_layers import coerce_layers
 from ai_drafter import draft_deliverable
-from ai_image_generator import generate_front_view, refine_after_image
+from ai_image_generator import generate_front_view, refine_after_image, requested_wall_color
 from rug_refine import describe_rug, refine_one, resolve_refine_rug
+from view_verification import verify_views
 from automation import run_automation
-from image_orientation import UnreadableImage, normalize_photo_bytes, upright_bytes
+from render_recovery import sweep_forever
+from draft_watermark import needs_draft_watermark, watermark_pdf, watermark_png
+from image_orientation import UnreadableImage, is_heif_upload, normalize_photo_bytes, upright_bytes
+from admin_session import create_admin_token, password_matches, verify_admin_token
+from photo_access import (
+    PHOTO_URL_PREFIX,
+    canonicalize_photo_urls,
+    gridfs_key,
+    photo_id_from_url,
+    sign_photo_urls,
+    signed_photo_url,
+    store_photo,
+    upload_token,
+    verify_signature,
+    verify_upload_token,
+)
 from fulfillment import checkout_lead_lookups, should_auto_start_automation
+from package_files import package_file_set, package_filename, png_to_pdf, project_stem
+from intake import (
+    PHOTO_OVERRIDE_MAX,
+    IntakeError,
+    build_fact_sheet,
+    chargeable_block_reason,
+    max_photos_for,
+    photo_override_enabled,
+    validate_intake,
+)
 from auth import (
     COOKIE_NAME,
     cookie_kwargs,
     create_token,
     decode_token,
     extract_token,
+    hash_password,
     normalize_email,
     validate_password,
     verify_password,
@@ -52,10 +86,24 @@ from members import (
     ensure_member_indexes,
     free_limit_error,
     is_free_package,
+    latest_transactions,
     new_member_doc,
     public_member,
+    public_plan,
     public_space,
     usage_for_member,
+)
+from password_reset import (
+    GENERIC_RESET_MESSAGE,
+    INVALID_TOKEN_MESSAGE,
+    RESET_TOKEN_TTL_MINUTES,
+    client_ip,
+    consume_reset_token,
+    ensure_reset_indexes,
+    issue_reset_token,
+    rate_limited,
+    reset_url,
+    retire_member_tokens,
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -70,6 +118,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 STRIPE_API_KEY      = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+DEV_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
 ADMIN_PASSWORD      = os.environ.get("ADMIN_PASSWORD", "flowspace2025")
 
 PACKAGES: Dict[str, Dict[str, Any]] = {
@@ -130,12 +179,21 @@ class Lead(BaseModel):
     diy_level: Optional[str] = None
     daily_improvement: Optional[str] = None
     language: str = "en"
+    intake: Optional[Dict[str, Any]] = None
+    fact_sheet: Optional[Dict[str, Any]] = None
     status: str = "new"
     member_id: Optional[str] = None
     stripe_session_id: Optional[str] = None
     email_sent: Optional[bool] = None
     email_error: Optional[str] = None
     automation_error: Optional[str] = None
+    automation_failed: Optional[bool] = None
+    automation_failed_at: Optional[str] = None
+    package_status: Optional[str] = None
+    # Admin-only: raised photo cap for a test / QA project (see PUT /admin/leads/{id}/photos).
+    photo_limit_override: Optional[int] = None
+    # Admin-only project brief: {"notes", "budget", "keep_existing", "decor"}.
+    brief: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -161,6 +219,7 @@ class LeadCreate(BaseModel):
     diy_level: Optional[str] = None
     daily_improvement: Optional[str] = None
     language: str = "en"
+    intake: Optional[Dict[str, Any]] = None
     password: Optional[str] = None
 
 
@@ -172,6 +231,15 @@ class MemberSignup(BaseModel):
 
 class MemberLogin(BaseModel):
     email: EmailStr
+    password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
     password: str
 
 
@@ -221,6 +289,12 @@ class ShoppingItem(BaseModel):
     name: str
     qty: float = 1
     price: float = 0
+    # "functional" or "decorative" (optional styling). Empty means classify by name.
+    priority: Optional[str] = None
+    # Per-item tags set by the package rules. Kept so an admin edit does not drop them.
+    measure_first: Optional[bool] = None
+    short_name: Optional[str] = None
+    item_class: Optional[str] = None
 
 
 class Zone(BaseModel):
@@ -262,11 +336,20 @@ class Deliverable(BaseModel):
     source_afters: List[Dict[str, Any]] = []
     non_room_uploads: List[Dict[str, Any]] = []
     package_status: Optional[str] = None
+    # Missing means version 1. The number advances on regenerate only after this
+    # copy has been emailed for review (see sent_for_review).
+    package_version: Optional[int] = None
+    # Highest package_version successfully emailed by send-draft or send-final.
+    # Missing means nothing has been sent, so regenerate keeps preparing Version 2.
+    sent_for_review: Optional[int] = None
     # Reviewer sign-off on the Design Plan. Until set, every surface reads DRAFT / REVIEW.
     design_plan_approved: bool = False
     contact_sheet_url: Optional[str] = None
     include_customer_photos: bool = True
     blueprint_layers: Optional[Dict[str, Any]] = None
+    # Shared item list (see package_items). Omitted from an edit means "keep what is stored".
+    fixed_items: Optional[List[Dict[str, Any]]] = None
+    additions: Optional[List[Dict[str, Any]]] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -275,21 +358,32 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-def _safe_metadata(sess) -> Dict[str, str]:
-    """
-    Safely extract a plain dict from a Stripe object's .metadata field.
+def _stripe_dict(obj: Any) -> Dict[str, Any]:
+    """Plain dict from a Stripe object or dict.
 
-    IMPORTANT: do not use the bare dict(...) constructor on a Stripe SDK
-    object here. Stripe's response objects can trigger Python's fallback
-    "sequence of pairs" protocol instead of being treated as a mapping,
-    causing dict(...) to probe for an integer index (0) and raise
-    KeyError: 0. Using .items() explicitly avoids that path entirely.
+    stripe>=15 objects are no longer dict subclasses: ``.items()``, ``.get()``
+    and ``dict(obj)`` all fail. ``to_dict()`` is the supported accessor.
     """
-    raw = getattr(sess, "metadata", None)
-    if not raw:
+    if obj is None:
         return {}
+    if isinstance(obj, dict):
+        return obj
+    to_dict = getattr(obj, "to_dict", None)
+    if callable(to_dict):
+        out = to_dict()
+        return out if isinstance(out, dict) else {}
+    return {}
+
+
+def _safe_metadata(sess: Any) -> Dict[str, str]:
+    """String metadata from a Stripe checkout session (object or dict)."""
+    if isinstance(sess, dict):
+        raw = sess.get("metadata")
+    else:
+        raw = getattr(sess, "metadata", None)
     try:
-        return {str(k): str(v) for k, v in raw.items()}
+        data = _stripe_dict(raw)
+        return {str(k): str(v) for k, v in data.items() if v is not None}
     except Exception:
         logging.warning("Could not parse Stripe metadata safely; defaulting to {}")
         return {}
@@ -314,8 +408,14 @@ def _hydrate(doc: dict, dt_fields: List[str]) -> dict:
     return doc
 
 
+def is_admin_token(token: Optional[str]) -> bool:
+    """A session token from /admin/login. The raw password is still accepted for
+    existing API scripts, but is no longer handed to the browser."""
+    return verify_admin_token(token) or password_matches(token, ADMIN_PASSWORD)
+
+
 async def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> bool:
-    if not x_admin_token or x_admin_token != ADMIN_PASSWORD:
+    if not is_admin_token(x_admin_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
@@ -356,6 +456,10 @@ async def optional_member(request: Request) -> Optional[Dict[str, Any]]:
     if not payload or not payload.get("sub"):
         return None
     member = await db.members.find_one({"id": payload["sub"]}, {"_id": 0})
+    changed_at = (member or {}).get("password_changed_at")
+    if member and changed_at and int(payload.get("iat") or 0) < int(changed_at):
+        # Sessions issued before a password reset no longer count.
+        return None
     return member
 
 
@@ -447,7 +551,7 @@ async def _resolve_member_for_lead(
         status_code=401,
         detail={
             "code": "ACCOUNT_REQUIRED",
-            "message": "Create a free account (or log in) to keep this plan and start your Blueprint.",
+            "message": "Create a free account (or log in) to keep this plan and start your Design Plan.",
         },
     )
 
@@ -465,12 +569,18 @@ async def _find_lead_for_checkout(
     metadata: Optional[Dict[str, Any]] = None,
     customer_email: Optional[str] = None,
     transaction_lead_id: Optional[str] = None,
+    include_email: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Resolve the customer lead for a paid Stripe session. Prefer lead_id over email."""
+    """Resolve the customer lead for a paid Stripe session by lead_id.
+
+    ``include_email`` adds the email fallback, used only to explain a miss in
+    the logs: an email match alone never fulfills a checkout.
+    """
     for reason, query in checkout_lead_lookups(
         metadata=metadata,
         customer_email=customer_email,
         transaction_lead_id=transaction_lead_id,
+        include_email=include_email,
     ):
         lead = await db.leads.find_one(query, {"_id": 0})
         if lead:
@@ -479,9 +589,21 @@ async def _find_lead_for_checkout(
     return None
 
 
+_RECOVERY_TASKS: set = set()
+
+
+def _schedule_automation(background_tasks: Optional[BackgroundTasks], lead: Dict[str, Any]) -> None:
+    if background_tasks is not None:
+        background_tasks.add_task(run_automation, lead=lead, db=db, fs_bucket=fs_bucket)
+        return
+    task = asyncio.create_task(run_automation(lead=lead, db=db, fs_bucket=fs_bucket))
+    _RECOVERY_TASKS.add(task)
+    task.add_done_callback(_RECOVERY_TASKS.discard)
+
+
 async def _start_automation_for_lead(
     lead: Dict[str, Any],
-    background_tasks: BackgroundTasks,
+    background_tasks: Optional[BackgroundTasks],
     extra_fields: Optional[Dict[str, Any]] = None,
     *,
     force: bool = False,
@@ -489,7 +611,9 @@ async def _start_automation_for_lead(
     """
     Claim the lead and queue the Claude → OpenAI image → board + PDF → Resend pipeline.
 
-    Skips if the lead is already processing/delivered unless force=True (admin retry).
+    Skips if the lead is already processing/delivered unless force=True (admin retry
+    and restart recovery). Without ``background_tasks`` (startup sweep) the run is
+    scheduled on the event loop; either way it waits on RENDER_CONCURRENCY.
     """
     extra_fields = extra_fields or {}
     lead_id = lead.get("id")
@@ -502,15 +626,27 @@ async def _start_automation_for_lead(
         return False
     if not force:
         query["status"] = {"$nin": ["processing", "delivered", "review", "incomplete"]}
+    # Restart recovery re-claims a stuck run; the customer's wait started with the first claim.
+    started = now
+    if lead.get("status") == "processing" and lead.get("processing_started_at"):
+        started = lead["processing_started_at"]
     res = await db.leads.update_one(
         query,
-        {"$set": {**extra_fields, "status": "processing", "updated_at": now}},
+        {
+            "$set": {
+                **extra_fields,
+                "status": "processing",
+                "processing_started_at": started,
+                "render_heartbeat_at": now,
+                "updated_at": now,
+            }
+        },
     )
     if res.matched_count == 0:
         logging.info("Skipping automation for lead %s — already in flight or delivered", lead_id)
         return False
-    queued = {**lead, **extra_fields, "status": "processing"}
-    background_tasks.add_task(run_automation, lead=queued, db=db, fs_bucket=fs_bucket)
+    queued = {**lead, **extra_fields, "status": "processing", "processing_started_at": started}
+    _schedule_automation(background_tasks, queued)
     logging.info("Automation queued for lead %s", lead_id)
     return True
 
@@ -524,7 +660,12 @@ async def _fulfill_paid_checkout(
     payment_status: str = "paid",
     stripe_status: str = "complete",
 ) -> None:
-    """Link a paid Stripe session to its lead and start PDF email automation."""
+    """Link a paid Stripe session to its lead and start PDF email automation.
+
+    Fulfillment runs at most once per session_id: the webhook, its retries and
+    the success-page poll all race to claim ``checkout_fulfillments`` (unique
+    on session_id) and only the winner queues automation.
+    """
     existing_tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
     await db.payment_transactions.update_one(
         {"session_id": session_id},
@@ -539,48 +680,119 @@ async def _fulfill_paid_checkout(
     if payment_status != "paid":
         return
 
-    lead = await _find_lead_for_checkout(
-        metadata=metadata,
-        customer_email=customer_email,
-        transaction_lead_id=(existing_tx or {}).get("lead_id"),
-    )
-    if not lead:
-        logging.warning(
-            "Paid checkout %s has no matching lead (email=%s metadata_lead_id=%s tx_lead_id=%s)",
-            session_id,
-            customer_email,
-            (metadata or {}).get("lead_id"),
-            (existing_tx or {}).get("lead_id"),
-        )
+    if not await _claim_fulfillment(session_id):
+        logging.info("Checkout %s already fulfilled — skipping", session_id)
         return
 
-    pkg = (metadata or {}).get("package_id") or lead.get("package_id") or ""
+    try:
+        lead = await _find_lead_for_checkout(
+            metadata=metadata,
+            customer_email=customer_email,
+            transaction_lead_id=(existing_tx or {}).get("lead_id"),
+        )
+        if not lead:
+            email_match = await _find_lead_for_checkout(
+                metadata={"email": (metadata or {}).get("email")} if (metadata or {}).get("email") else {},
+                customer_email=customer_email,
+                include_email=True,
+            )
+            if email_match:
+                logging.warning(
+                    "Paid checkout %s matched lead %s by email only; not starting automation. "
+                    "Link the lead_id on the transaction and retry from the admin.",
+                    session_id,
+                    email_match.get("id"),
+                )
+                await db.payment_transactions.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"lead_match": "email_only", "email_match_lead_id": email_match.get("id")}},
+                )
+            else:
+                logging.warning(
+                    "Paid checkout %s has no matching lead (metadata_lead_id=%s tx_lead_id=%s)",
+                    session_id,
+                    (metadata or {}).get("lead_id"),
+                    (existing_tx or {}).get("lead_id"),
+                )
+            # Release so a later trigger can match the lead once its id is linked.
+            await db.checkout_fulfillments.delete_one({"session_id": session_id})
+            return
+
+        pkg = (metadata or {}).get("package_id") or lead.get("package_id") or ""
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"lead_id": lead["id"]}},
+        )
+        await db.checkout_fulfillments.update_one(
+            {"session_id": session_id},
+            {"$set": {"lead_id": lead["id"]}},
+        )
+        await _start_automation_for_lead(
+            lead,
+            background_tasks,
+            extra_fields={
+                "stripe_session_id": session_id,
+                "package_id": pkg,
+            },
+        )
+    except Exception:
+        await db.checkout_fulfillments.delete_one({"session_id": session_id})
+        raise
+
+
+async def _claim_fulfillment(session_id: str) -> bool:
+    try:
+        await db.checkout_fulfillments.insert_one(
+            {"session_id": session_id, "claimed_at": _iso(datetime.now(timezone.utc))}
+        )
+    except DuplicateKeyError:
+        return False
+    return True
+
+
+async def _record_stripe_event(event_id: str, event_type: str) -> bool:
+    """Persist a Stripe event id; False when it was already processed."""
+    try:
+        await db.stripe_events.insert_one(
+            {"event_id": event_id, "type": event_type, "received_at": _iso(datetime.now(timezone.utc))}
+        )
+    except DuplicateKeyError:
+        return False
+    return True
+
+
+async def _mark_checkout_unpaid(session_id: str, outcome: str) -> None:
+    """Record an expired or failed checkout. Never downgrades a paid transaction."""
     await db.payment_transactions.update_one(
-        {"session_id": session_id},
-        {"$set": {"lead_id": lead["id"]}},
-    )
-    await _start_automation_for_lead(
-        lead,
-        background_tasks,
-        extra_fields={
-            "stripe_session_id": session_id,
-            "package_id": pkg,
+        {"session_id": session_id, "payment_status": {"$ne": "paid"}},
+        {
+            "$set": {
+                "payment_status": outcome,
+                "status": outcome,
+                "updated_at": _iso(datetime.now(timezone.utc)),
+            }
         },
     )
+
+
+async def ensure_payment_indexes(database) -> None:
+    try:
+        await database.stripe_events.create_index("event_id", unique=True)
+        await database.checkout_fulfillments.create_index("session_id", unique=True)
+    except Exception as e:
+        logging.warning("Could not create payment idempotency indexes: %s", e)
 
 
 async def _resolve_image_bytes(url: Optional[str], request: Request) -> Optional[bytes]:
     if not url:
         return None
     try:
-        if url.startswith("/api/uploads/photo/"):
-            photo_id = url.rsplit("/", 1)[-1]
-            try:
-                oid = ObjectId(photo_id)
-            except Exception:
+        if url.startswith(PHOTO_URL_PREFIX):
+            key = gridfs_key(photo_id_from_url(url))
+            if key is None:
                 return None
             try:
-                stream = await fs_bucket.open_download_stream(oid)
+                stream = await fs_bucket.open_download_stream(key)
             except NoFile:
                 return None
             return upright_bytes(await stream.read())
@@ -632,6 +844,54 @@ async def member_login(payload: MemberLogin, response: Response):
     return await _auth_payload(member, token, claimed)
 
 
+async def _email_reset_link(email: str, link: str) -> None:
+    ok, err = await send_password_reset(to_email=email, reset_link=link, ttl_minutes=RESET_TOKEN_TTL_MINUTES)
+    if not ok:
+        logging.warning("Password reset email not sent: %s", err)
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest, request: Request, background_tasks: BackgroundTasks):
+    """Same response whether or not the email has an account, so it can't be used to probe for members."""
+    email_n = normalize_email(str(payload.email))
+    ip = client_ip(request.headers, request.client.host if request.client else None)
+    if await rate_limited(db, email_n, ip):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "RATE_LIMITED",
+                "message": "Too many reset requests. Please wait an hour and try again.",
+            },
+        )
+    member = await db.members.find_one({"email": email_n}, {"_id": 0})
+    if member:
+        token = await issue_reset_token(db, member)
+        # Sent after the response so timing doesn't reveal whether the account exists.
+        background_tasks.add_task(_email_reset_link, member["email"], reset_url(public_app_url(), token))
+    return {"ok": True, "message": GENERIC_RESET_MESSAGE}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordRequest, response: Response):
+    pw_err = validate_password(payload.password)
+    if pw_err:
+        raise HTTPException(status_code=400, detail={"code": "WEAK_PASSWORD", "message": pw_err})
+    member_id = await consume_reset_token(db, (payload.token or "").strip())
+    member = await db.members.find_one({"id": member_id}, {"_id": 0}) if member_id else None
+    if not member:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_RESET_TOKEN", "message": INVALID_TOKEN_MESSAGE})
+    changed_at = int(datetime.now(timezone.utc).timestamp())
+    await db.members.update_one(
+        {"id": member["id"]},
+        {"$set": {"password_hash": hash_password(payload.password), "password_changed_at": changed_at}},
+    )
+    await retire_member_tokens(db, member["id"])
+    member["password_changed_at"] = changed_at
+    token = create_token(member["id"], member["email"])
+    _set_session_cookie(response, token)
+    return await _auth_payload(member, token)
+
+
 @api_router.post("/auth/logout")
 async def member_logout(response: Response):
     _clear_session_cookie(response)
@@ -658,10 +918,72 @@ async def my_spaces(member: Dict[str, Any] = Depends(require_member)):
             {"lead_id": {"$in": lead_ids}}, {"_id": 0}
         ).to_list(500)
     by_lead = {d.get("lead_id"): d for d in deliverables}
+    transactions = []
+    if lead_ids:
+        transactions = await db.payment_transactions.find(
+            {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "payment_status": 1, "status": 1, "created_at": 1}
+        ).to_list(2000)
+    tx_by_lead = latest_transactions(transactions)
+    now = datetime.now(timezone.utc)
+    spaces = [
+        public_space(
+            lead,
+            by_lead.get(lead.get("id")),
+            transaction=tx_by_lead.get(lead.get("id")),
+            packages=PACKAGES,
+            now=now,
+        )
+        for lead in leads
+    ]
     return {
-        "spaces": [public_space(lead, by_lead.get(lead.get("id"))) for lead in leads],
+        "spaces": sign_photo_urls(spaces),
         "usage": await _usage_for(member["id"]),
+        "server_time": _iso(now),
     }
+
+
+async def _member_plan_or_404(lead_id: str, member: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The member's own lead and its deliverable. Someone else's lead reads as missing, not forbidden."""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead or not member.get("id") or lead.get("member_id") != member["id"]:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return lead, d
+
+
+@api_router.get("/me/spaces/{lead_id}/plan")
+async def my_space_plan(lead_id: str, member: Dict[str, Any] = Depends(require_member)):
+    """Read-only plan for the owner. Never emails anyone or changes the lead status."""
+    lead, d = await _member_plan_or_404(lead_id, member)
+    return sign_photo_urls(public_plan(lead, d))
+
+
+def check_lead_intake(data: Dict[str, Any]) -> None:
+    """Reject over-cap photos and, for the beta intake, any answer the browser should have caught."""
+    pkg = PACKAGES.get(data.get("package_id") or "free") or PACKAGES["free"]
+    photos = data.get("photos") or []
+    if len(photos) > pkg["max_photos"]:
+        raise HTTPException(
+            status_code=422,
+            detail=IntakeError(
+                "INTAKE_INVALID",
+                f"The {pkg['name']} plan includes up to {pkg['max_photos']} photos.",
+                [{"field": "photos", "message": f"The {pkg['name']} plan includes up to {pkg['max_photos']} photos."}],
+            ).as_detail(),
+        )
+    intake = data.get("intake")
+    if not intake:
+        return
+    errors = validate_intake(intake, package=pkg, photos=photos)
+    if errors:
+        only_photos = all(e["field"] == "photos" for e in errors)
+        code = "PHOTO_REQUIRED" if only_photos else "INTAKE_INVALID"
+        raise HTTPException(
+            status_code=422,
+            detail=IntakeError(code, errors[0]["message"], errors).as_detail(),
+        )
 
 
 @api_router.post("/leads", response_model=Lead)
@@ -674,6 +996,7 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     """
     if payload.package_id and payload.package_id not in PACKAGES:
         raise HTTPException(status_code=400, detail="Invalid package_id")
+    check_lead_intake(canonicalize_photo_urls(payload.model_dump(exclude={"password"})))
 
     member = await _resolve_member_for_lead(payload, request, response)
     usage = await _usage_for(member["id"])
@@ -681,32 +1004,46 @@ async def create_lead(payload: LeadCreate, request: Request, response: Response,
     if free and not usage["can_generate_free"]:
         raise HTTPException(status_code=403, detail=free_limit_error(usage["free_generations_used"]))
 
-    data = payload.model_dump(exclude={"password"})
+    data = canonicalize_photo_urls(payload.model_dump(exclude={"password"}))
     data["email"] = normalize_email(str(member.get("email") or data.get("email") or ""))
     if member.get("name") and not (data.get("name") or "").strip():
         data["name"] = member["name"]
     data["member_id"] = member["id"]
+    if data.get("intake"):
+        data["fact_sheet"] = build_fact_sheet(data)
     lead = Lead(**data)
     await db.leads.insert_one(_doc(lead))
 
     if free:
         await _start_automation_for_lead(_doc(lead), background_tasks)
 
-    return lead
+    return sign_photo_urls(_doc(lead))
 
 
 @api_router.get("/gallery", response_model=List[GalleryItem])
 async def list_gallery():
     await seed_gallery_if_empty()
     items = await db.gallery.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [_hydrate(it, ["created_at"]) for it in items]
+    return [_hydrate(sign_photo_urls(it), ["created_at"]) for it in items]
 
 
 # ──────────────────────────── Uploads (GridFS) ─────────────────────────────
+def _upload_filename(name: Optional[str]) -> str:
+    stem = Path(name or "upload").stem or "upload"
+    return f"{stem}.jpg"
+
+
 @api_router.post("/uploads/photo")
-async def upload_photo(file: UploadFile = File(...)):
+async def upload_photo(request: Request, file: UploadFile = File(...)):
+    """Store an upright JPEG under an unguessable id.
+
+    Anonymous intake can upload. The response carries a short-lived signed
+    ``url`` for the preview and an ``upload_token`` that lets the same browser
+    refresh that preview later; nobody else can read the photo.
+    """
     ct = (file.content_type or "").lower()
-    if not ct.startswith("image/"):
+    heif = is_heif_upload(ct, file.filename)
+    if not ct.startswith("image/") and not heif:
         raise HTTPException(status_code=400, detail="Only image files are allowed")
     contents = await file.read()
     if not contents:
@@ -718,22 +1055,32 @@ async def upload_photo(file: UploadFile = File(...)):
         ct = orientation.get("content_type") or "image/jpeg"
     except UnreadableImage:
         raise HTTPException(status_code=400, detail="Could not read image")
-    file_id = await fs_bucket.upload_from_stream(
-        file.filename or "upload.jpg",
-        as_gridfs_source(contents),
-        metadata={
-            "content_type": ct,
-            "uploaded_at": _iso(datetime.now(timezone.utc)),
-            "orientation_normalized": True,
-            "exif_orientation": orientation.get("exif_orientation"),
-            "applied_exif": bool(orientation.get("applied")),
-            "width": orientation.get("width"),
-            "height": orientation.get("height"),
-        },
+    member = await optional_member(request)
+    metadata: Dict[str, Any] = {
+        "content_type": ct,
+        "uploaded_at": _iso(datetime.now(timezone.utc)),
+        "orientation_normalized": True,
+        "exif_orientation": orientation.get("exif_orientation"),
+        "applied_exif": bool(orientation.get("applied")),
+        "width": orientation.get("width"),
+        "height": orientation.get("height"),
+        "original_content_type": (file.content_type or "").lower(),
+        "converted_from_heif": heif,
+    }
+    if member:
+        metadata["member_id"] = member["id"]
+    stored_url = await store_photo(
+        fs_bucket,
+        filename=_upload_filename(file.filename),
+        data=contents,
+        metadata=metadata,
     )
+    photo_id = photo_id_from_url(stored_url)
     return {
-        "id": str(file_id),
-        "url": f"/api/uploads/photo/{file_id}",
+        "id": photo_id,
+        "url": signed_photo_url(stored_url),
+        "stored_url": stored_url,
+        "upload_token": upload_token(photo_id),
         "orientation": {
             "exif_orientation": orientation.get("exif_orientation"),
             "applied": bool(orientation.get("applied")),
@@ -744,37 +1091,80 @@ async def upload_photo(file: UploadFile = File(...)):
     }
 
 
+class PhotoPreviewRequest(BaseModel):
+    upload_token: str
+
+
+@api_router.post("/uploads/photo/{photo_id}/preview")
+async def refresh_photo_preview(photo_id: str, payload: PhotoPreviewRequest):
+    """A fresh signed preview URL for the browser that uploaded this photo."""
+    if gridfs_key(photo_id) is None or not verify_upload_token(photo_id, payload.upload_token):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": photo_id, "url": signed_photo_url(f"{PHOTO_URL_PREFIX}{photo_id}")}
+
+
+async def _member_can_read_photo(request: Request, photo_id: str, metadata: Dict[str, Any]) -> bool:
+    member = await optional_member(request)
+    if not member or not member.get("id"):
+        return False
+    member_id = member["id"]
+    if metadata.get("member_id") == member_id:
+        return True
+    lead_id = metadata.get("lead_id")
+    if lead_id and await db.leads.find_one({"id": lead_id, "member_id": member_id}, {"_id": 0, "id": 1}):
+        return True
+    url = f"{PHOTO_URL_PREFIX}{photo_id}"
+    for query in ({"member_id": member_id, "photos": url}, {"member_id": member_id, "photos.url": url}):
+        if await db.leads.find_one(query, {"_id": 0, "id": 1}):
+            return True
+    return False
+
+
 @api_router.get("/uploads/photo/{photo_id}")
-async def get_photo(photo_id: str):
-    try:
-        oid = ObjectId(photo_id)
-    except Exception:
+async def get_photo(
+    photo_id: str,
+    request: Request,
+    exp: Optional[str] = None,
+    sig: Optional[str] = None,
+    x_admin_token: Optional[str] = Header(default=None),
+):
+    """Serve a photo to a signed URL, an admin, or the member who owns it. Never public."""
+    key = gridfs_key(photo_id)
+    if key is None:
         raise HTTPException(status_code=400, detail="Invalid id")
+    signed = verify_signature(photo_id, exp, sig)
     try:
-        stream = await fs_bucket.open_download_stream(oid)
+        stream = await fs_bucket.open_download_stream(key)
     except NoFile:
         raise HTTPException(status_code=404, detail="Not found")
+    metadata = dict(getattr(stream, "metadata", None) or {})
+    if not (signed or is_admin_token(x_admin_token) or await _member_can_read_photo(request, photo_id, metadata)):
+        # Same answer as a missing file so ids cannot be probed.
+        raise HTTPException(status_code=404, detail="Not found")
     data = await stream.read()
-    media = stream.metadata.get("content_type", "image/jpeg") if stream.metadata else "image/jpeg"
+    media = metadata.get("content_type", "image/jpeg")
     return Response(
         content=data,
         media_type=media,
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers={
+            "Cache-Control": "private, max-age=3600" if signed else "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
 # ──────────────────────────── Admin Routes ─────────────────────────────
 @api_router.post("/admin/login")
 async def admin_login(payload: AdminLoginRequest):
-    if payload.password != ADMIN_PASSWORD:
+    if not password_matches(payload.password, ADMIN_PASSWORD):
         raise HTTPException(status_code=401, detail="Invalid password")
-    return {"token": ADMIN_PASSWORD}
+    return {"token": create_admin_token(), "token_type": "admin_session"}
 
 
 @api_router.get("/admin/leads", response_model=List[Lead])
 async def admin_leads(_: bool = Depends(require_admin)):
     items = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    return [_hydrate(it, ["created_at"]) for it in items]
+    return [_hydrate(sign_photo_urls(it), ["created_at"]) for it in items]
 
 
 @api_router.post("/admin/leads/{lead_id}/retry-automation")
@@ -783,8 +1173,127 @@ async def retry_automation(lead_id: str, background_tasks: BackgroundTasks, _: b
     lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    await _start_automation_for_lead(lead, background_tasks, force=True)
+    # A person decided to retry: give restart recovery its full budget again.
+    await _start_automation_for_lead(
+        lead,
+        background_tasks,
+        extra_fields={"render_recoveries": 0, "render_recovery_status": None},
+        force=True,
+    )
     return {"message": "Automation started", "lead_id": lead_id}
+
+
+class LeadPhotosOverride(BaseModel):
+    # Raised cap for this lead only; customer plan limits are unchanged.
+    max_photos: int
+    # Full ordered list of stored upload URLs (/api/uploads/photo/<id>). Omit to keep the current list.
+    photos: Optional[List[str]] = None
+
+
+def _override_intake_photos(intake: Dict[str, Any], photos: List[str]) -> Dict[str, Any]:
+    """The intake's photo list in the new order; new uploads count as wide views."""
+    by_url = {str((p or {}).get("url")): p for p in intake.get("photos") or [] if isinstance(p, dict)}
+    rows = []
+    for index, url in enumerate(photos):
+        meta = dict(by_url.get(url) or {"shot": "wide", "custom_label": ""})
+        meta.update({"ref": f"P{index + 1}", "label": f"Photo {index + 1}", "url": url, "photo_id": url.rsplit("/", 1)[-1]})
+        rows.append(meta)
+    return {**intake, "photos": rows}
+
+
+@api_router.put("/admin/leads/{lead_id}/photos")
+async def admin_override_lead_photos(lead_id: str, payload: LeadPhotosOverride, _: bool = Depends(require_admin)):
+    """Admin-only per-lead photo cap (up to 6) for a test project. Never changes plan limits.
+
+    Gated by ``ADMIN_PHOTO_OVERRIDE`` (on by default only on development / preview /
+    staging). Does not start automation or email anyone; run retry-automation after.
+    """
+    if not photo_override_enabled():
+        raise HTTPException(status_code=403, detail="Photo override is disabled on this deployment (ADMIN_PHOTO_OVERRIDE).")
+    if not 1 <= payload.max_photos <= PHOTO_OVERRIDE_MAX:
+        raise HTTPException(status_code=422, detail=f"max_photos must be between 1 and {PHOTO_OVERRIDE_MAX}.")
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    photos = canonicalize_photo_urls(payload.photos) if payload.photos is not None else [
+        p if isinstance(p, str) else str((p or {}).get("url") or "") for p in lead.get("photos") or []
+    ]
+    photos = [str(p) for p in photos if str(p).strip()]
+    for url in photos:
+        if not url.startswith(PHOTO_URL_PREFIX) or gridfs_key(photo_id_from_url(url)) is None:
+            raise HTTPException(status_code=422, detail=f"Not a stored upload: {url}")
+    pkg = PACKAGES.get(lead.get("package_id") or "free") or PACKAGES["free"]
+    cap = max_photos_for(pkg, {"photo_limit_override": payload.max_photos})
+    if len(photos) > cap:
+        raise HTTPException(status_code=422, detail=f"This lead allows up to {cap} photos.")
+    now = _iso(datetime.now(timezone.utc))
+    update: Dict[str, Any] = {
+        "photo_limit_override": payload.max_photos,
+        "photos": photos,
+        "photo_limit_override_at": now,
+        "updated_at": now,
+    }
+    if isinstance(lead.get("intake"), dict):
+        update["intake"] = _override_intake_photos(lead["intake"], photos)
+        update["fact_sheet"] = build_fact_sheet({**lead, **update})
+    await db.leads.update_one({"id": lead_id}, {"$set": update})
+    return {
+        "lead_id": lead_id,
+        "max_photos": cap,
+        "plan_max_photos": pkg["max_photos"],
+        "photos": len(photos),
+        "automation_started": False,
+    }
+
+
+class LeadBrief(BaseModel):
+    notes: str = ""
+    # "open" for no cap; otherwise one of the intake budget ids, or empty to keep the lead's.
+    budget: str = ""
+    keep_existing: List[str] = []
+    # Kept pieces with the structure every view must keep: [{"name": "TV console", "details": "two glass doors"}].
+    retained: List[Any] = []
+    # What no view may show, in plain words: ["basket on Sam's bed"].
+    avoid: List[str] = []
+    decor: List[Any] = []
+
+
+@api_router.put("/admin/leads/{lead_id}/brief")
+async def admin_set_lead_brief(lead_id: str, payload: LeadBrief, _: bool = Depends(require_admin)):
+    """Admin project brief. Drafting, image prompts, and every document read it. No email, no automation.
+
+    Existing views were checked against the earlier room inventory; when the
+    brief changes it, the consistency check marks them stale until verify or
+    a regeneration runs.
+    """
+    from intake import BUDGETS
+    from package_items import brief_requests, room_inventory
+
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    brief = payload.model_dump()
+    brief["budget"] = brief["budget"].strip()
+    if brief["budget"] and brief["budget"] not in BUDGETS:
+        raise HTTPException(status_code=422, detail=f"Unknown budget '{brief['budget']}'.")
+    update: Dict[str, Any] = {"brief": brief, "updated_at": _iso(datetime.now(timezone.utc))}
+    if brief["budget"]:
+        update["budget"] = brief["budget"]
+    merged = {**lead, **update}
+    if lead.get("intake") or lead.get("fact_sheet"):
+        update["fact_sheet"] = build_fact_sheet(merged)
+        merged["fact_sheet"] = update["fact_sheet"]
+    await db.leads.update_one({"id": lead_id}, {"$set": update})
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    inventory = room_inventory(merged, stored or {})
+    previous = ((stored or {}).get("room_inventory") or {}).get("hash")
+    return {
+        "lead_id": lead_id,
+        "brief": brief,
+        "requests": brief_requests(merged),
+        "room_inventory": inventory,
+        "views_need_verification": bool(stored and stored.get("source_afters") and previous != inventory["hash"]),
+    }
 
 
 @api_router.post("/admin/gallery", response_model=GalleryItem)
@@ -818,8 +1327,31 @@ async def get_deliverable(lead_id: str, _: bool = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Lead not found")
     d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
     if d:
-        d = _hydrate(d, ["updated_at"])
-    return {"lead": _hydrate(lead, ["created_at"]), "deliverable": d}
+        d = _hydrate(sign_photo_urls(d), ["updated_at"])
+    return {"lead": _hydrate(sign_photo_urls(lead), ["created_at"]), "deliverable": d}
+
+
+_ITEM_TAGS = ("measure_first", "short_name", "item_class")
+
+
+def _keep_item_tags(items: List[Dict[str, Any]], stored: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Carry tags from the stored line with the same name when the edit did not send them,
+    and drop unset tags so they do not overwrite anything with null."""
+    by_name = {
+        str(item.get("name") or "").strip().lower(): item for item in stored if isinstance(item, dict)
+    }
+    out = []
+    for item in items:
+        row = dict(item)
+        previous = by_name.get(str(row.get("name") or "").strip().lower()) or {}
+        for tag in _ITEM_TAGS:
+            if row.get(tag) is None:
+                if previous.get(tag) is not None:
+                    row[tag] = previous[tag]
+                else:
+                    row.pop(tag, None)
+        out.append(row)
+    return out
 
 
 @api_router.put("/admin/leads/{lead_id}/deliverable", response_model=Deliverable)
@@ -831,9 +1363,14 @@ async def upsert_deliverable(lead_id: str, payload: Deliverable, _: bool = Depen
     payload.updated_at = datetime.now(timezone.utc)
     if payload.blueprint_layers:
         payload.blueprint_layers = coerce_layers(payload.blueprint_layers)
-    doc = _doc(payload)
+    doc = canonicalize_photo_urls(_doc(payload))
+    for key in ("fixed_items", "additions"):
+        if doc.get(key) is None:
+            doc.pop(key, None)
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0, "shopping_list": 1}) or {}
+    doc["shopping_list"] = _keep_item_tags(doc.get("shopping_list") or [], stored.get("shopping_list") or [])
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": doc}, upsert=True)
-    return payload
+    return sign_photo_urls(doc)
 
 
 @api_router.post("/admin/leads/{lead_id}/deliverable/draft")
@@ -868,10 +1405,9 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
     first_photo = (lead.get("photos") or [None])[0]
     if first_photo:
         photo_url = first_photo if isinstance(first_photo, str) else first_photo.get("url")
-        if photo_url and "/api/uploads/photo/" in photo_url:
+        if photo_url and PHOTO_URL_PREFIX in photo_url:
             try:
-                photo_id = photo_url.rsplit("/", 1)[-1]
-                stream = await fs_bucket.open_download_stream(ObjectId(photo_id))
+                stream = await fs_bucket.open_download_stream(gridfs_key(photo_id_from_url(photo_url)))
                 reference_photo_bytes = upright_bytes(await stream.read())
             except Exception:
                 reference_photo_bytes = None
@@ -887,18 +1423,18 @@ async def ai_generate_image(lead_id: str, slot: str = "front_view", _: bool = De
         logging.exception("AI image generation failed")
         raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
     ext = "jpg" if "jpeg" in (mime or "") else "png"
-    file_id = await fs_bucket.upload_from_stream(
-        f"ai_{slot}_{lead_id}.{ext}",
-        as_gridfs_source(png_bytes),
+    url = await store_photo(
+        fs_bucket,
+        filename=f"ai_{slot}_{lead_id}.{ext}",
+        data=png_bytes,
         metadata={"content_type": mime or "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "ai", "lead_id": lead_id, "slot": slot},
     )
-    url = f"/api/uploads/photo/{file_id}"
     await db.deliverables.update_one(
         {"lead_id": lead_id},
         {"$set": {f"{slot}_url": url, "lead_id": lead_id, "updated_at": _iso(datetime.now(timezone.utc))}},
         upsert=True,
     )
-    return {"slot": slot, "url": url}
+    return {"slot": slot, "url": signed_photo_url(url), "stored_url": url}
 
 
 async def _blueprint_render_inputs(lead_id: str, request: Request):
@@ -938,6 +1474,7 @@ async def _blueprint_render_inputs(lead_id: str, request: Request):
                 "status": entry.get("status") or "",
                 "before": await _resolve_image_bytes(entry.get("source_url"), request),
                 "after": await _resolve_image_bytes(entry.get("after_url"), request) if entry.get("after_url") else None,
+                "visible_additions": list((entry.get("qa") or {}).get("visible_additions") or []),
             }
         )
     # Several source afters are the angles. Stale hero crops must not fill a gap.
@@ -973,24 +1510,40 @@ def _customer_title(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
     return customer_project_title(lead, deliverable) or plan_title(lead.get("space_type"))
 
 
+def _package_name_inputs(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> Tuple[str, bool]:
+    return _customer_title(lead, deliverable or {}), not is_released(deliverable)
+
+
 def _blueprint_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str]:
-    safe_name = "".join(
-        ch if ch.isalnum() or ch in "-_" else "_" for ch in (lead.get("name") or "client")
-    )
-    title = _customer_title(lead, deliverable or {})
-    stem = "".join(ch if ch.isalnum() else "_" for ch in title)
-    while "__" in stem:
-        stem = stem.replace("__", "_")
-    stem = stem.strip("_") or "Design_Plan"
-    board = f"FlowSpace_{stem}_Design_Plan_{safe_name}.png"
-    pdf = f"FlowSpace_{stem}_Companion_Guide_{safe_name}.pdf"
-    package = f"FlowSpace_{stem}_Design_Plan_{safe_name}.zip"
+    """Design Plan PNG, Companion Guide PDF, and the review zip, named by ``package_files``."""
+    title, draft = _package_name_inputs(lead, deliverable)
+    board = package_filename(title, "design_plan", "png", draft=draft)
+    pdf = package_filename(title, "companion_guide", "pdf", draft=draft)
+    tag = version_tag(package_version(deliverable))
+    package = f"FlowSpace_{project_stem(title)}_Package{'_DRAFT' if draft else ''}_{tag}.zip"
     return board, pdf, package
 
 
 def _zone_map_filenames(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]] = None) -> Tuple[str, str, str, str]:
     board, pdf, package = _blueprint_filenames(lead, deliverable)
-    return board, pdf, package, board.replace("_Design_Plan_", "_Room_Flow_", 1)
+    title, draft = _package_name_inputs(lead, deliverable)
+    return board, pdf, package, package_filename(title, "room_flow", "png", draft=draft)
+
+
+def _image_or_pdf(png: bytes, filename: str, fmt: str, *, disposition: str = "inline", cache: str = "no-store") -> Response:
+    """The PNG, or with ``format=pdf`` the same board as a one-page PDF."""
+    if (fmt or "png").lower() == "pdf":
+        name = filename.rsplit(".", 1)[0] + ".pdf"
+        return Response(
+            content=png_to_pdf(png),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'{disposition}; filename="{name}"', "Cache-Control": cache},
+        )
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"', "Cache-Control": cache},
+    )
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/presentation")
@@ -1017,7 +1570,7 @@ async def deliverable_presentation(lead_id: str, request: Request, _: bool = Dep
         elif isinstance(first_photo, dict):
             before_url = first_photo.get("url")
         media.append({"before_url": before_url, "after_url": d.get("front_view_url") or None})
-    return build_presentation(lead, d, images, lead_id=lead_id, media=media or None)
+    return sign_photo_urls(build_presentation(lead, d, images, lead_id=lead_id, media=media or None))
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/pdf")
@@ -1033,14 +1586,37 @@ async def render_deliverable_pdf(lead_id: str, request: Request, _: bool = Depen
 
 
 @api_router.get("/admin/leads/{lead_id}/deliverable/board")
-async def render_deliverable_board(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+async def render_deliverable_board(lead_id: str, request: Request, format: str = "png", _: bool = Depends(require_admin)):
+    """Design Plan board. ``format=pdf`` returns the same board as a one-page PDF."""
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
     filename, _pdf_name, _package = _blueprint_filenames(lead, d)
+    return _image_or_pdf(png_bytes, filename, format)
+
+
+@api_router.get("/me/spaces/{lead_id}/board")
+async def my_space_board(lead_id: str, request: Request, format: str = "png", member: Dict[str, Any] = Depends(require_member)):
+    await _member_plan_or_404(lead_id, member)
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    png_bytes = build_image_board(lead=lead, deliverable=d, images=images)
+    if needs_draft_watermark(d):
+        png_bytes = await asyncio.to_thread(watermark_png, png_bytes)
+    filename, _pdf_name, _package = _blueprint_filenames(lead, d)
+    return _image_or_pdf(png_bytes, filename, format, cache="private, no-store")
+
+
+@api_router.get("/me/spaces/{lead_id}/pdf")
+async def my_space_pdf(lead_id: str, request: Request, member: Dict[str, Any] = Depends(require_member)):
+    await _member_plan_or_404(lead_id, member)
+    lead, d, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=d, images=images)
+    if needs_draft_watermark(d):
+        pdf_bytes = await asyncio.to_thread(watermark_pdf, pdf_bytes)
+    _board_name, filename, _package = _blueprint_filenames(lead, d)
     return Response(
-        content=png_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store"},
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
     )
 
 
@@ -1059,9 +1635,10 @@ async def render_deliverable_zone_map(
     lead_id: str,
     request: Request,
     review: bool = False,
+    format: str = "png",
     _: bool = Depends(require_admin),
 ):
-    """Conceptual Zone Map / Flow Plan PNG. ``review=1`` adds the status banner with the lead id."""
+    """Conceptual Zone Map / Flow Plan PNG (``format=pdf`` for a PDF). ``review=1`` adds the status banner."""
     lead, d, images = await _blueprint_render_inputs(lead_id, request)
     png_bytes = build_zone_map(
         lead=lead,
@@ -1072,11 +1649,7 @@ async def render_deliverable_zone_map(
         lead_id=lead_id,
     )
     _board, _pdf, _package, zone_map_name = _zone_map_filenames(lead, d)
-    return Response(
-        content=png_bytes,
-        media_type="image/png",
-        headers={"Content-Disposition": f'inline; filename="{zone_map_name}"', "Cache-Control": "no-store"},
-    )
+    return _image_or_pdf(png_bytes, zone_map_name, format)
 
 
 def _email_inputs(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> Dict[str, str]:
@@ -1129,12 +1702,23 @@ async def render_deliverable_package(lead_id: str, request: Request, _: bool = D
     zone_map = build_zone_map(
         lead=lead, deliverable=d, images=images, final=str(d.get("package_status") or "") == "final"
     )
-    board_name, pdf_name, package_name, zone_map_name = _zone_map_filenames(lead, d)
+    _board_name, _pdf_name, package_name, _zone_map_name = _zone_map_filenames(lead, d)
+    title, draft = _package_name_inputs(lead, d)
+    views = [pair["after"] for pair in images.get("source_pairs") or [] if isinstance(pair, dict) and pair.get("after")]
+    if not views and images.get("after"):
+        views = [images["after"]]
+    rows = package_file_set(
+        title=title,
+        board_png=png_bytes,
+        zone_map_png=zone_map,
+        companion_pdf=pdf_bytes,
+        views=views,
+        draft=draft,
+    )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(board_name, png_bytes)
-        archive.writestr(zone_map_name, zone_map)
-        archive.writestr(pdf_name, pdf_bytes)
+        for row in rows:
+            archive.writestr(row["filename"], row["data"])
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
@@ -1230,6 +1814,9 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
     first_after = afters[0] if afters else None
     rug = resolve_refine_rug(lead, d, rug_override)
     rug = await asyncio.to_thread(describe_rug, [s for s in sources if s], first_after, rug)
+    from package_items import room_inventory, view_check_inputs
+
+    item_qa = {"paint_request": requested_wall_color(lead, d), **view_check_inputs(room_inventory(lead, d))}
     reference: Optional[bytes] = None
     report: List[Dict[str, Any]] = []
     replaced_urls: Dict[str, str] = {}
@@ -1251,14 +1838,16 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
             after=after,
             reference=None if position == 0 else (reference or first_after),
             edit=refine_after_image,
+            qa_kwargs=item_qa,
         )
         row = outcome.report()
         if outcome.replaced and outcome.after_bytes:
             mime = "image/png" if outcome.after_bytes.startswith(b"\x89PNG") else "image/jpeg"
             ext = "png" if mime == "image/png" else "jpg"
-            file_id = await fs_bucket.upload_from_stream(
-                f"ai_{after_label.lower()}_rug_{lead_id}.{ext}",
-                as_gridfs_source(outcome.after_bytes),
+            new_url = await store_photo(
+                fs_bucket,
+                filename=f"ai_{after_label.lower()}_rug_{lead_id}.{ext}",
+                data=outcome.after_bytes,
                 metadata={
                     "content_type": mime,
                     "uploaded_at": _iso(datetime.now(timezone.utc)),
@@ -1269,7 +1858,6 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
                     "refined_from": entry.get("after_url") or "",
                 },
             )
-            new_url = f"/api/uploads/photo/{file_id}"
             replaced_urls[str(entry.get("after_url") or "")] = new_url
             history = list(entry.get("after_history") or [])
             history.append(
@@ -1302,7 +1890,16 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
         "updated_at": _iso(datetime.now(timezone.utc)),
     }
     if replaced_urls:
+        # A refined view must pass the full item check and the cross-view comparison again.
+        verified = await verify_views(
+            lead=lead,
+            deliverable={**d, "source_afters": entries},
+            load=lambda url: _resolve_image_bytes(url, None),
+        )
+        entries = verified["source_afters"]
         update["source_afters"] = entries
+        update["cross_view"] = verified["cross_view"]
+        update["room_inventory"] = verified["room_inventory"]
         front = str(d.get("front_view_url") or "")
         if front in replaced_urls:
             update["front_view_url"] = replaced_urls[front]
@@ -1322,12 +1919,12 @@ async def _run_after_refine(lead_id: str, rug_override: Optional[Dict[str, Any]]
             customer_name=lead.get("name") or "",
             incomplete=str(d.get("package_status") or "") == "incomplete" or any(not p["after"] for p in pairs),
         )
-        sheet_id = await fs_bucket.upload_from_stream(
-            f"contact_sheet_{lead_id}.png",
-            as_gridfs_source(sheet),
+        update["contact_sheet_url"] = await store_photo(
+            fs_bucket,
+            filename=f"contact_sheet_{lead_id}.png",
+            data=sheet,
             metadata={"content_type": "image/png", "uploaded_at": _iso(datetime.now(timezone.utc)), "source": "rug_refine", "lead_id": lead_id, "slot": "contact_sheet"},
         )
-        update["contact_sheet_url"] = f"/api/uploads/photo/{sheet_id}"
     await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
     return {
         "lead_id": lead_id,
@@ -1371,7 +1968,7 @@ async def refine_deliverable_afters(
         raise HTTPException(status_code=409, detail="No approved per-source afters to refine.")
     payload = payload or AfterRefineRequest()
     if wait:
-        return await _run_after_refine(lead_id, payload.rug, payload.labels)
+        return sign_photo_urls(await _run_after_refine(lead_id, payload.rug, payload.labels))
     await db.deliverables.update_one(
         {"lead_id": lead_id},
         {"$set": {"after_refine": {"status": "running", "started_at": _iso(datetime.now(timezone.utc))}}},
@@ -1385,7 +1982,7 @@ async def refine_deliverable_afters_status(lead_id: str, _: bool = Depends(requi
     d = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Deliverable not found")
-    return {"lead_id": lead_id, "rug": d.get("rug"), **(d.get("after_refine") or {"status": "never_run"})}
+    return sign_photo_urls({"lead_id": lead_id, "rug": d.get("rug"), **(d.get("after_refine") or {"status": "never_run"})})
 
 
 def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1400,7 +1997,7 @@ def _client_facing_visuals(images: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         after = pair.get("after")
         if after:
-            visuals.append({"label": f"Organized-{index + 1}", "bytes": after})
+            visuals.append({"label": f"View-{index + 1}", "bytes": after})
     return visuals
 
 
@@ -1419,6 +2016,12 @@ async def send_draft_package_endpoint(
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images)
+    # A review send is never blocked by the consistency check (missing links included); it only reports.
+    try:
+        report = await _consistency(lead, deliverable, images, pdf_bytes)
+    except Exception as exc:
+        logging.warning("Consistency check failed for draft send %s: %s", lead_id, exc)
+        report = {"ok": False, "issues": [], "blocking": 0, "error": str(exc)}
     recipient = (to or lead.get("email") or os.environ.get("ADMIN_EMAIL") or "hello@flowspace.solutions").strip()
     cc_raw = (request.query_params.get("cc") or "").strip()
     cc_emails = [p.strip() for p in cc_raw.split(",") if p.strip()] if cc_raw else []
@@ -1434,24 +2037,142 @@ async def send_draft_package_endpoint(
     )
     if not sent:
         raise HTTPException(status_code=502, detail=error or "Draft package was not sent")
+    now = _iso(datetime.now(timezone.utc))
+    sent_version = package_version(deliverable)
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {"sent_for_review": sent_version, "updated_at": now}},
+    )
     return {
         "sent": True,
         "final": False,
         "package_status": deliverable.get("package_status"),
+        "package_version": sent_version,
+        "sent_for_review": sent_version,
         "to": recipient,
         "cc": cc_emails,
+        "consistency": {
+            "ok": bool(report.get("ok")),
+            "blocks_final": int(report.get("blocking") or 0),
+            "issues": report.get("issues") or [],
+        },
     }
 
 
+async def _consistency(lead: Dict[str, Any], deliverable: Dict[str, Any], images: Dict[str, Any], pdf_bytes: Optional[bytes]) -> Dict[str, Any]:
+    from package_items import consistency_report, customer_texts
+
+    def run() -> Dict[str, Any]:
+        texts = customer_texts(lead, deliverable, images, companion_pdf=pdf_bytes)
+        return consistency_report(lead, deliverable, texts=texts)
+
+    report = await asyncio.to_thread(run)
+    await db.deliverables.update_one(
+        {"lead_id": lead.get("id")},
+        {"$set": {"consistency": report, "updated_at": _iso(datetime.now(timezone.utc))}},
+    )
+    return report
+
+
+@api_router.get("/admin/leads/{lead_id}/deliverable/consistency")
+async def deliverable_consistency(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Shared item list and every mismatch between the views, the plan, the shopping list, and the copy."""
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    return {"lead_id": lead_id, **(await _consistency(lead, deliverable, images, pdf_bytes))}
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/verify")
+async def verify_deliverable_views(lead_id: str, request: Request, _: bool = Depends(require_admin)):
+    """Re-check every stored after against the current room inventory, and the afters against each other.
+
+    Generates nothing and sends nothing. A view that fails stays in the package
+    with its failure recorded, so the final send stays blocked until the view is
+    regenerated. Returns the refreshed consistency report.
+    """
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not stored:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
+    verified = await verify_views(lead=lead, deliverable=stored, load=lambda url: _resolve_image_bytes(url, request))
+    await db.deliverables.update_one(
+        {"lead_id": lead_id},
+        {"$set": {**verified, "updated_at": _iso(datetime.now(timezone.utc))}},
+    )
+    lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
+    pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    report = await _consistency(lead, deliverable, images, pdf_bytes)
+    return sign_photo_urls({"lead_id": lead_id, "emailed": False, "cross_view": verified["cross_view"], **report})
+
+
+OVERRIDE_REASON_MIN_CHARS = 15
+
+
 @api_router.post("/admin/leads/{lead_id}/deliverable/send-final")
-async def send_final_package(lead_id: str, request: Request, _: bool = Depends(require_admin)):
-    """Email the customer board and companion PDF. Refuses an incomplete package."""
+async def send_final_package(
+    lead_id: str,
+    request: Request,
+    override_consistency: bool = False,
+    override_reason: Optional[str] = None,
+    _: bool = Depends(require_admin),
+):
+    """Email the customer board and companion PDF. Refuses an incomplete or inconsistent package.
+
+    The consistency check is recomputed here, on the files about to be sent.
+    ``override_consistency=true`` (admin only) may send past its blocks only with
+    a written ``override_reason``; it is logged and kept in the deliverable's
+    override history. Fidelity failures (a fixed piece changed or missing,
+    views that disagree, something the brief rules out, a basket on a seat or
+    bed) cannot be overridden: fix the views instead.
+    """
+    from package_items import NON_OVERRIDABLE, final_send_block_reason
+
     lead, deliverable, images = await _blueprint_render_inputs(lead_id, request)
     reason = final_email_block_reason(deliverable)
     if reason:
         # Refuse the customer send. Do not rewrite a review lead and do not mark it final.
         raise HTTPException(status_code=409, detail=reason)
     pdf_bytes = build_pdf(lead=lead, deliverable=deliverable, images=images)
+    report = await _consistency(lead, deliverable, images, pdf_bytes)
+    blocked = final_send_block_reason(report)
+    if blocked and not override_consistency:
+        raise HTTPException(status_code=409, detail=blocked)
+    if blocked:
+        blocking = [i for i in report.get("issues") or [] if i.get("severity") == "block"]
+        hard = [i for i in blocking if i.get("code") in NON_OVERRIDABLE]
+        if hard:
+            raise HTTPException(
+                status_code=409,
+                detail="These checks cannot be overridden: " + "; ".join(str(i.get("message")) for i in hard[:3]),
+            )
+        written = " ".join(str(override_reason or "").split())
+        if len(written) < OVERRIDE_REASON_MIN_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail="An override needs override_reason: a written explanation of why this package may go out.",
+            )
+        record = {
+            "at": _iso(datetime.now(timezone.utc)),
+            "reason": blocked,
+            "override_reason": written,
+            "issues": [{"code": i.get("code"), "message": i.get("message")} for i in blocking],
+            "package_version": package_version(deliverable),
+            "actor": "admin",
+        }
+        history = [r for r in (deliverable.get("consistency_override_log") or []) if isinstance(r, dict)]
+        logging.warning(
+            "Consistency override on final send for lead %s (version %s): %s — reason: %s",
+            lead_id,
+            record["package_version"],
+            [i["code"] for i in record["issues"]],
+            written,
+        )
+        await db.deliverables.update_one(
+            {"lead_id": lead_id},
+            {"$set": {"consistency_override": record, "consistency_override_log": [*history, record]}},
+        )
     board_bytes = build_image_board(lead=lead, deliverable=deliverable, images=images)
     zone_map_bytes = build_zone_map(lead=lead, deliverable=deliverable, images=images, final=True)
     sent, error = await send_blueprint(
@@ -1471,9 +2192,10 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
             {"$set": {"status": "pdf_ready", "email_sent": False, "email_error": error, "updated_at": now}},
         )
         raise HTTPException(status_code=502, detail=error or "Final email was not sent")
+    sent_version = package_version(deliverable)
     await db.deliverables.update_one(
         {"lead_id": lead_id},
-        {"$set": {"package_status": "final", "updated_at": now}},
+        {"$set": {"package_status": "final", "sent_for_review": sent_version, "updated_at": now}},
     )
     await db.leads.update_one(
         {"id": lead_id},
@@ -1488,10 +2210,147 @@ async def send_final_package(lead_id: str, request: Request, _: bool = Depends(r
             }
         },
     )
-    return {"sent": True, "final": True, "package_status": "final", "status": "delivered"}
+    return {
+        "sent": True,
+        "final": True,
+        "package_status": "final",
+        "status": "delivered",
+        "package_version": sent_version,
+        "sent_for_review": sent_version,
+    }
+
+
+@api_router.post("/admin/leads/{lead_id}/deliverable/regenerate")
+async def regenerate_package(lead_id: str, _: bool = Depends(require_admin)):
+    """Rewrite the held review copy and re-apply package rules.
+
+    Does not email, and does not mark the package final or approved. The version
+    number stays put until send-draft or send-final has emailed that copy.
+    """
+    from package_facts import next_release
+
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    stored = await db.deliverables.find_one({"lead_id": lead_id}, {"_id": 0})
+    if not stored:
+        raise HTTPException(status_code=404, detail="Deliverable not found")
+    release = next_release(stored)
+    prepared = prepare_deliverable(lead, stored)
+    update = {key: value for key, value in prepared.items() if key != "_id"}
+    for key in (
+        "source_afters",
+        "front_view_url",
+        "floor_plan_url",
+        "view_1_url",
+        "view_2_url",
+        "view_3_url",
+        "contact_sheet_url",
+        "non_room_uploads",
+        "shopping_links",
+        "sent_for_review",
+    ):
+        if key in stored and key not in update:
+            update[key] = stored[key]
+    now = _iso(datetime.now(timezone.utc))
+    update.update(
+        {
+            "lead_id": lead_id,
+            "package_version": release["package_version"],
+            "package_status": release["package_status"],
+            "design_plan_approved": False,
+            "updated_at": now,
+        }
+    )
+    if release.get("sent_for_review"):
+        update["sent_for_review"] = release["sent_for_review"]
+    update.pop("emailed", None)
+    from package_items import consistency_report, room_inventory
+
+    # Views keep the inventory hash they were checked against; a changed inventory reads as stale.
+    update["room_inventory"] = room_inventory(lead, update)
+    update["consistency"] = await asyncio.to_thread(consistency_report, lead, update)
+    await db.deliverables.update_one({"lead_id": lead_id}, {"$set": update})
+    await db.leads.update_one(
+        {"id": lead_id},
+        {
+            "$set": {
+                "status": release["package_status"],
+                "package_status": release["package_status"],
+                "email_sent": False,
+                "updated_at": now,
+            }
+        },
+    )
+    base = f"/api/admin/leads/{lead_id}/deliverable"
+    return {
+        "lead_id": lead_id,
+        "package_version": release["package_version"],
+        "version_label": release["version_label"],
+        "package_status": release["package_status"],
+        "emailed": False,
+        "consistency": {"ok": update["consistency"]["ok"], "blocking": update["consistency"]["blocking"]},
+        "pieces": {
+            "board": f"{base}/board",
+            "board_pdf": f"{base}/board?format=pdf",
+            "zone_map": f"{base}/zone-map",
+            "zone_map_pdf": f"{base}/zone-map?format=pdf",
+            "pdf": f"{base}/pdf",
+            "consistency": f"{base}/consistency",
+        },
+    }
 
 
 # ──────────────────────────── Stripe ─────────────────────────────
+PAYMENTS_DISABLED_MESSAGE = "Payments are disabled in this preview. No charge will be made."
+STRIPE_UNPAID_OUTCOMES = {
+    "checkout.session.expired": "expired",
+    "checkout.session.async_payment_failed": "failed",
+}
+STRIPE_HANDLED_EVENTS = frozenset(
+    {"checkout.session.completed", "checkout.session.async_payment_succeeded", *STRIPE_UNPAID_OUTCOMES}
+)
+
+
+def _stripe_mode(key: str) -> Optional[str]:
+    if key.startswith(("sk_test_", "rk_test_")):
+        return "test"
+    if key.startswith(("sk_live_", "rk_live_")):
+        return "live"
+    return None
+
+
+@api_router.get("/checkout/config")
+async def checkout_config():
+    """Tell the intake up front whether paid checkout can start on this server.
+
+    Never returns the key itself — only whether one is set and its mode.
+    """
+    enabled = bool(STRIPE_API_KEY)
+    return {
+        "enabled": enabled,
+        "mode": _stripe_mode(STRIPE_API_KEY) if enabled else None,
+        "message": None if enabled else PAYMENTS_DISABLED_MESSAGE,
+    }
+
+
+async def _expire_open_checkouts(transactions: List[Dict[str, Any]]) -> None:
+    """Close a project's earlier open Stripe sessions so a resumed checkout can't be paid twice."""
+    for tx in transactions:
+        session_id = tx.get("session_id")
+        if not session_id or tx.get("status") != "open":
+            continue
+        try:
+            await asyncio.to_thread(stripe_sdk.checkout.Session.expire, session_id)
+        except Exception as e:
+            logging.warning("Could not expire earlier checkout %s: %s", session_id, e)
+            continue
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"status": "expired", "updated_at": _iso(datetime.now(timezone.utc))}},
+        )
+
+
 @api_router.post("/checkout/session")
 async def create_checkout(req: CheckoutRequest, request: Request):
     if req.package_id not in PACKAGES:
@@ -1499,10 +2358,42 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     pkg = PACKAGES[req.package_id]
     if pkg["price"] == 0.0:
         raise HTTPException(status_code=400, detail="Free tier does not require checkout")
+    lead_id = str((req.metadata or {}).get("lead_id") or "").strip()
+    if not lead_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "LEAD_REQUIRED", "message": "Finish your project details before payment."},
+        )
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Project not found")
+    member = await optional_member(request)
+    owner_id = str(lead.get("member_id") or "")
+    if owner_id and (not member or member.get("id") != owner_id):
+        # Same answer as a missing lead: do not confirm someone else's project exists.
+        raise HTTPException(status_code=404, detail="Project not found")
+    reason = chargeable_block_reason(lead, pkg)
+    if reason:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PHOTO_REQUIRED", "message": reason, "errors": [{"field": "photos", "message": reason}]},
+        )
+    earlier = await db.payment_transactions.find(
+        {"lead_id": lead_id}, {"_id": 0, "session_id": 1, "payment_status": 1, "status": 1}
+    ).to_list(50)
+    if any(t.get("payment_status") == "paid" for t in earlier):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ALREADY_PAID", "message": "This project is already paid. Follow it from My spaces."},
+        )
     if not STRIPE_API_KEY:
-        raise HTTPException(status_code=503, detail="Stripe not configured")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "PAYMENTS_DISABLED", "message": PAYMENTS_DISABLED_MESSAGE},
+        )
 
     stripe_sdk.api_key = STRIPE_API_KEY
+    await _expire_open_checkouts(earlier)
     origin = req.origin_url.rstrip("/")
     success_url = f"{origin}/success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/?canceled=1#packages"
@@ -1515,8 +2406,10 @@ async def create_checkout(req: CheckoutRequest, request: Request):
     if req.email:
         metadata["email"] = str(req.email)
     if req.metadata:
-        metadata.update({str(k): str(v) for k, v in req.metadata.items()})
-    member = await optional_member(request)
+        metadata.update(
+            {str(k): str(v) for k, v in req.metadata.items() if str(k) not in {"member_id", "lead_id"}}
+        )
+    metadata["lead_id"] = lead_id
     checkout_email = str(req.email) if req.email else None
     if member:
         metadata["member_id"] = member["id"]
@@ -1531,7 +2424,7 @@ async def create_checkout(req: CheckoutRequest, request: Request):
             line_items=[{
                 "price_data": {
                     "currency": pkg["currency"],
-                    "product_data": {"name": f"FlowSpace {pkg['name']} Blueprint"},
+                    "product_data": {"name": f"FlowSpace Design Plan — {pkg['name']}"},
                     "unit_amount": int(pkg["price"] * 100),
                 },
                 "quantity": 1,
@@ -1552,13 +2445,27 @@ async def create_checkout(req: CheckoutRequest, request: Request):
         amount=float(pkg["price"]),
         currency=pkg["currency"],
         email=checkout_email,
-        lead_id=(req.metadata or {}).get("lead_id") or metadata.get("lead_id"),
+        lead_id=lead_id,
         payment_status="initiated",
         status="open",
         metadata=metadata,
     )
     await db.payment_transactions.insert_one(_doc(tx))
     return {"url": session.url, "session_id": session.id}
+
+
+def _public_checkout_status(*, payment_status: Any, status: Any, amount_total: Any, currency: Any) -> Dict[str, Any]:
+    """Anonymous success-page poll: payment fields only. No email, lead_id or member_id."""
+    try:
+        amount = int(amount_total or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    return {
+        "payment_status": str(payment_status or "unknown"),
+        "status": str(status or "unknown"),
+        "amount_total": amount,
+        "currency": str(currency or "usd"),
+    }
 
 
 @api_router.get("/checkout/status/{session_id}")
@@ -1579,13 +2486,12 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
             payment_status="paid",
             stripe_status=existing.get("status", "complete"),
         )
-        return {
-            "payment_status": "paid",
-            "status": existing.get("status", "complete"),
-            "amount_total": int(float(existing.get("amount", 0)) * 100),
-            "currency": existing.get("currency", "usd"),
-            "metadata": meta,
-        }
+        return _public_checkout_status(
+            payment_status="paid",
+            status=existing.get("status", "complete"),
+            amount_total=int(float(existing.get("amount", 0)) * 100),
+            currency=existing.get("currency", "usd"),
+        )
 
     stripe_sdk.api_key = STRIPE_API_KEY
     try:
@@ -1612,43 +2518,77 @@ async def checkout_status(session_id: str, background_tasks: BackgroundTasks):
             payment_status=new_payment_status,
             stripe_status=new_status,
         )
-    return {
-        "payment_status": new_payment_status,
-        "status": new_status,
-        "amount_total": amount_total,
-        "currency": currency,
-        "metadata": metadata,
-    }
+    return _public_checkout_status(
+        payment_status=new_payment_status,
+        status=new_status,
+        amount_total=amount_total,
+        currency=currency,
+    )
+
+
+def _is_dev_environment() -> bool:
+    return (os.environ.get("ENVIRONMENT") or "").strip().lower() in DEV_ENVIRONMENTS
+
+
+def _allow_stripe_test_events() -> bool:
+    """Preview sets ALLOW_STRIPE_TEST_EVENTS=1. Production must not."""
+    return (os.environ.get("ALLOW_STRIPE_TEST_EVENTS") or "").strip() == "1"
 
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Handle Stripe webhooks.
-    On checkout.session.completed with payment_status=paid:
+    On checkout.session.completed (or async_payment_succeeded) with payment_status=paid:
       1. Mark transaction as paid
-      2. Link or create the lead
-      3. Fire automation pipeline in background
+      2. Link the lead
+      3. Fire automation pipeline in background (once per session)
+    On checkout.session.expired / async_payment_failed: mark the transaction
+    expired / failed; no automation.
+
+    Each event.id is recorded in ``stripe_events`` (unique) before handling, so
+    Stripe redeliveries are acknowledged without doing the work twice.
     """
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
+
+    if not STRIPE_WEBHOOK_SECRET and not _is_dev_environment():
+        # Fail closed: without a signing secret any caller could forge a paid event.
+        logging.error("Stripe webhook rejected: STRIPE_WEBHOOK_SECRET is not set outside development")
+        raise HTTPException(status_code=503, detail="Webhook signing is not configured")
 
     try:
         if STRIPE_WEBHOOK_SECRET:
             event = stripe_sdk.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
         else:
-            # Dev mode — trust all events
+            # ENVIRONMENT=development only — trust unsigned events.
             import json
             event = stripe_sdk.Event.construct_from(json.loads(body), stripe_sdk.api_key)
     except Exception as e:
         logging.exception("Webhook verification failed")
         raise HTTPException(status_code=400, detail=str(e))
 
-    if event.type == "checkout.session.completed":
-        try:
-            sess = event.data.object
-            session_id = sess.id
-            payment_status = getattr(sess, "payment_status", "unknown")
+    if not getattr(event, "livemode", False) and not _allow_stripe_test_events():
+        logging.info("Ignoring Stripe test-mode event %s", getattr(event, "id", ""))
+        return {"received": True, "ignored": "test_mode"}
+
+    event_type = getattr(event, "type", "")
+    if event_type not in STRIPE_HANDLED_EVENTS:
+        return {"received": True}
+
+    event_id = str(getattr(event, "id", "") or "")
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Event has no id")
+    if not await _record_stripe_event(event_id, event_type):
+        logging.info("Stripe event %s (%s) already processed — skipping", event_id, event_type)
+        return {"received": True, "duplicate": True}
+
+    try:
+        sess = event.data.object
+        session_id = sess.id
+        if event_type in STRIPE_UNPAID_OUTCOMES:
+            await _mark_checkout_unpaid(session_id, STRIPE_UNPAID_OUTCOMES[event_type])
+        else:
             metadata = _safe_metadata(sess)
             customer_email = getattr(sess, "customer_email", None) or metadata.get("email")
             await _fulfill_paid_checkout(
@@ -1656,14 +2596,15 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 metadata=metadata,
                 customer_email=customer_email,
                 background_tasks=background_tasks,
-                payment_status=payment_status,
+                payment_status=getattr(sess, "payment_status", "unknown"),
                 stripe_status=getattr(sess, "status", "complete"),
             )
-        except Exception:
-            # Log the FULL traceback so it's visible in Railway logs, then
-            # re-raise as a clean 500 so Stripe knows to retry.
-            logging.exception("Webhook processing failed for checkout.session.completed")
-            raise HTTPException(status_code=500, detail="Internal error processing webhook")
+    except Exception:
+        # Forget the event so Stripe's retry is processed, log the FULL
+        # traceback for Railway, and return a clean 500 so Stripe retries.
+        await db.stripe_events.delete_one({"event_id": event_id})
+        logging.exception("Webhook processing failed for %s", event_type)
+        raise HTTPException(status_code=500, detail="Internal error processing webhook")
 
     return {"received": True}
 
@@ -1686,12 +2627,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _requeue_stale_render(lead: Dict[str, Any]) -> None:
+    """Restart recovery uses the admin retry path (force) behind the render semaphore."""
+    await _start_automation_for_lead(lead, None, force=True)
+
+
+_SWEEP_TASK: Dict[str, Optional[asyncio.Task]] = {"task": None}
+
+
+def _recovery_sweep_enabled() -> bool:
+    return (os.environ.get("RENDER_RECOVERY_SWEEP") or "1").strip() != "0"
+
+
 @app.on_event("startup")
 async def _startup():
     await seed_gallery_if_empty()
     await ensure_member_indexes(db)
+    await ensure_reset_indexes(db)
+    await ensure_payment_indexes(db)
+    if _recovery_sweep_enabled():
+        _SWEEP_TASK["task"] = asyncio.create_task(sweep_forever(db, _requeue_stale_render))
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    task = _SWEEP_TASK.get("task")
+    if task:
+        task.cancel()
     client.close()

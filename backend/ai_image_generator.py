@@ -16,9 +16,11 @@ is scheduled to shut down on 2026-10-23, so new work should not target it.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+import re
 from typing import Any, Dict, Optional, Tuple
 
 from openai import AsyncOpenAI
@@ -66,16 +68,34 @@ def _with_space_rails(
     lead: Dict[str, Any],
     extra_constraint: str,
     deliverable: Optional[Dict[str, Any]] = None,
+    *,
+    photo_edit: bool = True,
 ) -> str:
-    """Append kids-room rails. Keep this call if the image provider changes."""
+    """Append kids-room rails and the shared item list. Keep this call if the image provider changes.
+
+    A text-to-image render (no customer photo) has no fixed pieces to lock, so
+    it only gets the basket rule from the shared list.
+    """
+    from package_items import additions_rails, avoid_rails, basket_rails, fixed_items_rails
     from space_rails import image_prompt_rails, rug_prompt_rails
 
     must_stay = str((lead or {}).get("must_stay") or "").strip()
-    must_line = f"MUST KEEP from the photo: {must_stay}." if must_stay else ""
+    must_line = (
+        f"MUST KEEP from the photo: {must_stay}. Every existing furniture piece and large object "
+        "(including any playpen or baby gear) stays in its place and in frame. Do not add new "
+        "furniture such as consoles, shelves, cabinets, or tables; only tidy loose items, add the "
+        "planned additions, and add small accessories."
+        if must_stay
+        else ""
+    )
     parts = [
         image_prompt_rails(lead, deliverable),
         rug_prompt_rails(lead, deliverable),
         must_line,
+        fixed_items_rails(lead, deliverable) if photo_edit else "",
+        basket_rails(lead),
+        avoid_rails(lead),
+        additions_rails(lead, deliverable) if photo_edit else "",
         (extra_constraint or "").strip(),
     ]
     return " ".join(part for part in parts if part)
@@ -83,18 +103,18 @@ def _with_space_rails(
 # Color prefs are for soft goods only. A warm fallback here used to leak onto walls.
 SOFT_GOODS_COLOR_FALLBACK = "neutral textiles that complement the existing wall color"
 
-# Shared rails for image edit, text-to-image, and QA retries.
+# Shared rails for image edit, text-to-image, and QA retries. Wall color comes
+# from each room's own source photo; never name a specific hue here.
 WALL_PRESERVE_RAILS = (
     "CRITICAL EDIT LOCK — WALL PAINT MUST MATCH THE REFERENCE PHOTO EXACTLY. "
-    "Copy the existing wall paint 1:1: same hue, same lightness — light blue / "
-    "cool gray-blue / light gray-blue if that is what the photo shows. "
-    "FORBIDDEN: warm taupe, beige, cream, sand, greige, terracotta, or earth-tone "
-    "wall makeovers. Do not repaint, re-tint, color-grade, white-balance, or restyle "
-    "the walls. Color preferences apply ONLY to textiles, pillows, baskets, rugs, "
-    "throws, and accessories — never to wall paint. "
+    "Copy the existing wall paint of this source photo 1:1: same hue, same lightness, "
+    "same warmth — whether the walls are warm, cool, neutral, white, or colored. "
+    "Do not repaint, re-tint, color-grade, white-balance, or restyle the walls, and "
+    "do not shift warm walls cooler or cool walls warmer. Color preferences apply ONLY "
+    "to textiles, pillows, baskets, rugs, throws, and accessories — never to wall paint. "
 )
 
-ORGANIZE_RAILS = (
+STRUCTURE_RAILS = (
     "HARD CONSTRAINT: Windows and room dimensions must stay ~95% accurate to the "
     "source photo — same window count, size, and placement, same wall lengths, "
     "same camera angle, same architecture. Do not add, remove, move, or invent "
@@ -108,22 +128,86 @@ ORGANIZE_RAILS = (
     "ceiling — never mounted on a wall. "
     "Gravity must be correct: floor at the bottom of the frame, ceiling at the top. "
     "Do not rotate the room or treat a wall as the ceiling. "
-    + WALL_PRESERVE_RAILS
 )
+
+ORGANIZE_RAILS = STRUCTURE_RAILS + WALL_PRESERVE_RAILS
 
 RETRY_RAILS = (
     "PREVIOUS RENDER FAILED QA. The last attempt covered a window/door, put a "
     "ceiling fixture on a wall / used wrong gravity, or changed the wall paint. "
     "Re-edit the source photo: keep every window fully visible, keep fans and lights "
-    "on the ceiling, floor at the bottom, and match the original light wall color "
-    "from the photo — light blue / cool gray-blue, not warm taupe or beige. "
+    "on the ceiling, floor at the bottom, and keep the original wall color exactly "
+    "as this source photo shows it. "
     "Do not repeat the failed layout."
 )
 
 WALL_RETRY_CONSTRAINT = (
-    "FAILED QA: walls were repainted. Keep the original light wall color from the "
-    "photo exactly — light blue / cool gray-blue, not warm taupe or beige. "
+    "FAILED QA: walls were repainted. Keep the original wall color from this source "
+    "photo exactly — same hue and warmth as the photo. "
     "Do not color-grade or restyle the walls. Color preferences are textiles only."
+)
+
+
+def requested_wall_color(
+    lead: Optional[Dict[str, Any]],
+    deliverable: Optional[Dict[str, Any]] = None,
+) -> str:
+    """The wall color the customer asked for, or "" when they did not ask to paint.
+
+    Prefers the plan's paint fields (the drafter only fills them on a request),
+    then falls back to the customer's own sentence that mentions paint.
+    """
+    from ai_drafter import PAINT_REQUEST_RE, customer_requested_paint, is_keep_existing_wall
+
+    if not customer_requested_paint(lead):
+        return ""
+    deliverable = deliverable or {}
+    if not is_keep_existing_wall(deliverable):
+        name = str(deliverable.get("wall_color_name") or "").strip()
+        hex_color = str(deliverable.get("wall_color_hex") or "").strip()
+        if name and hex_color:
+            return f"{name} ({hex_color})"
+        if name or hex_color:
+            return name or hex_color
+    for key in ("goals", "biggest_challenge", "bothers_other", "feeling_other", "daily_improvement", "notes", "must_stay"):
+        text = str((lead or {}).get(key) or "")
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+            if PAINT_REQUEST_RE.search(sentence):
+                return sentence.strip()[:200]
+    return "the wall color the customer described"
+
+
+def paint_request_rails(color: str) -> str:
+    return (
+        f"CUSTOMER PAINT REQUEST: the customer explicitly asked for new wall paint — {color}. "
+        "Repaint the walls in that requested color only, as an even, realistic painted finish. "
+        "Do not invent any other wall color. Color preferences for textiles and accessories "
+        "never change the walls. "
+    )
+
+
+def _wall_rails(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    """(rails, closing line) for this lead's walls."""
+    color = requested_wall_color(lead, deliverable)
+    if color:
+        return paint_request_rails(color), "Paint the walls only in the color the customer requested. "
+    return (
+        WALL_PRESERVE_RAILS,
+        "Do not change wall paint. The walls must look like the same painted surface as the input photo. ",
+    )
+
+
+BASKET_RETRY_CONSTRAINT = (
+    "FAILED QA: a basket sat on a seat, a bed, or a shoe bench. Move every basket to the floor beside "
+    "furniture or into shelving. Seats stay free and shoes stay reachable."
+)
+
+# Sent with the second image of an edit: an approved after of the same room from another angle.
+CONSISTENCY_REFERENCE_CONSTRAINT = (
+    "SECOND IMAGE = REFERENCE ONLY: it is the already approved organized view of this same room from a "
+    "different angle. Do not copy its camera or framing. Match it for every fixed furniture piece, the rug, "
+    "the artwork, and every planned addition that is also visible in this photo: same structure, doors, "
+    "drawers, shelves, color, material, size, and position."
 )
 
 SAME_CAMERA_CONSTRAINT = (
@@ -160,24 +244,30 @@ def _build_kontext_prompt(
     color_str = _soft_goods_colors(lead)
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "everyday items"
 
-    rails = ORGANIZE_RAILS
+    wall_rails, wall_close = _wall_rails(lead, deliverable)
+    rails = STRUCTURE_RAILS + wall_rails
     if stronger_rails:
         rails = rails + RETRY_RAILS
     extra = _with_space_rails(lead, extra_constraint, deliverable)
-    if extra and not extra.endswith((".", " ")):
+    if extra and not extra.endswith(" "):
+        extra = extra if extra.endswith(".") else extra + "."
         extra = extra + " "
+    if wall_rails is WALL_PRESERVE_RAILS:
+        lock = (
+            "WALL PAINT LOCK: match this reference photo's exact wall paint — whatever "
+            "color the walls are in this photo, they stay that color. "
+        )
+    else:
+        lock = "WALL PAINT: change the walls only to the color the customer requested. "
 
     return (
         f"Edit this existing {space} photo while keeping the original composition. "
-        "WALL PAINT LOCK: match the reference photo's exact wall paint — light blue / "
-        "cool gray-blue / light gray-blue stays that color. Do not warm, taupe, beige, "
-        "or earth-tone the walls. "
+        f"{lock}"
         f"Change only furniture, storage, and loose items into a tidy {style_str} layout. "
         f"Soft-goods colors only (textiles, baskets, pillows — NEVER walls): {color_str}. "
         f"{nursery_storage_line(lead, storage_str)}"
         f"{rails}{extra}"
-        "Do not change wall paint. The walls must look like the same painted surface as "
-        "the input photo. Photorealistic, natural lighting, "
+        f"{wall_close}Photorealistic, natural lighting, "
         "no people, no text or watermarks."
     )
 
@@ -202,20 +292,27 @@ def _build_text_to_image_prompt(
     feeling_str = ", ".join(_humanize(lead.get("desired_feeling") or [], FEELING)) or "calm and functional"
     storage_str = ", ".join(_humanize(lead.get("storage_needs") or [], STORAGE)) or "general storage"
 
+    color = requested_wall_color(lead, deliverable)
+    if color:
+        walls = paint_request_rails(color)
+    else:
+        walls = (
+            "Do not feature a painted-wall makeover — keep existing wall color. "
+            "Use a plain, believable wall finish; apply color preferences only to "
+            "textiles and accessories, never walls. "
+        )
     rails = (
         "Do not invent unusual windows or exaggerated room dimensions. "
         "Never place shelves or storage over windows or doors. "
         "Keep ceiling fans, lights, and fixtures on the ceiling, never on a wall. "
         "Gravity correct: floor at the bottom, ceiling at the top. "
-        "Do not feature a painted-wall makeover — keep existing wall color. "
-        "Match existing wall paint exactly — light blue / cool gray-blue if that is "
-        "the room; apply color preferences only to textiles and accessories, never walls. "
-        "FORBIDDEN: warm taupe or beige wall makeovers. "
+        + walls
     )
     if stronger_rails:
         rails = rails + RETRY_RAILS
-    extra = _with_space_rails(lead, extra_constraint, deliverable)
-    if extra and not extra.endswith((".", " ")):
+    extra = _with_space_rails(lead, extra_constraint, deliverable, photo_edit=False)
+    if extra and not extra.endswith(" "):
+        extra = extra if extra.endswith(".") else extra + "."
         extra = extra + " "
     storage_line = nursery_storage_line(lead, storage_str)
     if storage_line.startswith("Tidy only"):
@@ -334,7 +431,7 @@ async def refine_after_image(prompt: str, after: bytes, reference: Optional[byte
     """Targeted edit of an existing organized after (same Images edit model and settings)."""
     client = _openai_client(_require_openai_key())
     try:
-        data, _mime = await _edit_image(client, prompt, upright_bytes(after) or after, reference)
+        data, _mime = await _edit_image(client, prompt, (await asyncio.to_thread(upright_bytes, after)) or after, reference)
     except RuntimeError:
         raise
     except Exception as exc:
@@ -351,9 +448,13 @@ async def generate_front_view(
     reference_photo_bytes: Optional[bytes] = None,
     stronger_rails: bool = False,
     extra_constraint: str = "",
+    consistency_reference: Optional[bytes] = None,
 ) -> Tuple[bytes, str]:
     """
     Generate a room rendering.
+
+    ``consistency_reference`` is an approved after of the same room from another
+    angle; it is attached as a second image so fixed pieces match across views.
 
     If ``reference_photo_bytes`` is provided (the customer's actual uploaded photo),
     uses the OpenAI Images edit API on that exact photo — preserving the real room.
@@ -371,7 +472,9 @@ async def generate_front_view(
 
     try:
         if reference_photo_bytes:
-            reference_photo_bytes = upright_bytes(reference_photo_bytes) or reference_photo_bytes
+            reference_photo_bytes = (
+                await asyncio.to_thread(upright_bytes, reference_photo_bytes)
+            ) or reference_photo_bytes
             prompt = _build_edit_prompt(
                 lead,
                 deliverable,
@@ -379,7 +482,12 @@ async def generate_front_view(
                 extra_constraint=extra_constraint,
             )
             logger.info("OpenAI image edit prompt: %s", prompt[:200])
-            image_bytes, mime = await _edit_image(client, prompt, reference_photo_bytes)
+            reference = (
+                (await asyncio.to_thread(upright_bytes, consistency_reference)) or consistency_reference
+                if consistency_reference
+                else None
+            )
+            image_bytes, mime = await _edit_image(client, prompt, reference_photo_bytes, reference)
         else:
             prompt = _build_text_to_image_prompt(
                 lead,
@@ -447,8 +555,9 @@ def _supporting_prompt(lead: Dict[str, Any], deliverable: Optional[Dict[str, Any
     base = _build_edit_prompt(lead, deliverable)
     return (
         f"{base} {instruction} "
-        "This must stay a photo of the same organized room. Do not repaint the walls. "
-        "Do not add people, text, or watermarks."
+        "This must stay a photo of the same organized room. "
+        + ("" if requested_wall_color(lead, deliverable) else "Do not repaint the walls. ")
+        + "Do not add people, text, or watermarks."
     )
 
 
@@ -471,15 +580,21 @@ async def generate_supporting_views(
     source = organized_bytes or reference_photo_bytes
     if not source:
         return {}
-    source = upright_bytes(source) or source
-    before = upright_bytes(reference_photo_bytes) if reference_photo_bytes else None
+    source = (await asyncio.to_thread(upright_bytes, source)) or source
+    before = (
+        await asyncio.to_thread(upright_bytes, reference_photo_bytes)
+        if reference_photo_bytes
+        else None
+    )
     if before is None:
         before = reference_photo_bytes
 
     api_key = _require_openai_key()
     client = _openai_client(api_key)
+    from package_items import room_inventory, view_check_inputs
     from render_qa import review_organized_render
 
+    item_qa = view_check_inputs(room_inventory(lead, deliverable))
     found: Dict[str, bytes] = {}
     for key, instruction, _caption in supporting_view_plan(lead):
         accepted: Optional[bytes] = None
@@ -493,8 +608,15 @@ async def generate_supporting_views(
             except Exception as exc:
                 logger.warning("[images] Supporting view %s failed: %s", key, exc)
                 break
-            qa = review_organized_render(after_bytes=raw, before_bytes=before or source, attempt=attempt)
-            if qa.failed:
+            qa = await asyncio.to_thread(
+                review_organized_render,
+                after_bytes=raw,
+                before_bytes=before or source,
+                attempt=attempt,
+                paint_request=requested_wall_color(lead, deliverable),
+                **item_qa,
+            )
+            if qa.failed or qa.skipped:
                 logger.warning(
                     "[images] Dropping supporting view %s after QA: %s",
                     key,
@@ -502,7 +624,9 @@ async def generate_supporting_views(
                 )
                 break
             references = [source, *found.values()]
-            if any(renders_too_similar(raw, ref) for ref in references):
+            if await asyncio.to_thread(
+                lambda: any(renders_too_similar(raw, ref) for ref in references)
+            ):
                 logger.warning(
                     "[images] Supporting view %s is too similar to the hero or another view (attempt %s)",
                     key,

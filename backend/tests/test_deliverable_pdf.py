@@ -204,7 +204,7 @@ class TestPdfGeneration:
         assert "Bedroom Design Plan" not in text
         assert "Total" in text  # shopping list total appears
         assert "Shopping Links" in text or "shopping list" in text.lower()
-        assert "The FlowSpace Design Team" in text
+        assert "FlowSpace Design System" in text
         assert 1 <= page_count <= 3
 
     def test_pdf_without_customer_photos(self, lead_with_photo):

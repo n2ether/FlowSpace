@@ -115,7 +115,7 @@ class _ScriptedMessages:
         self.replies = list(replies)
         self.calls = []
 
-    def create(self, **kwargs):
+    async def create(self, **kwargs):
         self.calls.append(kwargs)
         text, stop = self.replies[len(self.calls) - 1]
         return SimpleNamespace(
@@ -128,12 +128,12 @@ def _install_client(monkeypatch, replies):
     messages = _ScriptedMessages(replies)
 
     class _Client:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kwargs):
             self.api_key = api_key
             self.messages = messages
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-live-key")
-    monkeypatch.setattr(ai_drafter.anthropic, "Anthropic", _Client)
+    monkeypatch.setattr(ai_drafter.anthropic, "AsyncAnthropic", _Client)
     return messages
 
 
@@ -194,3 +194,38 @@ def test_draft_raises_retryable_error_when_both_attempts_fail(monkeypatch):
     assert "Retry this lead" in message
     assert "JSONDecodeError" not in message
     assert not isinstance(caught.value, json.JSONDecodeError)
+
+
+def test_event_loop_stays_responsive_during_slow_draft(monkeypatch):
+    """A slow Anthropic reply must not block other coroutines on the loop."""
+
+    class _SlowMessages:
+        async def create(self, **kwargs):
+            await asyncio.sleep(0.5)
+            return SimpleNamespace(
+                content=[SimpleNamespace(text=TRUNCATED_KIDS_ROOM)],
+                stop_reason="max_tokens",
+            )
+
+    class _Client:
+        def __init__(self, api_key, **kwargs):
+            self.messages = _SlowMessages()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-live-key")
+    monkeypatch.setattr(ai_drafter.anthropic, "AsyncAnthropic", _Client)
+
+    async def scenario():
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        task = asyncio.create_task(ticker())
+        await draft_deliverable({"space_type": "closet", "name": "Camila"})
+        task.cancel()
+        return ticks
+
+    assert asyncio.run(scenario()) >= 10

@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { PHOTO_ACCEPT } from "../lib/photoFiles";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Upload, X, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -457,7 +458,7 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
                             <input
                                 id="q-photo-input"
                                 type="file"
-                                accept="image/*"
+                                accept={PHOTO_ACCEPT}
                                 multiple
                                 className="hidden"
                                 onChange={(e) => handleFiles(e.target.files)}
@@ -470,6 +471,7 @@ const Questionnaire = ({ presetPackage = "", onDone, embedded = false }) => {
                                     copy={q.orientation}
                                     onRotate={rotatePending}
                                     onConfirm={confirmPending}
+                                    busy={uploading}
                                 />
                             )}
                             {form.photos.length > 0 && (

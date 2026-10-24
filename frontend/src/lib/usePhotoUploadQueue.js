@@ -1,10 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { isHeifFile, isSupportedPhotoFile } from "./photoFiles";
 import { bakeRotation, inspectPhotoFile } from "./photoOrientation";
 
-export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
+export function usePhotoUploadQueue({ uploadFile, remainingSlots, onReject }) {
     const [uploading, setUploading] = useState(false);
     const [pending, setPending] = useState(null);
     const [queue, setQueue] = useState([]);
+    // A second tap on "Ceiling is up" before the first upload returns would add the same photo twice.
+    const confirming = useRef(false);
 
     const uploadBaked = useCallback(
         async (file, quarterTurns) => {
@@ -23,6 +26,17 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
                 return;
             }
             const [file, ...rest] = files;
+            if (!isSupportedPhotoFile(file)) {
+                if (onReject) onReject(file);
+                await processQueue(rest);
+                return;
+            }
+            if (isHeifFile(file)) {
+                // Most browsers cannot decode HEIC; the backend converts and uprights it.
+                await uploadFile(file);
+                await processQueue(rest);
+                return;
+            }
             try {
                 const inspection = await inspectPhotoFile(file);
                 if (!inspection.needsNudge) {
@@ -40,12 +54,13 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
                 await processQueue(rest);
             }
         },
-        [uploadBaked, uploadFile],
+        [uploadBaked, uploadFile, onReject],
     );
 
     const handleFiles = useCallback(
-        async (fileList) => {
-            const max = typeof remainingSlots === "number" ? remainingSlots : 99;
+        async (fileList, { limit } = {}) => {
+            const max =
+                typeof limit === "number" ? limit : typeof remainingSlots === "number" ? remainingSlots : 99;
             const files = Array.from(fileList || []).slice(0, Math.max(0, max));
             if (!files.length) return;
             setUploading(true);
@@ -64,7 +79,8 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
     }, [pending]);
 
     const confirmPending = useCallback(async () => {
-        if (!pending) return;
+        if (!pending || confirming.current) return;
+        confirming.current = true;
         setUploading(true);
         try {
             await uploadBaked(pending.inspection.file, pending.quarterTurns);
@@ -73,6 +89,7 @@ export function usePhotoUploadQueue({ uploadFile, remainingSlots }) {
             const rest = queue;
             setPending(null);
             setQueue([]);
+            confirming.current = false;
             await processQueue(rest);
         }
     }, [pending, queue, processQueue, uploadBaked]);

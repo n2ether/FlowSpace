@@ -18,6 +18,13 @@ here, so a new lead gets the same structure without per-lead code.
    assessment live in the modular Companion Guide, not on the board.
 6. Every surface reads DRAFT / REVIEW until the package is released.
 7. Copy is evergreen (see ``evergreen_copy``).
+8. A package is three separate pieces (Design Plan, Room Flow, Companion
+   Guide) with one version number; their facts come from ``package_facts``.
+
+Nicholas's Nursery keeps its approved v5 copy (the ``NURSERY_*`` defaults).
+Every other room uses the general standard below: a functional / optional
+decorative shopping split, the three-step Measure → Set up → Style roadmap,
+the Intake → Reset process, and the companion sections that go with them.
 """
 from __future__ import annotations
 
@@ -82,6 +89,42 @@ REVIEW_PILL = "DRAFT / REVIEW"
 REVIEW_NOTE = ("Internal review only", "Not final · not released")
 RELEASED_STATUS = "final"
 
+# ──────────────────────────── Package and versions ─────────────────────────────
+
+BRAND_ATTRIBUTION = BRAND_NAME
+DESIGN_SYSTEM_NAME = "FlowSpace Design System"
+
+# The three separate files of every package, in reading order.
+PACKAGE_PIECES: Tuple[Tuple[str, str], ...] = (
+    ("design_plan", "Design Plan"),
+    ("room_flow", "Room Flow"),
+    ("companion_guide", "Companion Guide"),
+)
+
+FIRST_PACKAGE_VERSION = 1
+
+
+def package_version(deliverable: Optional[Dict[str, Any]]) -> int:
+    """Version of the stored package. A package from before versioning is version 1."""
+    try:
+        version = int((deliverable or {}).get("package_version") or FIRST_PACKAGE_VERSION)
+    except (TypeError, ValueError):
+        version = FIRST_PACKAGE_VERSION
+    return max(FIRST_PACKAGE_VERSION, version)
+
+
+def version_label(version: int) -> str:
+    """Review chrome painted on the board, Room Flow and PDF footer until release.
+
+    Customer-facing, so English only. File names use :func:`version_tag` instead.
+    """
+    return f"Version {int(version)} for your review"
+
+
+def version_tag(version: int) -> str:
+    """ASCII tag for file names."""
+    return f"V{int(version)}"
+
 
 def is_released(deliverable: Optional[Dict[str, Any]]) -> bool:
     """True only once a package is final or a reviewer set ``design_plan_approved``.
@@ -136,6 +179,10 @@ WHY_IT_WORKS_BODY = (
 DEFAULT_SUBTITLE = "A calmer flow for the room you already have"
 
 SHOPPING_DISCLAIMER = "Representative examples for reference; prices and availability may vary."
+# Board caption for every room but the nursery (which keeps its approved v5 line).
+BOARD_SHOPPING_CAPTION = (
+    "Representative examples for reference. Full shopping detail, links, and extra costs are in the Companion Guide."
+)
 SNAPSHOT_TOTAL_LABEL = "Illustrative reference total"
 SNAPSHOT_MAX_ITEMS = 5
 KEPT_LABEL = "Kept as-is"
@@ -199,6 +246,83 @@ DEFAULT_ROADMAP: Tuple[str, ...] = (
     "Do a short reset now and then so the room stays easy.",
 )
 
+# ──────────────────────────── General standard (every room but the nursery) ─────────────────────────────
+
+# (title, board body, companion detail). The same three steps print on all three pieces.
+GENERAL_ROADMAP: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "Measure and verify",
+        "Measure walls, tables, and niches, then check each item against them.",
+        "Measure the walls, tables, and niches where new pieces will go. Check every size, finish, "
+        "and price against those measurements before you buy.",
+    ),
+    (
+        "Set up functional storage",
+        "Place the functional items first so everyday things have a home.",
+        "Set up the functional items first. Give everyday things one home each and keep the path clear.",
+    ),
+    (
+        "Add styling",
+        "Add the optional decorative pieces once storage is working.",
+        "Add the optional decorative pieces last, once the functional storage is working.",
+    ),
+)
+
+# How every FlowSpace project runs, in order.
+PROCESS_STEPS: Tuple[Tuple[str, str], ...] = (
+    ("Intake", "You shared photos of the room and how you use it."),
+    ("Clarify", "We confirmed what stays and what each area needs."),
+    ("Design", "The Design Plan, the Room Flow, and this guide."),
+    ("Verify", "Measure and check each item before you buy."),
+    ("Set up", "Functional storage first, styling after."),
+    ("Reset", "A self-paced reset keeps the room working."),
+)
+PROCESS_LINE = " · ".join(name for name, _ in PROCESS_STEPS)
+
+WHAT_STAYS_TEXT = "Keep the original wall color and all current furniture."
+WHAT_STAYS_CHIPS = ("Original wall color", "All current furniture")
+
+LIVING_ROOM_SUBTITLE = "A calmer flow through the living, dining, and entry areas."
+
+# Project names by room. The nursery names the child (``customer_project_title``).
+PROJECT_TITLES = {"living_room": "Living Room"}
+
+MEASURE_BEFORE_BUYING = "measure before buying"
+
+SHOPPING_FUNCTIONAL = "Functional"
+SHOPPING_DECORATIVE = "Optional decorative"
+TAX_SHIPPING_NOTE = "before tax and shipping"
+LINK_TESTED = "Tested product link"
+LINK_REFERENCE = "Reference search"
+LINK_TESTED_NOTE = "Tested product links open the exact product page we checked."
+LINK_REFERENCE_NOTE = "Reference searches open a labeled retailer search to compare options."
+LINK_KIND_NOTE = f"{LINK_TESTED_NOTE} {LINK_REFERENCE_NOTE}"
+# A price not read from the tested product page is an estimate, and says so.
+PRICE_ESTIMATE_MARK = "est."
+PRICE_ESTIMATE_NOTE = "est. = estimated price"
+PRICE_ESTIMATE_GUIDE_NOTE = "Prices marked estimated were not confirmed on the product page; check them before you buy."
+
+
+def link_kind_note(kinds) -> str:
+    """Explain only the link kinds the guide actually prints; never claim a tested link that isn't there."""
+    kinds = {str(k) for k in kinds or ()}
+    parts = []
+    if "tested" in kinds:
+        parts.append(LINK_TESTED_NOTE)
+    if "reference" in kinds:
+        parts.append(LINK_REFERENCE_NOTE)
+    return " ".join(parts)
+
+SELF_PACED_RESET_TITLE = "Self-paced reset"
+SELF_PACED_RESET = (
+    "Whenever the room starts to drift, go at your own pace: return each item to its home, "
+    "clear the path, and empty the catch-all. The reset keeps the system. It is not a remodel."
+)
+SELF_PACED_RESET_NO_CATCH_ALL = (
+    "Whenever the room starts to drift, go at your own pace: return each item to its home "
+    "and clear the path. The reset keeps the system. It is not a remodel."
+)
+
 # ──────────────────────────── Palette ─────────────────────────────
 
 WARM_NEUTRAL_PALETTE: Tuple[Tuple[str, str], ...] = (
@@ -235,6 +359,21 @@ COMPANION_GUIDE_MODULES: Tuple[str, ...] = (
     "shopping",
     "views",
 )
+# The general guide: process and first step up front, then what to check and what comes first,
+# the essentials, styling and assessment, the reset, the shopping list, and one page per view.
+GENERAL_COMPANION_MODULES: Tuple[str, ...] = (
+    "process",
+    "first_step",
+    "check",
+    "priority",
+    "safety",
+    "climate",
+    "styling",
+    "assessment",
+    "reset",
+    "shopping",
+    "views",
+)
 COMPANION_MODULE_TITLES = {
     "safety": "SAFETY ESSENTIALS",
     "climate": "CLIMATE COMFORT",
@@ -243,17 +382,26 @@ COMPANION_MODULE_TITLES = {
     "assessment": "DESIGNER ASSESSMENT",
     "shopping": "SHOPPING LIST",
     "views": "BEFORE AND AFTER",
+    "process": "HOW FLOWSPACE WORKS",
+    "first_step": "FIRST STEP",
+    "check": "CHECK BEFORE BUYING",
+    "priority": "FUNCTIONAL VS DECORATIVE PRIORITY",
+    "reset": "SELF-PACED RESET",
 }
 COMPANION_NAME = "Companion Guide"
 
 
-def companion_modules(deliverable: Optional[Dict[str, Any]]) -> Tuple[str, ...]:
-    """Modules this package prints. Unknown names are ignored; the order is always the standard one."""
+def companion_modules(deliverable: Optional[Dict[str, Any]], *, general: bool = False) -> Tuple[str, ...]:
+    """Modules this package prints. Unknown names are ignored; the order is always the standard one.
+
+    ``general`` picks the general guide; the nursery keeps its approved module list.
+    """
+    standard = GENERAL_COMPANION_MODULES if general else COMPANION_GUIDE_MODULES
     chosen = (deliverable or {}).get("companion_modules")
     if not isinstance(chosen, (list, tuple)) or not chosen:
-        return COMPANION_GUIDE_MODULES
+        return standard
     wanted = {str(name).strip().lower() for name in chosen}
-    return tuple(name for name in COMPANION_GUIDE_MODULES if name in wanted)
+    return tuple(name for name in standard if name in wanted)
 
 
 # ──────────────────────────── Email ─────────────────────────────
@@ -275,5 +423,9 @@ FlowSpace Design Plan standards (every plan):
 - action_plan is exactly three steps in order. No "Week 1", "Day 2", dates, or durations.
 - zones: up to four, each with one clear job. For a nursery use Sleep, Change, Comfort, and Play + Storage.
 - shopping_list names are generic product descriptions (no brand or retailer names). Prices are typical mid-range retail examples.
+- Give each shopping_list item "priority": "functional" (storage, organizing, safety, the entry catch-all) or "decorative" (optional styling: art, frames, pillows, throws, plants).
+- Do not state an exact size for a frame, basket, print, tray, pillow, or any other product unless the customer gave wall, table, or niche measurements; write "measure before buying" instead.
+- A playpen is an item inside a zone, never a zone of its own.
+- Outside a nursery, action_plan is: measure and verify, set up functional storage, then add styling.
 - Safety, climate, maintenance, and styling detail belong in the companion guide; keep them out of intro and summary.
 """

@@ -68,6 +68,15 @@ class _FakeFS:
         self.store[oid] = data if isinstance(data, bytes) else bytes(data)
         return oid
 
+    async def upload_from_stream_with_id(self, file_id, filename, source, metadata=None):
+        if self.fail_upload:
+            raise RuntimeError("gridfs unavailable")
+        data = source.read() if hasattr(source, "read") else source
+        self.uploads += 1
+        self.store[str(file_id)] = data if isinstance(data, bytes) else bytes(data)
+        self.metadata = getattr(self, "metadata", {})
+        self.metadata[str(file_id)] = metadata or {}
+
     async def open_download_stream(self, oid):
         key = str(oid)
         if key not in self.store:
@@ -230,7 +239,9 @@ def test_automation_does_not_crash_pipeline_on_flux_failure(monkeypatch):
 
     sent, captured, db, fs = _run(monkeypatch, generate=boom)
     assert sent is True
-    assert db.leads.docs["lead-img-1"]["status"] == "delivered"
+    assert db.leads.docs["lead-img-1"]["status"] == "review"
+    assert db.leads.docs["lead-img-1"]["email_sent"] is False
+    assert not captured.get("send_calls")
 
 
 def test_automation_passes_before_and_after_when_both_exist(monkeypatch):
@@ -355,9 +366,35 @@ def test_qa_retry_extra_includes_wall_preserve_constraint():
             reasons=["Walls went from light blue to taupe"],
         )
     )
-    assert "original light wall color from the photo" in extra.lower()
+    assert "original wall color from this source photo" in extra.lower()
     assert WALL_RETRY_CONSTRAINT in extra
     assert "taupe" in extra.lower()
+
+
+def test_qa_retry_extra_skips_wall_lock_when_customer_asked_for_paint():
+    from ai_image_generator import WALL_RETRY_CONSTRAINT
+    from automation import _qa_retry_extra
+    from render_qa import RenderQAResult
+
+    qa = RenderQAResult(ok=False, walls_repainted=True, reasons=["Walls are a different color"])
+    assert WALL_RETRY_CONSTRAINT not in _qa_retry_extra(qa, "soft sage green")
+
+
+def test_qa_receives_the_paint_request(monkeypatch):
+    original = _jpeg((200, 170, 140))  # warm walls
+    seen: list = []
+
+    def fake_review(**kwargs):
+        from render_qa import RenderQAResult
+
+        seen.append(kwargs.get("paint_request"))
+        return RenderQAResult(ok=True)
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review)
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    lead = _lead(with_photo=True)
+    _run(monkeypatch, generate=lambda **k: (original, "image/jpeg"), fs=fs, lead=lead, capture={})
+    assert seen and all(value == "" for value in seen)
 
 
 def test_automation_retries_once_after_wall_repaint_qa(monkeypatch):
@@ -398,7 +435,7 @@ def test_automation_retries_once_after_wall_repaint_qa(monkeypatch):
     assert len(calls) == 2
     assert calls[1].get("stronger_rails") is True
     extra = (calls[1].get("extra_constraint") or "").lower()
-    assert "original light wall color from the photo" in extra
+    assert "original wall color from this source photo" in extra
     assert captured["images"]["after"] == second
     qa = db.deliverables.docs["lead-img-1"].get("render_qa") or {}
     assert qa.get("ok") is True
@@ -751,3 +788,200 @@ def test_multi_photo_review_keeps_every_after_and_skips_hero_angles(monkeypatch)
     assert spec["claims_organized_photo"] is True
     assert spec["detail_sources"] == ["SOURCE_01", "SOURCE_02"]
     assert "after_crop" not in spec["detail_sources"]
+
+
+def test_pipeline_exception_holds_lead_for_review_not_error(monkeypatch, caplog):
+    from automation import run_automation
+
+    async def draft_crash(lead_doc, **kwargs):
+        raise RuntimeError("anthropic 529 overloaded")
+
+    async def never_send(**kwargs):
+        raise AssertionError("a failed run must not email the customer")
+
+    monkeypatch.setattr("automation.draft_deliverable", draft_crash)
+    monkeypatch.setattr("automation.send_blueprint", never_send)
+    db = _FakeDB()
+    lead = _lead()
+    db.leads.docs[lead["id"]] = dict(lead)
+
+    with caplog.at_level("ERROR", logger="automation"):
+        sent = asyncio.run(run_automation(lead=lead, db=db, fs_bucket=_FakeFS()))
+
+    assert sent is False
+    doc = db.leads.docs["lead-img-1"]
+    assert doc["status"] == "review"
+    assert doc["package_status"] == "review"
+    assert doc["status"] != "error"
+    assert doc["email_sent"] is False
+    assert doc["automation_failed"] is True
+    assert doc["automation_error"] == "anthropic 529 overloaded"
+    assert doc["automation_failed_at"]
+    assert any("Pipeline failed" in r.getMessage() for r in caplog.records)
+
+
+def test_changed_camera_is_retried_with_a_camera_note_then_discarded(monkeypatch):
+    from automation import CAMERA_RETRY_CONSTRAINT
+    from render_qa import RenderQAResult
+
+    original = _jpeg((110, 90, 60))
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10)), "image/jpeg"
+
+    monkeypatch.setattr(
+        "automation.review_organized_render",
+        lambda **_k: RenderQAResult(ok=False, camera_changed=True, reasons=["close-up became a wide room view"]),
+    )
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": original})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    assert len(calls) == 2
+    assert CAMERA_RETRY_CONSTRAINT in calls[1]["extra_constraint"]
+    assert captured["images"].get("after") is None
+    assert captured["images"]["front_view_kind"] != "organized"
+
+
+def _same_shot_run(monkeypatch, answers):
+    from render_qa import RenderQAResult
+
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    monkeypatch.setattr("automation.review_organized_render", lambda **_k: RenderQAResult(ok=True))
+    monkeypatch.setattr("automation.review_same_shot", lambda **_k: answers.pop(0))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((110, 90, 60))})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    return calls, captured
+
+
+def test_different_shot_is_retried_and_kept_when_the_retry_matches(monkeypatch):
+    """Preview closet of 24 Oct 2026: a shoe close-up came back as a wide closet and passed the cheap QA."""
+    from automation import CAMERA_RETRY_CONSTRAINT
+
+    calls, captured = _same_shot_run(monkeypatch, [(False, "close-up became a wide closet"), (True, "same shot")])
+    assert len(calls) == 2
+    assert CAMERA_RETRY_CONSTRAINT in calls[1]["extra_constraint"]
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_different_shot_twice_is_discarded(monkeypatch):
+    calls, captured = _same_shot_run(monkeypatch, [(False, "wide closet"), (False, "still a wide closet")])
+    assert len(calls) == 2
+    assert captured["images"].get("after") is None
+
+
+def test_same_shot_check_that_cannot_run_does_not_block(monkeypatch):
+    calls, captured = _same_shot_run(monkeypatch, [(None, "no_api_key")])
+    assert len(calls) == 1
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def _gravity_run(monkeypatch, confirm):
+    from render_qa import RenderQAResult
+
+    calls: list = []
+    asked: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    def fake_review(**_k):
+        return RenderQAResult(ok=False, gravity_wrong=True, suggested_rotate_degrees=90, reasons=["BEFORE photo is rotated 90°"])
+
+    def fake_confirm(**_k):
+        asked.append(1)
+        return confirm
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review if confirm != "second_ok" else _first_gravity_then_ok())
+    monkeypatch.setattr("automation.confirm_orientation_problem", fake_confirm if confirm != "second_ok" else lambda **_k: (True, "sideways"))
+    monkeypatch.setattr("automation.review_same_shot", lambda **_k: (True, "same shot"))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((110, 90, 60))})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    return calls, asked, captured
+
+
+def _first_gravity_then_ok():
+    from render_qa import RenderQAResult
+
+    answers = [
+        RenderQAResult(ok=False, gravity_wrong=True, suggested_rotate_degrees=90, reasons=["sideways"]),
+        RenderQAResult(ok=True),
+    ]
+    return lambda **_k: answers.pop(0)
+
+
+def test_rotation_flag_the_stronger_model_rejects_keeps_the_view(monkeypatch):
+    """Preview closet of 24 Oct 2026: the cheap QA called an upright cedar-closet photo rotated 90°."""
+    calls, asked, captured = _gravity_run(monkeypatch, (False, "the bulb hangs straight down; upright"))
+    assert len(calls) == 1
+    assert asked == [1]
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_confirmed_rotation_still_retries_with_the_rotated_source(monkeypatch):
+    calls, _asked, captured = _gravity_run(monkeypatch, "second_ok")
+    assert len(calls) == 2
+    assert calls[1].get("stronger_rails") is True
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_rotation_confirm_that_cannot_run_keeps_the_current_reject(monkeypatch):
+    calls, asked, captured = _gravity_run(monkeypatch, (None, "no_api_key"))
+    assert len(calls) == 2
+    assert len(asked) == 2
+    assert captured["images"].get("after") is None
+
+
+def _reference_retry(monkeypatch, first_qa):
+    import asyncio
+
+    import automation
+    from render_qa import RenderQAResult
+
+    calls: list = []
+
+    async def fake_generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    answers = [first_qa, RenderQAResult(ok=True)]
+    monkeypatch.setattr(automation, "generate_front_view", fake_generate)
+    monkeypatch.setattr(automation, "review_organized_render", lambda **_k: answers.pop(0))
+    monkeypatch.setattr(automation, "review_same_shot", lambda **_k: (True, "same shot"))
+    monkeypatch.setattr(automation, "confirm_orientation_problem", lambda **_k: (None, "not needed"))
+    asyncio.run(
+        automation._generate_organized_with_qa(
+            lead=_lead(with_photo=True),
+            plan={},
+            fs_bucket=None,
+            original_bytes=_jpeg((110, 90, 60)),
+            view_reference=_jpeg((10, 200, 10)),
+        )
+    )
+    return calls
+
+
+def test_camera_retry_drops_the_reference_view(monkeypatch):
+    """Preview closet of 24 Oct 2026: with the approved view attached, both attempts copied its camera."""
+    from ai_image_generator import CONSISTENCY_REFERENCE_CONSTRAINT
+    from render_qa import RenderQAResult
+
+    calls = _reference_retry(monkeypatch, RenderQAResult(ok=False, camera_changed=True, reasons=["different shot"]))
+    assert len(calls) == 2
+    assert "consistency_reference" in calls[0]
+    assert "consistency_reference" not in calls[1]
+    assert CONSISTENCY_REFERENCE_CONSTRAINT not in calls[1]["extra_constraint"]
+
+
+def test_other_retries_keep_the_reference_view(monkeypatch):
+    from render_qa import RenderQAResult
+
+    calls = _reference_retry(monkeypatch, RenderQAResult(ok=False, walls_repainted=True, reasons=["walls repainted"]))
+    assert len(calls) == 2
+    assert "consistency_reference" in calls[1]

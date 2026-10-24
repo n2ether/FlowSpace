@@ -1,38 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api, apiErrorMessage } from "../lib/api";
+import {
+    DELIVERED_NOTE,
+    STATUS_STYLES,
+    customerStatus,
+    displayStatus,
+    serverClockOffset,
+    spaceThumbnail,
+    spaceTitle,
+} from "../lib/projectStatus";
+import { useNow } from "../lib/useNow";
 
-const SPACE_LABELS = {
-    closet: "Closet",
-    garage: "Garage",
-    laundry_room: "Laundry room",
-    pantry: "Pantry",
-    mudroom: "Mudroom",
-    storage: "Storage area",
-    kids_room: "Kids' room",
-    home_office: "Home office",
-    living_room: "Living room",
-    bedroom: "Bedroom",
-    other: "Other",
-};
-
-const STATUS_STYLES = {
-    new: "bg-slate-100 text-slate-700",
-    processing: "bg-amber-50 text-amber-800",
-    paid: "bg-sky-50 text-sky-800",
-    pdf_ready: "bg-emerald-50 text-emerald-800",
-    delivered: "bg-emerald-50 text-emerald-800",
-    error: "bg-rose-50 text-rose-800",
-};
-
-function photoSrc(url) {
-    if (!url) return null;
-    if (url.startsWith("http")) return url;
-    return `${process.env.REACT_APP_BACKEND_URL || ""}${url}`;
-}
+export { customerStatus, spaceTitle };
 
 export default function Account() {
     const { member, loading } = useAuth();
@@ -41,6 +25,8 @@ export default function Account() {
     const [usage, setUsage] = useState(member?.usage || null);
     const [fetching, setFetching] = useState(true);
     const [error, setError] = useState("");
+    const [clockOffset, setClockOffset] = useState(0);
+    const now = useNow(30000) + clockOffset;
 
     useEffect(() => {
         if (loading) return;
@@ -55,6 +41,7 @@ export default function Account() {
                 if (cancelled) return;
                 setSpaces(data.spaces || []);
                 setUsage(data.usage || member.usage);
+                setClockOffset(serverClockOffset(data.server_time));
             } catch (err) {
                 if (!cancelled) setError(apiErrorMessage(err, "Could not load your spaces."));
             } finally {
@@ -89,7 +76,7 @@ export default function Account() {
                             Welcome back, {member.name?.split(" ")[0] || "there"}
                         </h1>
                         <p className="mt-2 text-slate-600">
-                            Every space you create stays here. We email the PDF Blueprint when it&apos;s ready.
+                            Every space you create stays here. We email your Design Plan when it&apos;s ready.
                         </p>
                     </div>
                     {canFree ? (
@@ -111,8 +98,8 @@ export default function Account() {
                 >
                     <p className={`text-sm font-medium ${canFree ? "text-emerald-900" : "text-amber-950"}`}>
                         {canFree
-                            ? `Free plan: ${used} of 1 Blueprint used. Your first space is included.`
-                            : "You've used your free Blueprint. Plus ($10) and Premium ($20) unlock another space."}
+                            ? `Free plan: ${used} of 1 Design Plan used. Your first space is included.`
+                            : "You've used your free Design Plan. Plus ($10) and Premium ($20) unlock another space."}
                     </p>
                     {!canFree && (
                         <p className="mt-1 text-sm text-amber-800">
@@ -136,24 +123,21 @@ export default function Account() {
                                 Upload a closet, garage, laundry room, pantry, or mudroom to get your first plan.
                             </p>
                             <Link to="/intake?plan=free" className="btn-primary mt-6" data-testid="account-empty-cta">
-                                Start my free Blueprint
+                                Start my free Design Plan
                             </Link>
                         </div>
                     ) : (
                         <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2" data-testid="account-spaces">
                             {spaces.map((space) => {
-                                const thumb =
-                                    photoSrc(space.deliverable?.front_view_url) ||
-                                    photoSrc(
-                                        typeof space.photos?.[0] === "string"
-                                            ? space.photos[0]
-                                            : space.photos?.[0]?.url
-                                    );
-                                const status = space.status || "new";
+                                const status = displayStatus(space, now);
+                                const thumb = spaceThumbnail(space, status);
+                                const styleKey = status.delayed ? "delayed" : status.key;
                                 return (
-                                    <article
+                                    <Link
                                         key={space.id}
-                                        className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                                        to={`/account/spaces/${space.id}`}
+                                        className="group block overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-colors hover:border-emerald-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                                        aria-label={`${spaceTitle(space)}: ${status.label}. Open project`}
                                         data-testid={`space-card-${space.id}`}
                                     >
                                         <div className="h-40 bg-slate-100">
@@ -164,22 +148,26 @@ export default function Account() {
                                                     className="h-full w-full object-contain"
                                                 />
                                             ) : (
-                                                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                                                <div className="flex h-full items-center justify-center text-sm text-slate-500">
                                                     Photos processing
                                                 </div>
                                             )}
                                         </div>
                                         <div className="p-5">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <h3 className="font-display text-xl font-medium text-slate-900">
-                                                    {SPACE_LABELS[space.space_type] || space.space_type}
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <h3
+                                                    className="font-display text-xl font-medium text-slate-900"
+                                                    data-testid={`space-title-${space.id}`}
+                                                >
+                                                    {spaceTitle(space)}
                                                 </h3>
                                                 <span
-                                                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                                                        STATUS_STYLES[status] || STATUS_STYLES.new
+                                                    className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                                                        STATUS_STYLES[styleKey]
                                                     }`}
+                                                    data-testid={`space-status-${space.id}`}
                                                 >
-                                                    {status.replace("_", " ")}
+                                                    {status.label}
                                                 </span>
                                             </div>
                                             <p className="mt-2 text-sm text-slate-600">
@@ -188,13 +176,15 @@ export default function Account() {
                                                     ? ` · ${new Date(space.created_at).toLocaleDateString()}`
                                                     : ""}
                                             </p>
-                                            <p className="mt-3 text-sm text-slate-500">
-                                                {space.email_sent
-                                                    ? "Blueprint emailed to you."
-                                                    : "We'll email the PDF when it's ready."}
+                                            <p className="mt-3 text-sm text-slate-600">
+                                                {space.email_sent ? DELIVERED_NOTE : status.note}
+                                            </p>
+                                            <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 group-hover:text-emerald-800">
+                                                View project
+                                                <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                                             </p>
                                         </div>
-                                    </article>
+                                    </Link>
                                 );
                             })}
                         </div>

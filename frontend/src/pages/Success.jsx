@@ -4,16 +4,30 @@ import { Check, Loader2, AlertCircle, Mail } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { api } from "../lib/api";
+import { CHECKOUT_LEAD_KEY, ESTIMATE_MINUTES, recordProgressStart } from "../lib/projectStatus";
+
+function checkoutLead() {
+    try {
+        return sessionStorage.getItem(CHECKOUT_LEAD_KEY) || "";
+    } catch {
+        return "";
+    }
+}
 
 const Success = () => {
     const [params] = useSearchParams();
     const sessionId = params.get("session_id");
     const planParam = (params.get("plan") || "").toLowerCase();
+    const [leadId] = useState(() => params.get("lead") || (sessionId ? checkoutLead() : ""));
     const navigate = useNavigate();
     const [status, setStatus] = useState(sessionId ? "checking" : (planParam === "free" ? "free" : "expired"));
     const [amount, setAmount] = useState(null);
     const [currency, setCurrency] = useState("usd");
     const attempts = useRef(0);
+
+    useEffect(() => {
+        if (status === "paid" || status === "free") recordProgressStart(leadId);
+    }, [status, leadId]);
 
     useEffect(() => {
         if (!sessionId) return; // free flow — nothing to poll
@@ -63,7 +77,7 @@ const Success = () => {
 
                     {status === "checking" && (
                         <>
-                            <Loader2 className="mx-auto h-10 w-10 animate-spin text-emerald-600" />
+                            <Loader2 className="mx-auto h-10 w-10 animate-spin text-emerald-600" strokeWidth={1.75} />
                             <h1 className="mt-6 font-display text-3xl font-light text-slate-900">Confirming your payment…</h1>
                             <p className="mt-3 text-slate-600">Hang tight, this takes a few seconds.</p>
                         </>
@@ -75,7 +89,7 @@ const Success = () => {
                                 <Check className="h-7 w-7" />
                             </div>
                             <h1 className="mt-6 font-display text-3xl font-light text-slate-900">
-                                {status === "paid" ? "You're all set!" : "Your Blueprint is on the way!"}
+                                {status === "paid" ? "You're all set!" : "Your Design Plan is in progress"}
                             </h1>
                             {status === "paid" && amount != null && (
                                 <p className="mt-2 text-sm text-slate-500">Payment received: <strong>{fmt(amount)}</strong></p>
@@ -84,20 +98,25 @@ const Success = () => {
                                 <div className="flex items-start gap-3">
                                     <Mail className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
                                     <div>
-                                        <p className="font-medium text-emerald-900">Check your email in about two minutes</p>
+                                        <p className="font-medium text-emerald-900">We&apos;ll email you when it&apos;s ready</p>
                                         <p className="mt-1 text-sm text-emerald-800">
-                                            We&apos;re generating your FlowSpace Blueprint now — a PDF with your
-                                            room rendering, zones, shopping list, and action plan, sent to the
-                                            inbox you provided. Check spam if it isn&apos;t there.
+                                            We&apos;re preparing your FlowSpace Design Plan. This step usually takes up
+                                            to {ESTIMATE_MINUTES} minutes. During the beta, our team then reviews every
+                                            plan before it&apos;s sent to the inbox you provided. Check spam if it
+                                            isn&apos;t there.
                                         </p>
                                     </div>
                                 </div>
                             </div>
                             <p className="mt-6 text-xs text-slate-500">
-                                Don't see it? Check your spam folder, or reply to any of our emails to reach us.
+                                Questions? Reply to any of our emails to reach us.
                             </p>
-                            <Link to="/account" className="btn-primary mt-8 w-full justify-center" data-testid="success-account">
-                                View my spaces
+                            <Link
+                                to={leadId ? `/account/spaces/${leadId}` : "/account"}
+                                className="btn-primary mt-8 w-full justify-center"
+                                data-testid="success-account"
+                            >
+                                {leadId ? "Follow my project" : "View my spaces"}
                             </Link>
                             <Link to="/" className="btn-ghost mt-3 w-full justify-center">Back to homepage</Link>
                         </>
@@ -108,7 +127,7 @@ const Success = () => {
                             <Loader2 className="mx-auto h-10 w-10 animate-spin text-amber-500" />
                             <h1 className="mt-6 font-display text-3xl font-light text-slate-900">Payment still processing</h1>
                             <p className="mt-3 text-slate-600">
-                                Your Blueprint will start generating as soon as the payment clears.
+                                Your Design Plan will start as soon as the payment clears.
                                 You'll receive an email confirmation.
                             </p>
                             <Link to="/" className="btn-ghost mt-8 inline-flex">Return home</Link>
@@ -135,10 +154,10 @@ const Success = () => {
                             <p className="mt-3 text-slate-600">
                                 We couldn't confirm this page in time, but if you completed checkout with Stripe,
                                 your payment almost certainly went through — please check your email for your
-                                Blueprint before trying again.
+                                payment confirmation before trying again.
                             </p>
                             <p className="mt-3 text-xs text-slate-500">
-                                Still nothing after a few minutes? Reply to any FlowSpace email and we'll sort it out —
+                                Not sure it went through? Reply to any FlowSpace email and we'll sort it out —
                                 no need to pay twice.
                             </p>
                             <Link to="/" className="btn-ghost mt-8 inline-flex">Return home</Link>

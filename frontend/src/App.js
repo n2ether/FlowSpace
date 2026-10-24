@@ -10,10 +10,17 @@ import Success from "./pages/Success";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Account from "./pages/Account";
+import ProjectStatus from "./pages/ProjectStatus";
 import AdminLogin from "./pages/AdminLogin";
 import Admin from "./pages/Admin";
 import AdminDeliverable from "./pages/AdminDeliverable";
 import BlueprintPreview from "./pages/BlueprintPreview";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import Privacy from "./pages/Privacy";
+import PhotoUse from "./pages/PhotoUse";
+import Terms from "./pages/Terms";
+import Support from "./pages/Support";
 
 function App() {
     return (
@@ -27,6 +34,13 @@ function App() {
                         <Route path="/login" element={<Login />} />
                         <Route path="/signup" element={<Signup />} />
                         <Route path="/account" element={<Account />} />
+                        <Route path="/account/spaces/:leadId" element={<ProjectStatus />} />
+                        <Route path="/forgot-password" element={<ForgotPassword />} />
+                        <Route path="/reset-password" element={<ResetPassword />} />
+                        <Route path="/privacy" element={<Privacy />} />
+                        <Route path="/photo-use" element={<PhotoUse />} />
+                        <Route path="/terms" element={<Terms />} />
+                        <Route path="/support" element={<Support />} />
                         <Route path="/admin/login" element={<AdminLogin />} />
                         <Route path="/admin" element={<Admin />} />
                         <Route path="/admin/leads/:leadId/design" element={<AdminDeliverable />} />

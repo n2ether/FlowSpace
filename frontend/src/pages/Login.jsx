@@ -44,7 +44,7 @@ export default function Login() {
                         Log in to FlowSpace
                     </h1>
                     <p className="mt-2 text-sm text-slate-600">
-                        Your Blueprints stay here — revisit every space you&apos;ve organized.
+                        Your Design Plans stay here — revisit every space you&apos;ve organized.
                     </p>
                     <label className="mt-8 mb-2 block text-sm font-medium text-slate-800">Email</label>
                     <input
@@ -68,6 +68,15 @@ export default function Login() {
                         autoComplete="current-password"
                         data-testid="login-password"
                     />
+                    <p className="mt-2 text-right text-sm">
+                        <Link
+                            to="/forgot-password"
+                            className="font-medium text-emerald-700 hover:text-emerald-800"
+                            data-testid="login-forgot-password"
+                        >
+                            Forgot password?
+                        </Link>
+                    </p>
                     <button
                         type="submit"
                         disabled={loading}

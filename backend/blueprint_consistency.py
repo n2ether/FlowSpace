@@ -69,8 +69,9 @@ def shopping_total(deliverable: Dict[str, Any] | None) -> float:
 
 
 def stated_budget_label(lead: Dict[str, Any] | None) -> str:
-    raw = str((lead or {}).get("budget") or "").strip()
-    return BUDGET_LABELS.get(raw, "")
+    from package_items import effective_budget
+
+    return BUDGET_LABELS.get(effective_budget(lead), "")
 
 
 def _parse_amounts(text: str) -> Tuple[List[Tuple[float, float]], List[float]]:
@@ -223,6 +224,8 @@ _GENERIC_SAFETY_ESSENTIALS = (
     "Anchor tall or heavy furniture to the wall before you load it.",
     "Keep a clear floor path to the door.",
 )
+# Wall anchoring needs drilling; a "No drilling" customer gets a stability line instead.
+NO_DRILL_STABILITY_LINE = "Keep heavy items on the lowest shelves so tall units stay stable without wall anchors."
 NURSERY_BEDTIME_TITLE = BEDTIME_RITUAL_TITLE
 NURSERY_BEDTIME = BEDTIME_RITUAL_BODY
 
@@ -632,6 +635,9 @@ def prepare_deliverable(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     child = _story_child(lead, out)
     issues = apply_curated_shopping(lead, out)
     issues.extend(apply_nursery_rules(lead, out))
+    from package_facts import apply_package_rules
+
+    issues.extend(apply_package_rules(lead, out))
     issues.extend(align_budget(lead, out))
     issues.extend(apply_evergreen(out, child=child))
     _record(out, issues)
@@ -775,16 +781,13 @@ def nightly_instruction(lead: Dict[str, Any] | None, deliverable: Dict[str, Any]
     deliverable = deliverable or {}
     if is_nursery_space(lead):
         return NURSERY_BEDTIME_TITLE, NURSERY_BEDTIME
-    layers = deliverable.get("blueprint_layers") if isinstance(deliverable.get("blueprint_layers"), dict) else {}
-    instruction = layers.get("customer_instruction") if isinstance(layers.get("customer_instruction"), dict) else {}
-    reset = evergreen_text(" ".join(str(instruction.get("weekly_reset") or "").split()))
-    if reset:
-        return "Weekly reset", reset
-    return (
-        "Weekly reset",
-        "Once a week, return each item to its home, clear the floor path, and wipe one surface. "
-        "The reset keeps the system. It is not a remodel.",
-    )
+    from design_plan_standards import SELF_PACED_RESET, SELF_PACED_RESET_NO_CATCH_ALL, SELF_PACED_RESET_TITLE
+    from package_facts import is_catch_all
+
+    has_catch_all = any(isinstance(item, dict) and is_catch_all(item) for item in (deliverable.get("shopping_list") or []))
+    if has_catch_all:
+        return SELF_PACED_RESET_TITLE, SELF_PACED_RESET
+    return SELF_PACED_RESET_TITLE, SELF_PACED_RESET_NO_CATCH_ALL
 
 
 def safety_guidance(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] | None) -> List[str]:
@@ -830,8 +833,13 @@ def safety_essentials(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] |
             continue
         if not _same_warning(text, lines):
             lines.append(text)
+    from package_items import stated_limits
+
     covered = " ".join(lines).lower()
-    for keyword, line in zip(("anchor", "path"), _GENERIC_SAFETY_ESSENTIALS):
+    generic = _GENERIC_SAFETY_ESSENTIALS
+    if "no_drilling" in stated_limits(lead):
+        generic = (NO_DRILL_STABILITY_LINE, *generic[1:])
+    for keyword, line in zip(("anchor", "path"), generic):
         if keyword not in covered:
             lines.append(line)
     return lines[:4]
@@ -962,6 +970,9 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
     )
     removed = _REMOVED_NOTE if _REMOVED_NOTE in str(doc.get("notes") or "") else ""
     reset_title, reset_body = nightly_instruction(lead, doc)
+    from package_facts import package_facts
+
+    facts = package_facts(lead, deliverable, prepared=doc)
     shop_links = search_links(doc, lead)
     sections = {
         "intro": intro,
@@ -984,7 +995,9 @@ def companion_sections(lead: Dict[str, Any] | None, deliverable: Dict[str, Any] 
         "why": why_it_helps(lead, doc),
         "story": str(doc.get("project_story") or ""),
         "styling": styling_rules(lead, doc),
-        "modules": list(companion_modules(doc)),
+        "modules": list(companion_modules(doc, general=bool(facts["general"]))),
+        "facts": facts,
+        "what_stays": facts["what_stays"],
     }
     sections["assessment"] = designer_assessment(lead, doc, needs)
     return sections, doc
