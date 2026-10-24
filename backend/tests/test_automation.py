@@ -879,3 +879,60 @@ def test_same_shot_check_that_cannot_run_does_not_block(monkeypatch):
     calls, captured = _same_shot_run(monkeypatch, [(None, "no_api_key")])
     assert len(calls) == 1
     assert captured["images"]["front_view_kind"] == "organized"
+
+
+def _gravity_run(monkeypatch, confirm):
+    from render_qa import RenderQAResult
+
+    calls: list = []
+    asked: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    def fake_review(**_k):
+        return RenderQAResult(ok=False, gravity_wrong=True, suggested_rotate_degrees=90, reasons=["BEFORE photo is rotated 90°"])
+
+    def fake_confirm(**_k):
+        asked.append(1)
+        return confirm
+
+    monkeypatch.setattr("automation.review_organized_render", fake_review if confirm != "second_ok" else _first_gravity_then_ok())
+    monkeypatch.setattr("automation.confirm_orientation_problem", fake_confirm if confirm != "second_ok" else lambda **_k: (True, "sideways"))
+    monkeypatch.setattr("automation.review_same_shot", lambda **_k: (True, "same shot"))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((110, 90, 60))})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    return calls, asked, captured
+
+
+def _first_gravity_then_ok():
+    from render_qa import RenderQAResult
+
+    answers = [
+        RenderQAResult(ok=False, gravity_wrong=True, suggested_rotate_degrees=90, reasons=["sideways"]),
+        RenderQAResult(ok=True),
+    ]
+    return lambda **_k: answers.pop(0)
+
+
+def test_rotation_flag_the_stronger_model_rejects_keeps_the_view(monkeypatch):
+    """Preview closet of 24 Oct 2026: the cheap QA called an upright cedar-closet photo rotated 90°."""
+    calls, asked, captured = _gravity_run(monkeypatch, (False, "the bulb hangs straight down; upright"))
+    assert len(calls) == 1
+    assert asked == [1]
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_confirmed_rotation_still_retries_with_the_rotated_source(monkeypatch):
+    calls, _asked, captured = _gravity_run(monkeypatch, "second_ok")
+    assert len(calls) == 2
+    assert calls[1].get("stronger_rails") is True
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_rotation_confirm_that_cannot_run_keeps_the_current_reject(monkeypatch):
+    calls, asked, captured = _gravity_run(monkeypatch, (None, "no_api_key"))
+    assert len(calls) == 2
+    assert len(asked) == 2
+    assert captured["images"].get("after") is None

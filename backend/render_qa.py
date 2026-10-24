@@ -350,6 +350,78 @@ def review_same_shot(*, before_bytes: Optional[bytes], after_bytes: Optional[byt
         return None, str(exc)
 
 
+# ──────────────────────────── Orientation confirmation ─────────────────────────────
+
+# The cheap QA called an upright cedar-closet photo "rotated 90°" on both attempts,
+# so a gravity flag is confirmed with one question on the stronger model.
+ORIENTATION_PROMPT = """Image 1 is a customer's photo of a room. Image 2 is an edited version of it.
+
+Return ONLY JSON (no markdown):
+{"sideways": true or false, "reason": "one short fact"}
+
+sideways=true only when Image 1 or Image 2 is clearly rotated or upside down: the floor is not at the bottom,
+hanging things (cords, clothes, lamps) do not hang downward, or a ceiling light or fan sits on a wall.
+Upward or tilted camera angles, dim light, and tall narrow framing are not sideways.
+"""
+
+
+def orientation_from_payload(data: Dict[str, Any]) -> Tuple[Optional[bool], str]:
+    value = data.get("sideways")
+    reason = " ".join(str(data.get("reason") or "").split())
+    if isinstance(value, bool):
+        return value, reason
+    return None, reason
+
+
+def confirm_orientation_problem(*, before_bytes: Optional[bytes], after_bytes: Optional[bytes]) -> Tuple[Optional[bool], str]:
+    """``(sideways, reason)`` from the stronger model; ``None`` when it could not run. Never raises."""
+    if not after_bytes:
+        return None, ""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None, "no_api_key"
+    try:
+        content: List[Dict[str, Any]] = []
+        if before_bytes:
+            content += [
+                _image_block(jpeg_for_vision(before_bytes, max_side=640)),
+                {"type": "text", "text": "Image 1 (customer photo)."},
+            ]
+        content += [
+            _image_block(jpeg_for_vision(after_bytes, max_side=640)),
+            {"type": "text", "text": "Image 2 (edited version).\n\n" + ORIENTATION_PROMPT},
+        ]
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=CROSS_VIEW_MODEL,
+            max_tokens=200,
+            messages=[{"role": "user", "content": content}],
+        )
+        raw = message.content[0].text if message.content else ""
+        sideways, reason = orientation_from_payload(_parse_qa_json(raw))
+        logger.info("[render_qa] orientation confirm sideways=%s reason=%s", sideways, reason)
+        return sideways, reason
+    except Exception as exc:
+        logger.warning("[render_qa] orientation confirm skipped after error: %s", exc)
+        return None, str(exc)
+
+
+def clear_unconfirmed_gravity(qa: RenderQAResult, reason: str) -> RenderQAResult:
+    """Drop a gravity flag the stronger model did not confirm; other failures still stand."""
+    qa.gravity_wrong = False
+    qa.suggested_rotate_degrees = 0
+    qa.ok = not (
+        qa.windows_covered
+        or qa.walls_repainted
+        or qa.camera_changed
+        or qa.fixed_items_changed
+        or qa.baskets_misplaced
+        or bool(qa.avoid_seen)
+    )
+    qa.reasons = list(qa.reasons) + [f"Rotation flag not confirmed: {reason}".strip()]
+    return qa
+
+
 # ──────────────────────────── Cross-view check ─────────────────────────────
 
 # Comparing several views at once needs the stronger vision model the drafter uses.
