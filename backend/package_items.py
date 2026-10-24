@@ -798,6 +798,33 @@ _NON_ENGLISH_RE = re.compile(
 )
 
 
+_DRILLING_RE = re.compile(
+    r"\b(?:drill(?:s|ed|ing)?|(?:wall|ceiling)[- ]mount(?:s|ed|ing)?|"
+    r"mount(?:s|ed|ing)?\s+(?:[\w-]+\s+){0,4}?(?:on|to|onto)\s+(?:the\s+)?(?:[\w-]+\s+){0,2}?(?:wall|ceiling)s?|"
+    r"screw(?:s|ed|ing)?\s+(?:[\w-]+\s+){0,3}?(?:in|into)|"
+    r"anchor(?:s|ed|ing)?\s+(?:[\w-]+\s+){0,4}?to\s+(?:the\s+)?(?:wall|studs?))\b",
+    re.I,
+)
+
+
+def stated_limits(lead: Optional[Dict[str, Any]]) -> List[str]:
+    intake = (lead or {}).get("intake")
+    limits = intake.get("limits") if isinstance(intake, dict) else None
+    return [str(x) for x in limits] if isinstance(limits, list) else []
+
+
+def no_drilling_conflicts(lead: Optional[Dict[str, Any]], doc: Dict[str, Any]) -> List[str]:
+    """Plan sentences that drill, wall-mount or anchor when the customer chose "No drilling"."""
+    if "no_drilling" not in stated_limits(lead):
+        return []
+    hits: List[str] = []
+    for sentence in _sentences(_plan_text(doc)):
+        match = _DRILLING_RE.search(sentence)
+        if match and not _negated(sentence, match.start()) and sentence not in hits:
+            hits.append(sentence)
+    return hits
+
+
 def _issue(code: str, severity: str, message: str, **extra: Any) -> Dict[str, Any]:
     return {"code": code, "severity": severity, "message": message, **extra}
 
@@ -1035,6 +1062,15 @@ def consistency_report(
                 "basket_on_seat_or_bed",
                 BLOCK,
                 f"A basket sits on a seat, a bed, or a shoe bench's shoe area: \"{sentence}\"",
+            )
+        )
+
+    for sentence in no_drilling_conflicts(lead, doc):
+        issues.append(
+            _issue(
+                "limit_no_drilling_contradicted",
+                BLOCK,
+                f"The customer chose \"No drilling\", but the plan says: \"{sentence}\"",
             )
         )
 

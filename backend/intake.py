@@ -35,6 +35,10 @@ LIMITS = {
     "other": "Other",
     "none": "No specific limits",
 }
+NO_DRILLING_RULE = (
+    "No drilling: recommend only freestanding, over-door, tension or removable adhesive options. "
+    "Do not suggest wall-mounted, ceiling-mounted, screwed-in or wall-anchored items."
+)
 BUDGETS = {
     "use_owned": "Use what I own",
     "under_100": "Under $100",
@@ -410,6 +414,8 @@ def fact_sheet_prompt(fact_sheet: Optional[Dict[str, Any]]) -> str:
         lines.append(f"- Keep: {keep['label']}.")
     if fs["limits"]["labels"]:
         lines.append("- Limits to respect: " + ", ".join(fs["limits"]["labels"]) + ".")
+        if "no_drilling" in fs["limits"]["ids"]:
+            lines.append(f"- {NO_DRILLING_RULE}")
     elif fs["limits"]["none"]:
         lines.append("- Limits: customer stated no specific limits.")
     if fs.get("layout_within_current"):
