@@ -230,6 +230,7 @@ export default function StepPhotos({
                             reason={pending.inspection.reason}
                             onRotate={rotatePending}
                             onConfirm={confirmPending}
+                            busy={uploading}
                         />
                     </div>
                 )}

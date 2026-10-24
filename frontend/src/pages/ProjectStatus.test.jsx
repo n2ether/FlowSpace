@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectStatus from "./ProjectStatus";
 import { api } from "../lib/api";
@@ -9,7 +9,7 @@ jest.mock("../components/Footer", () => () => null);
 
 const mockAuth = { member: { id: "m1", name: "Camila", email: "camila@example.com" }, loading: false };
 jest.mock("../context/AuthContext", () => ({ useAuth: () => mockAuth }));
-jest.mock("../lib/api", () => ({ api: { get: jest.fn() }, apiErrorMessage: () => "error" }));
+jest.mock("../lib/api", () => ({ api: { get: jest.fn(), post: jest.fn() }, apiErrorMessage: () => "error" }));
 
 function renderProject(space, extra = {}) {
     api.get.mockResolvedValue({ data: { spaces: space ? [space] : [], ...extra } });
@@ -74,6 +74,43 @@ describe("Project page", () => {
     it("says delivered plans are in the inbox", async () => {
         renderProject({ ...base, status: "delivered", status_label: "Delivered", email_sent: true });
         expect(await screen.findByTestId("project-delivered")).toHaveTextContent("in your inbox");
+    });
+
+    it("finishes checkout for the same project instead of starting a new one", async () => {
+        api.post.mockResolvedValue({ data: { url: "https://checkout.stripe.test/cs_new" } });
+        const assign = jest.fn();
+        const original = window.location;
+        delete window.location;
+        window.location = { origin: "https://preview.test", set href(url) { assign(url); } };
+        try {
+            renderProject({
+                ...base,
+                status: "awaiting_payment",
+                status_label: "Awaiting payment",
+                status_note: "Finish checkout to start your Design Plan.",
+            });
+            const resume = await screen.findByTestId("project-resume-checkout");
+            expect(resume).toHaveTextContent("Finish checkout — $10");
+            fireEvent.click(resume);
+            await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/cs_new"));
+            expect(api.post).toHaveBeenCalledWith("/checkout/session", {
+                package_id: "plus",
+                origin_url: "https://preview.test",
+                email: "camila@example.com",
+                metadata: { lead_id: "l1" },
+            });
+            expect(screen.getByTestId("project-choose-plan")).toHaveTextContent("Choose a different plan");
+        } finally {
+            window.location = original;
+        }
+    });
+
+    it("keeps the customer on the page when checkout can't reopen", async () => {
+        api.post.mockRejectedValue(new Error("nope"));
+        renderProject({ ...base, status: "payment_not_completed", status_label: "Payment not completed" });
+        fireEvent.click(await screen.findByTestId("project-resume-checkout"));
+        expect(await screen.findByTestId("project-resume-error")).toHaveTextContent("error");
+        expect(screen.getByTestId("project-resume-checkout")).not.toBeDisabled();
     });
 
     it("handles a project that isn't in this account", async () => {
