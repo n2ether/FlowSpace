@@ -813,15 +813,41 @@ def stated_limits(lead: Optional[Dict[str, Any]]) -> List[str]:
     return [str(x) for x in limits] if isinstance(limits, list) else []
 
 
+_MOUNTED_ADJ_RE = re.compile(r"^(?:wall|ceiling)[- ]mounted$", re.I)
+_NEW_ITEM_RE = re.compile(r"\b(?:add|adds|adding|install|installs|installing|new|buy|put up|hang up)\b", re.I)
+_EXISTING_RE = re.compile(r"\b(?:existing|current|already|stays|kept|keep|keeps|original)\b", re.I)
+
+
+def _purchase_lines(doc: Dict[str, Any]) -> List[str]:
+    lines = [_clean(item.get("name")) for item in doc.get("shopping_list") or [] if isinstance(item, dict)]
+    lines += [
+        f"{_clean(item.get('name'))} {_clean(item.get('placement'))}".strip()
+        for item in doc.get("additions") or []
+        if isinstance(item, dict)
+    ]
+    return [line for line in lines if line]
+
+
 def no_drilling_conflicts(lead: Optional[Dict[str, Any]], doc: Dict[str, Any]) -> List[str]:
-    """Plan sentences that drill, wall-mount or anchor when the customer chose "No drilling"."""
+    """Plan sentences that drill, wall-mount or anchor when the customer chose "No drilling".
+
+    Purchases are always checked. In the prose, "wall-mounted" alone usually
+    describes something already in the room (e.g. the existing coat rack), so it
+    only counts when the sentence adds or installs something new.
+    """
     if "no_drilling" not in stated_limits(lead):
         return []
+    purchases = _purchase_lines(doc)
+    prose = _plan_text({k: v for k, v in doc.items() if k not in {"shopping_list", "additions"}})
     hits: List[str] = []
-    for sentence in _sentences(_plan_text(doc)):
+    for sentence in purchases + _sentences(prose):
         match = _DRILLING_RE.search(sentence)
-        if match and not _negated(sentence, match.start()) and sentence not in hits:
-            hits.append(sentence)
+        if not match or _negated(sentence, match.start()) or sentence in hits:
+            continue
+        if sentence not in purchases and _MOUNTED_ADJ_RE.match(match.group(0)):
+            if _EXISTING_RE.search(sentence) or not _NEW_ITEM_RE.search(sentence):
+                continue
+        hits.append(sentence)
     return hits
 
 

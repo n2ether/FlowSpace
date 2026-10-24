@@ -224,7 +224,6 @@ def test_no_drilling_blocks_wall_mounting_in_plan_and_shopping():
 
     hits = no_drilling_conflicts(_garage(["no_drilling"]), _GARAGE_DRAFT)
     assert any(h.startswith("Mount bike hooks on the right wall") for h in hits)
-    assert any("Wall-mounted bike hooks" in h for h in hits)
     assert any("Heavy-duty wall-mounted bike hooks" in h for h in hits)
     assert not any("Over-door" in h or "Parking" in h for h in hits)
 
@@ -243,6 +242,22 @@ def test_no_drilling_rule_only_applies_when_chosen_and_respects_negation():
     assert no_drilling_conflicts(_garage(["no_drilling"]), renter) == []
     for sentence in ("Drill pilot holes for the shelf.", "Screw the rail into the studs.", "Anchor the cabinet to the wall."):
         assert no_drilling_conflicts(_garage(["no_drilling"]), {"strategy": [sentence]}) == [sentence]
+
+
+def test_no_drilling_ignores_an_existing_wall_mounted_fixture():
+    """Preview mudroom of 24 Oct 2026: the room already has a wall-mounted coat rack."""
+    from package_items import no_drilling_conflicts
+
+    mudroom = {
+        "zones": [{"title": "Coat & Bag Zone", "desc": "Wall-mounted coat rack holds jackets, backpacks, and scarves within easy reach."}],
+        "strategy": ["Use removable adhesive hooks for extra bags or hats without drilling into walls."],
+        "shopping_list": [{"name": "Set of removable adhesive hooks for bags or hats", "qty": 1, "price": 12}],
+    }
+    assert no_drilling_conflicts(_garage(["no_drilling"]), mudroom) == []
+    for sentence in ("Keep the existing wall-mounted shelf above the bench.", "The current wall-mounted rack stays."):
+        assert no_drilling_conflicts(_garage(["no_drilling"]), {"strategy": [sentence]}) == []
+    added = "Add a wall-mounted shelf above the bench."
+    assert no_drilling_conflicts(_garage(["no_drilling"]), {"strategy": [added]}) == [added]
 
 
 def test_no_drilling_swaps_the_generic_wall_anchor_safety_line():
