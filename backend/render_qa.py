@@ -296,6 +296,60 @@ def review_organized_render(
         return RenderQAResult(ok=True, skipped=True, error=str(exc), attempt=attempt)
 
 
+# ──────────────────────────── Same-shot check ─────────────────────────────
+
+# The cheap QA answers many questions at once and approved a shoe close-up whose
+# "after" was a wide view of a whole closet. One question on the stronger model.
+SAME_SHOT_PROMPT = """Image 1 is a customer's photo. Image 2 is supposed to be an edited version of that
+exact photo: same camera position, same framing, same main subject, with only loose items and storage changed.
+
+Return ONLY JSON (no markdown):
+{"same_shot": true or false, "reason": "one short fact"}
+
+same_shot=false when Image 2 is a different shot: a close-up became a wide view of the room (or the reverse),
+the main subject of Image 1 is no longer the main subject of Image 2, the viewpoint moved to another wall or
+corner, or it is a different room. Ignore aspect-ratio padding, a slightly tighter or looser crop, tidier or
+replaced loose items, and lighting.
+"""
+
+
+def same_shot_from_payload(data: Dict[str, Any]) -> Tuple[Optional[bool], str]:
+    value = data.get("same_shot")
+    reason = " ".join(str(data.get("reason") or "").split())
+    if isinstance(value, bool):
+        return value, reason
+    return None, reason
+
+
+def review_same_shot(*, before_bytes: Optional[bytes], after_bytes: Optional[bytes]) -> Tuple[Optional[bool], str]:
+    """``(same_shot, reason)``; ``same_shot`` is ``None`` when the check could not run. Never raises."""
+    if not before_bytes or not after_bytes:
+        return None, ""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None, "no_api_key"
+    try:
+        content: List[Dict[str, Any]] = [
+            _image_block(jpeg_for_vision(before_bytes, max_side=640)),
+            {"type": "text", "text": "Image 1 (customer photo)."},
+            _image_block(jpeg_for_vision(after_bytes, max_side=640)),
+            {"type": "text", "text": "Image 2 (edited version).\n\n" + SAME_SHOT_PROMPT},
+        ]
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=CROSS_VIEW_MODEL,
+            max_tokens=200,
+            messages=[{"role": "user", "content": content}],
+        )
+        raw = message.content[0].text if message.content else ""
+        same, reason = same_shot_from_payload(_parse_qa_json(raw))
+        logger.info("[render_qa] same_shot=%s reason=%s", same, reason)
+        return same, reason
+    except Exception as exc:
+        logger.warning("[render_qa] same-shot check skipped after error: %s", exc)
+        return None, str(exc)
+
+
 # ──────────────────────────── Cross-view check ─────────────────────────────
 
 # Comparing several views at once needs the stronger vision model the drafter uses.

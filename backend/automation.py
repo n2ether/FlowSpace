@@ -53,7 +53,7 @@ from package_items import (
 )
 from pdf_images import assemble_pdf_images, choose_hero
 from photo_access import gridfs_key, store_photo
-from render_qa import RenderQAResult, review_cross_view, review_organized_render
+from render_qa import RenderQAResult, review_cross_view, review_organized_render, review_same_shot
 from render_recovery import heartbeat_loop, touch_render_heartbeat
 from source_photos import (
     classify_upload,
@@ -268,6 +268,18 @@ def _same_camera_extra(extra: str) -> str:
     return f"{SAME_CAMERA_CONSTRAINT} {extra}".strip()
 
 
+async def _check_same_shot(qa: RenderQAResult, before: Optional[bytes], after: Optional[bytes]) -> RenderQAResult:
+    """Fail a view that passed QA but is not an edit of its source photo's shot."""
+    if qa.failed or not before or not after:
+        return qa
+    same, reason = await asyncio.to_thread(review_same_shot, before_bytes=before, after_bytes=after)
+    if same is False:
+        qa.camera_changed = True
+        qa.ok = False
+        qa.reasons = list(qa.reasons) + [f"Different shot from the source photo: {reason}".strip()]
+    return qa
+
+
 async def _generate_organized_with_qa(
     *,
     lead: Dict[str, Any],
@@ -321,6 +333,7 @@ async def _generate_organized_with_qa(
         paint_request=paint_request,
         **item_qa,
     )
+    qa = await _check_same_shot(qa, original_bytes, organized_bytes)
     if not qa.failed:
         return organized_bytes, image_mime, qa
 
@@ -365,6 +378,7 @@ async def _generate_organized_with_qa(
         paint_request=paint_request,
         **item_qa,
     )
+    qa2 = await _check_same_shot(qa2, retry_ref or original_bytes, organized_bytes)
     if qa2.failed:
         logger.error(
             "[automation] Organized render still failed QA after retry — discarding after "

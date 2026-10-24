@@ -109,3 +109,15 @@ def test_from_payload_fails_when_camera_changed():
     assert qa.camera_changed is True
     assert qa.as_dict()["camera_changed"] is True
     assert _from_payload({"ok": True}).camera_changed is False
+
+
+def test_same_shot_payload_and_skip_without_key(monkeypatch):
+    from render_qa import review_same_shot, same_shot_from_payload
+
+    assert same_shot_from_payload({"same_shot": False, "reason": " close-up became a  wide closet "}) == (
+        False,
+        "close-up became a wide closet",
+    )
+    assert same_shot_from_payload({"same_shot": "maybe"})[0] is None
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert review_same_shot(before_bytes=b"x", after_bytes=b"y") == (None, "no_api_key")

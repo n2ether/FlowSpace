@@ -841,3 +841,41 @@ def test_changed_camera_is_retried_with_a_camera_note_then_discarded(monkeypatch
     assert CAMERA_RETRY_CONSTRAINT in calls[1]["extra_constraint"]
     assert captured["images"].get("after") is None
     assert captured["images"]["front_view_kind"] != "organized"
+
+
+def _same_shot_run(monkeypatch, answers):
+    from render_qa import RenderQAResult
+
+    calls: list = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return _jpeg((200, 10, 10 + len(calls))), "image/jpeg"
+
+    monkeypatch.setattr("automation.review_organized_render", lambda **_k: RenderQAResult(ok=True))
+    monkeypatch.setattr("automation.review_same_shot", lambda **_k: answers.pop(0))
+    fs = _FakeFS(store={"aaaaaaaaaaaaaaaaaaaaaaaa": _jpeg((110, 90, 60))})
+    sent, captured, db, _fs = _run(monkeypatch, generate=generate, fs=fs, lead=_lead(with_photo=True), capture={})
+    return calls, captured
+
+
+def test_different_shot_is_retried_and_kept_when_the_retry_matches(monkeypatch):
+    """Preview closet of 24 Oct 2026: a shoe close-up came back as a wide closet and passed the cheap QA."""
+    from automation import CAMERA_RETRY_CONSTRAINT
+
+    calls, captured = _same_shot_run(monkeypatch, [(False, "close-up became a wide closet"), (True, "same shot")])
+    assert len(calls) == 2
+    assert CAMERA_RETRY_CONSTRAINT in calls[1]["extra_constraint"]
+    assert captured["images"]["front_view_kind"] == "organized"
+
+
+def test_different_shot_twice_is_discarded(monkeypatch):
+    calls, captured = _same_shot_run(monkeypatch, [(False, "wide closet"), (False, "still a wide closet")])
+    assert len(calls) == 2
+    assert captured["images"].get("after") is None
+
+
+def test_same_shot_check_that_cannot_run_does_not_block(monkeypatch):
+    calls, captured = _same_shot_run(monkeypatch, [(None, "no_api_key")])
+    assert len(calls) == 1
+    assert captured["images"]["front_view_kind"] == "organized"
