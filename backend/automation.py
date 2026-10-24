@@ -220,6 +220,8 @@ def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     bits: list[str] = []
     if qa.walls_repainted and not paint_request:
         bits.append(WALL_RETRY_CONSTRAINT)
+    if qa.camera_changed:
+        bits.append(CAMERA_RETRY_CONSTRAINT)
     if qa.fixed_items_changed:
         bits.append(fixed_retry_constraint(qa.fixed_items_altered or [], qa.fixed_items_missing or []))
     if qa.baskets_misplaced:
@@ -229,6 +231,11 @@ def _qa_retry_extra(qa: RenderQAResult, paint_request: str = "") -> str:
     bits.extend(qa.reasons[:3])
     return " ".join(bits)
 
+
+CAMERA_RETRY_CONSTRAINT = (
+    "FAILED QA: the last render showed a different camera view than the source photo. Keep this photo's "
+    "exact framing and subject; if it is a close-up, the organized view is the same close-up, not the whole room."
+)
 
 CROSS_VIEW_RETRY_CONSTRAINT = (
     "FAILED CROSS-VIEW CHECK: this view shows a piece differently from the reference view of the same room. "
@@ -318,10 +325,11 @@ async def _generate_organized_with_qa(
         return organized_bytes, image_mime, qa
 
     logger.warning(
-        "[automation] Organized render failed QA (attempt 1): windows_covered=%s gravity_wrong=%s walls_repainted=%s reasons=%s",
+        "[automation] Organized render failed QA (attempt 1): windows_covered=%s gravity_wrong=%s walls_repainted=%s camera_changed=%s reasons=%s",
         qa.windows_covered,
         qa.gravity_wrong,
         qa.walls_repainted,
+        qa.camera_changed,
         qa.reasons,
     )
     retry_ref = _qa_retry_reference(original_bytes, qa)
@@ -343,6 +351,7 @@ async def _generate_organized_with_qa(
             windows_covered=qa.windows_covered,
             gravity_wrong=qa.gravity_wrong,
             walls_repainted=qa.walls_repainted,
+            camera_changed=qa.camera_changed,
             reasons=list(qa.reasons) + [f"retry generate failed: {img_err}"],
             attempt=2,
             error="retry_generate_failed",

@@ -32,6 +32,7 @@ Return ONLY JSON (no markdown):
   "windows_covered": true if shelves, cabinets, racks, or storage cover, block, or sit over a window or door that should stay visible,
   "gravity_wrong": true if the room is sideways/upside-down OR a ceiling fan, light, vent, or fixture is on a wall instead of the ceiling,
   "walls_repainted": true if AFTER walls are a clearly different paint color than BEFORE, in either direction (warm became cool, cool became warm, or a new hue). Warm, cool, neutral, and colored walls are all correct when they match BEFORE. Ignore small lighting or white-balance shifts. Fail on an obvious wall-color makeover,
+  "camera_changed": true if AFTER is clearly not an edit of BEFORE's camera view: a close-up became a wide view of the room (or the reverse), the viewpoint moved to a different wall or corner, or AFTER shows a different room. Ignore aspect-ratio padding, a slightly tighter or looser crop, and small perspective shifts. false when only AFTER is attached,
   "reasons": ["short facts"],
   "suggested_rotate_degrees": 0, 90, 180, or 270
 }
@@ -39,9 +40,9 @@ Return ONLY JSON (no markdown):
 suggested_rotate_degrees is clockwise rotation to apply to the SOURCE photo
 before a retry when gravity looks wrong; otherwise 0.
 
-Mark ok=false if windows_covered OR gravity_wrong OR walls_repainted.
+Mark ok=false if windows_covered OR gravity_wrong OR walls_repainted OR camera_changed.
 Do not fail for clutter style or minor furniture taste.
-Be conservative: only fail on clear window-covering, gravity/fixture errors, or an obvious wall repaint.
+Be conservative: only fail on clear window-covering, gravity/fixture errors, an obvious wall repaint, or a clearly different camera view.
 """
 
 
@@ -95,6 +96,7 @@ class RenderQAResult:
     windows_covered: bool = False
     gravity_wrong: bool = False
     walls_repainted: bool = False
+    camera_changed: bool = False
     fixed_items_changed: bool = False
     baskets_misplaced: bool = False
     reasons: List[str] = field(default_factory=list)
@@ -194,6 +196,7 @@ def _from_payload(data: Dict[str, Any], *, skipped: bool = False, error: Optiona
     windows_covered = bool(data.get("windows_covered"))
     gravity_wrong = bool(data.get("gravity_wrong"))
     walls_repainted = bool(data.get("walls_repainted"))
+    camera_changed = bool(data.get("camera_changed"))
     altered, missing = _fixed_check(data.get("fixed_items_check"))
     fixed_changed = bool(data.get("fixed_items_changed")) or bool(altered) or bool(missing)
     baskets = bool(data.get("baskets_misplaced"))
@@ -203,7 +206,7 @@ def _from_payload(data: Dict[str, Any], *, skipped: bool = False, error: Optiona
         reasons = [reasons]
     reasons = [str(r).strip() for r in reasons if str(r).strip()]
     ok = data.get("ok")
-    hard = windows_covered or gravity_wrong or walls_repainted or fixed_changed or baskets or bool(avoid_seen)
+    hard = windows_covered or gravity_wrong or walls_repainted or camera_changed or fixed_changed or baskets or bool(avoid_seen)
     if ok is None:
         ok = not hard
     return RenderQAResult(
@@ -211,6 +214,7 @@ def _from_payload(data: Dict[str, Any], *, skipped: bool = False, error: Optiona
         windows_covered=windows_covered,
         gravity_wrong=gravity_wrong,
         walls_repainted=walls_repainted,
+        camera_changed=camera_changed,
         fixed_items_changed=fixed_changed,
         baskets_misplaced=baskets,
         visible_additions=_names(data.get("visible_additions")),
@@ -274,12 +278,13 @@ def review_organized_render(
         parsed = _from_payload(_parse_qa_json(raw))
         parsed.attempt = attempt
         logger.info(
-            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s walls_repainted=%s fixed_changed=%s baskets=%s rotate=%s reasons=%s",
+            "[render_qa] attempt=%s ok=%s windows_covered=%s gravity_wrong=%s walls_repainted=%s camera_changed=%s fixed_changed=%s baskets=%s rotate=%s reasons=%s",
             attempt,
             parsed.ok,
             parsed.windows_covered,
             parsed.gravity_wrong,
             parsed.walls_repainted,
+            parsed.camera_changed,
             parsed.fixed_items_changed,
             parsed.baskets_misplaced,
             parsed.suggested_rotate_degrees,

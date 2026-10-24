@@ -82,3 +82,30 @@ def test_result_as_dict_roundtrip():
     assert dumped["windows_covered"] is True
     assert dumped["walls_repainted"] is True
     assert dumped["attempt"] == 2
+
+
+def test_qa_prompt_asks_about_a_changed_camera():
+    from render_qa import qa_prompt
+
+    low = qa_prompt().lower()
+    assert "camera_changed" in low
+    assert "close-up became a wide view" in low
+    assert "aspect-ratio padding" in low
+
+
+def test_from_payload_fails_when_camera_changed():
+    """Preview closet of 24 Oct 2026: a shoe close-up came back as a wide view of a whole closet."""
+    qa = _from_payload(
+        {
+            "ok": True,
+            "windows_covered": False,
+            "gravity_wrong": False,
+            "walls_repainted": False,
+            "camera_changed": True,
+            "reasons": ["BEFORE is a close-up of shoes; AFTER is a wide view of a walk-in closet"],
+        }
+    )
+    assert qa.failed is True
+    assert qa.camera_changed is True
+    assert qa.as_dict()["camera_changed"] is True
+    assert _from_payload({"ok": True}).camera_changed is False
