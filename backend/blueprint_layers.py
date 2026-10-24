@@ -320,10 +320,12 @@ def _space_key(lead: Dict[str, Any]) -> str:
 
 
 def _budget_label(lead: Dict[str, Any], deliverable: Dict[str, Any]) -> str:
+    from package_items import effective_budget
+
     note = _as_str(deliverable.get("budget_note"))
     if note:
         return note
-    raw = _as_str(lead.get("budget"))
+    raw = effective_budget(lead)
     return BUDGET_LABELS.get(raw, raw.replace("_", " ") if raw else "")
 
 
@@ -340,7 +342,9 @@ def _shopping_total(deliverable: Dict[str, Any]) -> float:
 
 
 def _band_status(lead: Dict[str, Any], total: float) -> Tuple[str, str]:
-    raw = _as_str(lead.get("budget"))
+    from package_items import effective_budget
+
+    raw = effective_budget(lead)
     ranges = {
         "under_100": (0, 100),
         "100_300": (100, 300),

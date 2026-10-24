@@ -21,7 +21,7 @@ from design_plan_standards import DRAFTER_DESIGN_PLAN_RULES
 from evergreen_copy import DRAFTER_EVERGREEN_RULE
 from image_orientation import jpeg_for_vision, upright_bytes
 from intake import fact_sheet_prompt
-from package_items import BASKET_DRAFT_RULE, brief_prompt_lines
+from package_items import BASKET_DRAFT_RULE, brief_prompt_lines, effective_budget
 from space_rails import NURSERY_DRAFT_RULES, nursery_draft_addon
 
 logger = logging.getLogger(__name__)
@@ -247,8 +247,9 @@ def _summarize_lead(lead: Dict[str, Any]) -> str:
             "Wall paint: KEEP EXISTING / no paint change. Customer did not ask to paint. "
             "Do not invent an optional accent wall color."
         )
-    if lead.get("budget"):
-        parts.append("Budget: " + BUDGET.get(lead["budget"], lead["budget"]))
+    budget = effective_budget(lead)
+    if budget:
+        parts.append("Budget: " + BUDGET.get(budget, budget))
     if lead.get("diy_level"):
         parts.append("DIY: " + DIY.get(lead["diy_level"], lead["diy_level"]))
     if lead.get("daily_improvement"):

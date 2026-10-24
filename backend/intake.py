@@ -340,7 +340,9 @@ def build_fact_sheet(lead: Dict[str, Any]) -> Dict[str, Any]:
     limit_labels = [
         f"Other: {_s(intake.get('limit_other'))}" if l == "other" else LIMITS[l] for l in limits if l != "none"
     ]
-    budget = intake.get("budget") or lead.get("budget") or ""
+    from package_items import effective_budget
+
+    budget = effective_budget({**lead, "intake": intake}) or ""
 
     unknowns: List[str] = []
     if mode != "measured":

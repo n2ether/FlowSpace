@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from ai_image_generator import _build_edit_prompt, _build_text_to_image_prompt, _supporting_prompt
-from render_qa import RenderQAResult
+from render_qa import CrossViewResult, RenderQAResult
 from rug_refine import RugCheckResult, build_refine_prompt, refine_one, resolve_refine_rug
 from space_rails import RUG_PRESERVE_RAILS, customer_requested_rug_change, rug_prompt_rails, rug_spec
 
@@ -217,10 +217,17 @@ def api(monkeypatch):
         edits.append({"prompt": prompt, "after": after, "reference": reference})
         return _jpeg((200, 10 * len(edits), 30))
 
-    def qa(*, after_bytes, before_bytes=None, attempt=1):
+    qa_calls = []
+
+    def qa(*, after_bytes, before_bytes=None, attempt=1, **kwargs):
         # AFTER_03's refined view fails QA both times; every other view passes.
+        qa_calls.append(kwargs)
         failing = images["/api/uploads/photo/after3"]
         return RenderQAResult(ok=edits[-1]["after"] != failing, reasons=["wall repainted"], attempt=attempt)
+
+    def verify_qa(**kwargs):
+        qa_calls.append({k: v for k, v in kwargs.items() if k not in {"after_bytes", "before_bytes"}})
+        return RenderQAResult(ok=True, visible_additions=[], unlisted_additions=[])
 
     def no_email(*_args, **_kwargs):
         raise AssertionError("refine must not send email")
@@ -235,12 +242,15 @@ def api(monkeypatch):
     monkeypatch.setattr(server, "send_contact_sheet", no_email)
     monkeypatch.setattr("rug_refine.review_organized_render", qa)
     monkeypatch.setattr("rug_refine.review_rug_edit", lambda **_kw: RugCheckResult(ok=True))
+    monkeypatch.setattr("view_verification.review_organized_render", verify_qa)
+    monkeypatch.setattr("view_verification.review_cross_view", lambda **_kw: CrossViewResult(ok=True))
 
     async def no_seed():
         return None
 
     monkeypatch.setattr(server, "seed_gallery_if_empty", no_seed)
     with TestClient(server.app) as client:
+        client.qa_calls = qa_calls
         yield client, fake, bucket, edits, server.ADMIN_PASSWORD
 
 
@@ -298,6 +308,13 @@ def test_refine_replaces_passing_afters_and_keeps_every_mapping(api):
 
     assert all(mapping_is_own_source(entry) for entry in doc["source_afters"])
     assert final_email_block_reason(doc) is None
+
+    # Refined views are checked against the room inventory and re-verified on the images they now carry.
+    assert client.qa_calls and all("fixed_items" in call and "avoid" in call for call in client.qa_calls)
+    for entry in doc["source_afters"]:
+        assert entry["qa"]["checked_after_url"] == entry["after_url"]
+        assert entry["qa"]["inventory_hash"] == doc["room_inventory"]["hash"]
+    assert sorted(doc["cross_view"]["after_urls"]) == sorted(e["after_url"] for e in doc["source_afters"])
 
     status = client.get(f"/api/admin/leads/{LEAD_ID}/deliverable/afters/refine", headers={"X-Admin-Token": token})
     assert status.json()["status"] == "done"

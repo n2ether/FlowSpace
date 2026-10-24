@@ -76,7 +76,7 @@ def _with_space_rails(
     A text-to-image render (no customer photo) has no fixed pieces to lock, so
     it only gets the basket rule from the shared list.
     """
-    from package_items import additions_rails, basket_rails, fixed_items_rails
+    from package_items import additions_rails, avoid_rails, basket_rails, fixed_items_rails
     from space_rails import image_prompt_rails, rug_prompt_rails
 
     must_stay = str((lead or {}).get("must_stay") or "").strip()
@@ -94,6 +94,7 @@ def _with_space_rails(
         must_line,
         fixed_items_rails(lead, deliverable) if photo_edit else "",
         basket_rails(lead),
+        avoid_rails(lead),
         additions_rails(lead, deliverable) if photo_edit else "",
         (extra_constraint or "").strip(),
     ]
@@ -590,8 +591,10 @@ async def generate_supporting_views(
 
     api_key = _require_openai_key()
     client = _openai_client(api_key)
+    from package_items import room_inventory, view_check_inputs
     from render_qa import review_organized_render
 
+    item_qa = view_check_inputs(room_inventory(lead, deliverable))
     found: Dict[str, bytes] = {}
     for key, instruction, _caption in supporting_view_plan(lead):
         accepted: Optional[bytes] = None
@@ -611,8 +614,9 @@ async def generate_supporting_views(
                 before_bytes=before or source,
                 attempt=attempt,
                 paint_request=requested_wall_color(lead, deliverable),
+                **item_qa,
             )
-            if qa.failed:
+            if qa.failed or qa.skipped:
                 logger.warning(
                     "[images] Dropping supporting view %s after QA: %s",
                     key,

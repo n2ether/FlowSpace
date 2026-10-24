@@ -272,11 +272,14 @@ async def refine_one(
     qa: Optional[QAFn] = None,
     rug_check: Optional[RugCheckFn] = None,
     attempts: int = 2,
+    qa_kwargs: Optional[Dict[str, Any]] = None,
 ) -> RefineOutcome:
     """Edit one approved after; keep it only when generation QA and the rug check both pass.
 
-    A skipped check is not a pass: without a working vision review the
-    existing after stays.
+    ``qa_kwargs`` carries the room inventory's fixed pieces, additions, and
+    avoid rules, so a refined view that changes a kept piece is rejected. A
+    skipped check is not a pass: without a working vision review the existing
+    after stays.
     """
     qa = qa or review_organized_render
     rug_check = rug_check or review_rug_edit
@@ -295,7 +298,7 @@ async def refine_one(
             logger.warning("[rug_refine] %s edit failed: %s", after_label, exc)
             break
         render = await asyncio.to_thread(
-            qa, after_bytes=refined, before_bytes=source or after, attempt=attempt
+            lambda: qa(after_bytes=refined, before_bytes=source or after, attempt=attempt, **(qa_kwargs or {}))
         )
         last_qa = render.as_dict()
         if not _passed(render):
